@@ -1,0 +1,627 @@
+import { Load } from '../../types/domain.types.ts';
+import { LoadWithRelations } from '../loads/loadTypes.ts';
+import { loadService } from '../loads/loadService.ts';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase.ts';
+import {
+  CheckCall,
+  CheckCallWithRelations,
+  CreateCheckCallInput,
+  UpdateCheckCallInput,
+  CheckCallFilters,
+  LoadTrackingSummary,
+  TrackingStats,
+  isOperationalException,
+  formatTimeSince,
+} from './checkCallTypes.ts';
+
+const CHECK_CALLS_STORAGE_PREFIX = 'dispatchdesk_demo_check_calls_';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUUID(str?: string | null): boolean {
+  return Boolean(str && UUID_REGEX.test(str.trim()));
+}
+
+// Initial realistic seed check calls for demo organization
+const SEED_CHECK_CALLS: Omit<CheckCall, 'organization_id'>[] = [
+  {
+    id: 'demo-checkcall-1',
+    load_id: 'demo-load-1', // LD-2024-8841 (booked)
+    call_type: 'dispatch',
+    status: 'on_time',
+    location_city: 'Dallas',
+    location_state: 'TX',
+    latitude: 32.7767,
+    longitude: -96.7970,
+    eta_pickup: new Date(Date.now() + 18 * 3600000).toISOString(),
+    eta_delivery: new Date(Date.now() + 48 * 3600000).toISOString(),
+    notes: 'Driver Marcus Vance confirmed rate confirmation, booked appointment at Gate 4. Pre-trip inspection clean.',
+    created_by: 'Alex Rivera (Dispatcher)',
+    created_at: new Date(Date.now() - 16 * 3600000).toISOString(),
+    updated_at: new Date(Date.now() - 16 * 3600000).toISOString(),
+  },
+  {
+    id: 'demo-checkcall-2',
+    load_id: 'demo-load-2', // LD-2024-8842 (in_transit)
+    call_type: 'dispatch',
+    status: 'on_time',
+    location_city: 'Memphis',
+    location_state: 'TN',
+    latitude: 35.1495,
+    longitude: -90.0490,
+    eta_pickup: new Date(Date.now() - 14 * 3600000).toISOString(),
+    eta_delivery: new Date(Date.now() + 14 * 3600000).toISOString(),
+    notes: 'Driver Elena Rostova dispatched to shipper facility with pre-cooled reefer at 34°F.',
+    created_by: 'Alex Rivera (Dispatcher)',
+    created_at: new Date(Date.now() - 20 * 3600000).toISOString(),
+    updated_at: new Date(Date.now() - 20 * 3600000).toISOString(),
+  },
+  {
+    id: 'demo-checkcall-3',
+    load_id: 'demo-load-2', // LD-2024-8842 (in_transit)
+    call_type: 'loaded',
+    status: 'on_time',
+    location_city: 'Memphis',
+    location_state: 'TN',
+    latitude: 35.1495,
+    longitude: -90.0490,
+    eta_pickup: new Date(Date.now() - 12 * 3600000).toISOString(),
+    eta_delivery: new Date(Date.now() + 14 * 3600000).toISOString(),
+    notes: '22 pallets of chilled yogurt loaded and secured. Seal #774921 applied. Clean signed BOL in hand.',
+    created_by: 'Elena Rostova (Driver)',
+    created_at: new Date(Date.now() - 11 * 3600000).toISOString(),
+    updated_at: new Date(Date.now() - 11 * 3600000).toISOString(),
+  },
+  {
+    id: 'demo-checkcall-4',
+    load_id: 'demo-load-2', // LD-2024-8842 (in_transit)
+    call_type: 'en_route_delivery',
+    status: 'on_time',
+    location_city: 'Knoxville',
+    location_state: 'TN',
+    latitude: 35.9606,
+    longitude: -83.9207,
+    eta_pickup: null,
+    eta_delivery: new Date(Date.now() + 12 * 3600000).toISOString(),
+    notes: 'Passing Knoxville on I-40 East. Reefer continuous at 36°F. On schedule for Charlotte receiver dock appointment.',
+    created_by: 'Elena Rostova (Driver)',
+    created_at: new Date(Date.now() - 2 * 3600000).toISOString(),
+    updated_at: new Date(Date.now() - 2 * 3600000).toISOString(),
+  },
+  {
+    id: 'demo-checkcall-5',
+    load_id: 'demo-load-4', // LD-2024-8844 (delivered)
+    call_type: 'delivered',
+    status: 'completed',
+    location_city: 'Phoenix',
+    location_state: 'AZ',
+    latitude: 33.4484,
+    longitude: -112.0740,
+    eta_pickup: null,
+    eta_delivery: new Date(Date.now() - 10 * 3600000).toISOString(),
+    notes: 'Delivered and unloaded at Phoenix Cold Logistics dock 14. Signed & stamped POD received with no OS&D shortages.',
+    created_by: 'David Chen (Driver)',
+    created_at: new Date(Date.now() - 10 * 3600000).toISOString(),
+    updated_at: new Date(Date.now() - 10 * 3600000).toISOString(),
+  },
+];
+
+export interface ICheckCallService {
+  getCheckCalls(organizationId: string, loadId?: string, filters?: CheckCallFilters): Promise<CheckCall[]>;
+  getCheckCallsWithRelations(organizationId: string, loadId?: string, filters?: CheckCallFilters): Promise<CheckCallWithRelations[]>;
+  getCheckCall(organizationId: string, checkCallId: string): Promise<CheckCall | null>;
+  createCheckCall(organizationId: string, payload: CreateCheckCallInput): Promise<CheckCall>;
+  updateCheckCall(organizationId: string, checkCallId: string, payload: UpdateCheckCallInput): Promise<CheckCall>;
+  deleteCheckCall(organizationId: string, checkCallId: string): Promise<void>;
+  getLatestCheckCall(organizationId: string, loadId: string): Promise<CheckCall | null>;
+  getTrackingSummaryForLoad(organizationId: string, load: Load | LoadWithRelations): Promise<LoadTrackingSummary>;
+  getTrackingStats(organizationId: string): Promise<TrackingStats>;
+  getLoadsMissingRecentCheckIn(organizationId: string): Promise<LoadWithRelations[]>;
+}
+
+class CheckCallService implements ICheckCallService {
+  private getStorageKey(organizationId: string): string {
+    return `${CHECK_CALLS_STORAGE_PREFIX}${organizationId}`;
+  }
+
+  private readRawCheckCalls(organizationId: string): CheckCall[] {
+    if (!organizationId) return [];
+
+    try {
+      const raw = localStorage.getItem(this.getStorageKey(organizationId));
+      if (!raw) {
+        // Seed default check calls for the initial demo organization
+        const seeded: CheckCall[] = SEED_CHECK_CALLS.map((call) => ({
+          ...call,
+          organization_id: organizationId,
+        }));
+        this.writeRawCheckCalls(organizationId, seeded);
+        return seeded;
+      }
+
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+
+      // Guarantee strict tenant isolation and schema validation
+      return parsed.filter((c: CheckCall) => {
+        return (
+          c &&
+          typeof c === 'object' &&
+          c.organization_id === organizationId &&
+          typeof c.id === 'string' &&
+          typeof c.load_id === 'string' &&
+          typeof c.call_type === 'string'
+        );
+      });
+    } catch (err) {
+      console.error('Error reading check calls from storage:', err);
+      return [];
+    }
+  }
+
+  private writeRawCheckCalls(organizationId: string, calls: CheckCall[]): void {
+    if (!organizationId) return;
+    try {
+      // Ensure all persisted records strictly carry the active organization_id
+      const sanitized = calls.filter((c) => c && c.organization_id === organizationId);
+      localStorage.setItem(this.getStorageKey(organizationId), JSON.stringify(sanitized));
+    } catch (err) {
+      console.error('Error saving check calls to storage:', err);
+    }
+  }
+
+  public async getCheckCalls(
+    organizationId: string,
+    loadId?: string,
+    filters?: CheckCallFilters
+  ): Promise<CheckCall[]> {
+    if (!organizationId) return [];
+
+    let rawCalls: CheckCall[] = [];
+
+    if (isSupabaseConfigured) {
+      try {
+        let query = (supabase.from('check_calls' as any) as any)
+          .select('*')
+          .eq('organization_id', organizationId)
+          .order('created_at', { ascending: false });
+
+        if (loadId) {
+          query = query.eq('load_id', loadId);
+        }
+
+        if (filters?.callType && filters.callType !== 'all') {
+          query = query.eq('call_type', filters.callType);
+        }
+
+        if (filters?.status && filters.status !== 'all') {
+          query = query.eq('status', filters.status);
+        }
+
+        const { data, error } = await query;
+
+        if (!error && data) {
+          rawCalls = (data as unknown) as CheckCall[];
+        }
+      } catch (err) {
+        console.warn('Supabase getCheckCalls failed, falling back to local storage:', err);
+      }
+    }
+
+    if (rawCalls.length === 0) {
+      const all = this.readRawCheckCalls(organizationId);
+      let filtered = all;
+
+      if (loadId) {
+        filtered = filtered.filter((c) => c.load_id === loadId);
+      }
+
+      if (filters?.callType && filters.callType !== 'all') {
+        filtered = filtered.filter((c) => c.call_type === filters.callType);
+      }
+
+      if (filters?.status && filters.status !== 'all') {
+        filtered = filtered.filter((c) => c.status === filters.status);
+      }
+
+      rawCalls = filtered;
+    }
+
+    // Apply exception filter if set
+    if (filters?.hasException) {
+      rawCalls = rawCalls.filter((c) => isOperationalException(c.call_type, c.status));
+    }
+
+    // Apply search filter if set
+    if (filters?.search) {
+      const query = filters.search.toLowerCase().trim();
+      rawCalls = rawCalls.filter((c) => {
+        const cityMatch = c.location_city?.toLowerCase().includes(query) ?? false;
+        const stateMatch = c.location_state?.toLowerCase().includes(query) ?? false;
+        const notesMatch = c.notes?.toLowerCase().includes(query) ?? false;
+        const creatorMatch = c.created_by?.toLowerCase().includes(query) ?? false;
+        return cityMatch || stateMatch || notesMatch || creatorMatch;
+      });
+    }
+
+    // Sort newest first
+    return rawCalls.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }
+
+  public async getCheckCallsWithRelations(
+    organizationId: string,
+    loadId?: string,
+    filters?: CheckCallFilters
+  ): Promise<CheckCallWithRelations[]> {
+    const checkCalls = await this.getCheckCalls(organizationId, loadId, filters);
+    const loads = await loadService.getLoads(organizationId);
+    const loadMap = new Map<string, LoadWithRelations>();
+    loads.forEach((l) => loadMap.set(l.id, l));
+
+    return checkCalls.map((call) => ({
+      ...call,
+      load: loadMap.get(call.load_id) || null,
+    }));
+  }
+
+  public async getCheckCall(organizationId: string, checkCallId: string): Promise<CheckCall | null> {
+    if (!organizationId || !checkCallId) return null;
+
+    if (isSupabaseConfigured && isUUID(checkCallId)) {
+      try {
+        const { data, error } = await (supabase.from('check_calls' as any) as any)
+          .select('*')
+          .eq('id', checkCallId)
+          .eq('organization_id', organizationId)
+          .maybeSingle();
+
+        if (!error && data) {
+          return (data as unknown) as CheckCall;
+        }
+      } catch (err) {
+        console.warn('Supabase getCheckCall failed, falling back to local storage:', err);
+      }
+    }
+
+    const all = this.readRawCheckCalls(organizationId);
+    return all.find((c) => c.id === checkCallId && c.organization_id === organizationId) || null;
+  }
+
+  public async createCheckCall(organizationId: string, payload: CreateCheckCallInput): Promise<CheckCall> {
+    if (!organizationId) {
+      throw new Error('Organization ID is required to create a check call.');
+    }
+
+    if (!payload.load_id) {
+      throw new Error('A valid load_id is required.');
+    }
+
+    // Verify tenant boundary: load must exist and belong to the same organization
+    const targetLoad = await loadService.getLoad(organizationId, payload.load_id);
+    if (!targetLoad || targetLoad.organization_id !== organizationId) {
+      throw new Error('Referenced load does not exist or does not belong to the active organization.');
+    }
+
+    // Location validation: city and state must be paired
+    const city = payload.location_city?.trim() || null;
+    const state = payload.location_state?.trim().toUpperCase() || null;
+
+    if (city && !state) {
+      throw new Error('State is required when city is provided.');
+    }
+    if (state && !city) {
+      throw new Error('City is required when state is provided.');
+    }
+    if (state && state.length !== 2) {
+      throw new Error('State must be exactly a 2-letter uppercase postal code.');
+    }
+
+    // Exception notes validation
+    const isException = payload.call_type === 'delay' || payload.call_type === 'breakdown';
+    const notes = payload.notes?.trim() || null;
+    if (isException && (!notes || notes.length < 5)) {
+      throw new Error('Operational exceptions (delay / breakdown) require descriptive notes (min 5 characters).');
+    }
+
+    const createdBy = payload.created_by?.trim() || 'Dispatcher';
+    const latitude = typeof payload.latitude === 'number' ? payload.latitude : null;
+    const longitude = typeof payload.longitude === 'number' ? payload.longitude : null;
+    const etaPickup = payload.eta_pickup || null;
+    const etaDelivery = payload.eta_delivery || null;
+
+    if (isSupabaseConfigured && isUUID(payload.load_id)) {
+      try {
+        const { data, error } = await (supabase.from('check_calls' as any) as any)
+          .insert({
+            organization_id: organizationId,
+            load_id: payload.load_id,
+            call_type: payload.call_type,
+            status: payload.status,
+            location_city: city,
+            location_state: state,
+            latitude: latitude,
+            longitude: longitude,
+            eta_pickup: etaPickup,
+            eta_delivery: etaDelivery,
+            notes: notes,
+            created_by: createdBy,
+          })
+          .select()
+          .single();
+
+        if (!error && data) {
+          const createdCheckCall = (data as unknown) as CheckCall;
+          // Synchronize local cache
+          const existing = this.readRawCheckCalls(organizationId);
+          this.writeRawCheckCalls(organizationId, [createdCheckCall, ...existing.filter((c) => c.id !== createdCheckCall.id)]);
+          return createdCheckCall;
+        }
+      } catch (err) {
+        console.warn('Supabase createCheckCall failed, saving locally:', err);
+      }
+    }
+
+    const now = new Date().toISOString();
+    const newCheckCall: CheckCall = {
+      id: `checkcall-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      organization_id: organizationId,
+      load_id: payload.load_id,
+      call_type: payload.call_type,
+      status: payload.status,
+      location_city: city,
+      location_state: state,
+      latitude: latitude,
+      longitude: longitude,
+      eta_pickup: etaPickup,
+      eta_delivery: etaDelivery,
+      notes: notes,
+      created_by: createdBy,
+      created_at: now,
+      updated_at: now,
+    };
+
+    const existing = this.readRawCheckCalls(organizationId);
+    this.writeRawCheckCalls(organizationId, [newCheckCall, ...existing]);
+
+    return newCheckCall;
+  }
+
+  public async updateCheckCall(
+    organizationId: string,
+    checkCallId: string,
+    payload: UpdateCheckCallInput
+  ): Promise<CheckCall> {
+    if (!organizationId || !checkCallId) {
+      throw new Error('Organization ID and checkCallId are required.');
+    }
+
+    const existing = this.readRawCheckCalls(organizationId);
+    const existingIndex = existing.findIndex((c) => c.id === checkCallId && c.organization_id === organizationId);
+    const current = existingIndex !== -1 ? existing[existingIndex] : null;
+
+    // Location validation if updated
+    const city = payload.location_city !== undefined ? payload.location_city?.trim() || null : current?.location_city || null;
+    const state = payload.location_state !== undefined ? payload.location_state?.trim().toUpperCase() || null : current?.location_state || null;
+
+    if (city && !state) {
+      throw new Error('State is required when city is provided.');
+    }
+    if (state && !city) {
+      throw new Error('City is required when state is provided.');
+    }
+    if (state && state.length !== 2) {
+      throw new Error('State must be exactly a 2-letter uppercase postal code.');
+    }
+
+    const callType = payload.call_type || current?.call_type || 'other';
+    const status = payload.status || current?.status || 'on_time';
+    const notes = payload.notes !== undefined ? payload.notes?.trim() || null : current?.notes || null;
+
+    if ((callType === 'delay' || callType === 'breakdown') && (!notes || notes.length < 5)) {
+      throw new Error('Operational exceptions (delay / breakdown) require descriptive notes (min 5 characters).');
+    }
+
+    if (isSupabaseConfigured && isUUID(checkCallId)) {
+      try {
+        const updateFields: Record<string, unknown> = {
+          updated_at: new Date().toISOString(),
+        };
+
+        if (payload.call_type !== undefined) updateFields.call_type = payload.call_type;
+        if (payload.status !== undefined) updateFields.status = payload.status;
+        if (payload.location_city !== undefined) updateFields.location_city = city;
+        if (payload.location_state !== undefined) updateFields.location_state = state;
+        if (payload.latitude !== undefined) updateFields.latitude = typeof payload.latitude === 'number' ? payload.latitude : null;
+        if (payload.longitude !== undefined) updateFields.longitude = typeof payload.longitude === 'number' ? payload.longitude : null;
+        if (payload.eta_pickup !== undefined) updateFields.eta_pickup = payload.eta_pickup || null;
+        if (payload.eta_delivery !== undefined) updateFields.eta_delivery = payload.eta_delivery || null;
+        if (payload.notes !== undefined) updateFields.notes = notes;
+
+        const { data, error } = await (supabase.from('check_calls' as any) as any)
+          .update(updateFields)
+          .eq('id', checkCallId)
+          .eq('organization_id', organizationId)
+          .select()
+          .single();
+
+        if (!error && data) {
+          const updatedCheckCall = (data as unknown) as CheckCall;
+          // Synchronize local cache
+          if (existingIndex !== -1) {
+            existing[existingIndex] = updatedCheckCall;
+            this.writeRawCheckCalls(organizationId, existing);
+          }
+          return updatedCheckCall;
+        }
+      } catch (err) {
+        console.warn('Supabase updateCheckCall failed, saving locally:', err);
+      }
+    }
+
+    if (!current) {
+      throw new Error('Check call record not found.');
+    }
+
+    const updated: CheckCall = {
+      ...current,
+      call_type: callType,
+      status: status,
+      location_city: city,
+      location_state: state,
+      latitude: payload.latitude !== undefined ? payload.latitude : current.latitude,
+      longitude: payload.longitude !== undefined ? payload.longitude : current.longitude,
+      eta_pickup: payload.eta_pickup !== undefined ? payload.eta_pickup : current.eta_pickup,
+      eta_delivery: payload.eta_delivery !== undefined ? payload.eta_delivery : current.eta_delivery,
+      notes: notes,
+      updated_at: new Date().toISOString(),
+    };
+
+    existing[existingIndex] = updated;
+    this.writeRawCheckCalls(organizationId, existing);
+
+    return updated;
+  }
+
+  public async deleteCheckCall(organizationId: string, checkCallId: string): Promise<void> {
+    if (!organizationId || !checkCallId) return;
+
+    if (isSupabaseConfigured && isUUID(checkCallId)) {
+      try {
+        await (supabase.from('check_calls' as any) as any)
+          .delete()
+          .eq('id', checkCallId)
+          .eq('organization_id', organizationId);
+      } catch (err) {
+        console.warn('Supabase deleteCheckCall failed:', err);
+      }
+    }
+
+    const existing = this.readRawCheckCalls(organizationId);
+    const filtered = existing.filter((c) => !(c.id === checkCallId && c.organization_id === organizationId));
+    this.writeRawCheckCalls(organizationId, filtered);
+  }
+
+  public async getLatestCheckCall(organizationId: string, loadId: string): Promise<CheckCall | null> {
+    if (!organizationId || !loadId) return null;
+    const calls = await this.getCheckCalls(organizationId, loadId);
+    return calls.length > 0 ? calls[0] : null;
+  }
+
+  public async getTrackingSummaryForLoad(
+    organizationId: string,
+    load: Load | LoadWithRelations
+  ): Promise<LoadTrackingSummary> {
+    const calls = await this.getCheckCalls(organizationId, load.id);
+    const latest = calls.length > 0 ? calls[0] : null;
+
+    let currentLocation: string | null = null;
+    if (latest?.location_city && latest?.location_state) {
+      currentLocation = `${latest.location_city}, ${latest.location_state}`;
+    }
+
+    // Determine if load is missing a recent check-in (>24 hours for booked or in_transit)
+    const isBookedOrInTransit = load.pipeline_status === 'booked' || load.pipeline_status === 'in_transit';
+    let isMissingRecentCheckIn = false;
+
+    if (isBookedOrInTransit) {
+      if (!latest) {
+        isMissingRecentCheckIn = true;
+      } else {
+        const lastUpdatedMs = new Date(latest.created_at).getTime();
+        const twentyFourHoursAgoMs = Date.now() - 24 * 3600000;
+        if (lastUpdatedMs < twentyFourHoursAgoMs) {
+          isMissingRecentCheckIn = true;
+        }
+      }
+    }
+
+    const hasException = latest ? isOperationalException(latest.call_type, latest.status) : false;
+
+    return {
+      latestCheckCall: latest,
+      totalCheckCalls: calls.length,
+      currentStatus: latest?.status || null,
+      currentLocation: currentLocation,
+      etaPickup: latest?.eta_pickup || load.pickup_datetime || null,
+      etaDelivery: latest?.eta_delivery || load.delivery_datetime || null,
+      lastUpdated: latest?.created_at || null,
+      timeSinceLastUpdate: formatTimeSince(latest?.created_at),
+      hasException: hasException,
+      isMissingRecentCheckIn: isMissingRecentCheckIn,
+    };
+  }
+
+  public async getTrackingStats(organizationId: string): Promise<TrackingStats> {
+    const [allCalls, allLoads] = await Promise.all([
+      this.getCheckCalls(organizationId),
+      loadService.getLoads(organizationId),
+    ]);
+
+    const activeLoads = allLoads.filter(
+      (l) => l.pipeline_status === 'booked' || l.pipeline_status === 'in_transit'
+    );
+
+    let onTimeCount = 0;
+    let delayedCount = 0;
+    let atRiskCount = 0;
+    let exceptionsCount = 0;
+    let missingRecentCheckInCount = 0;
+
+    const twentyFourHoursAgoMs = Date.now() - 24 * 3600000;
+
+    for (const load of activeLoads) {
+      const loadCalls = allCalls.filter((c) => c.load_id === load.id);
+      const latest = loadCalls.length > 0 ? loadCalls[0] : null;
+
+      if (!latest) {
+        missingRecentCheckInCount++;
+      } else {
+        const lastTime = new Date(latest.created_at).getTime();
+        if (lastTime < twentyFourHoursAgoMs) {
+          missingRecentCheckInCount++;
+        }
+
+        if (latest.status === 'on_time') onTimeCount++;
+        else if (latest.status === 'delayed') delayedCount++;
+        else if (latest.status === 'at_risk') atRiskCount++;
+
+        if (isOperationalException(latest.call_type, latest.status)) {
+          exceptionsCount++;
+        }
+      }
+    }
+
+    return {
+      totalCheckCalls: allCalls.length,
+      activeLoadsTrackingCount: activeLoads.length,
+      onTimeCount,
+      delayedCount,
+      atRiskCount,
+      exceptionsCount,
+      missingRecentCheckInCount,
+    };
+  }
+
+  public async getLoadsMissingRecentCheckIn(organizationId: string): Promise<LoadWithRelations[]> {
+    const [allLoads, allCalls] = await Promise.all([
+      loadService.getLoads(organizationId),
+      this.getCheckCalls(organizationId),
+    ]);
+
+    const activeLoads = allLoads.filter(
+      (l) => l.pipeline_status === 'booked' || l.pipeline_status === 'in_transit'
+    );
+
+    const twentyFourHoursAgoMs = Date.now() - 24 * 3600000;
+
+    return activeLoads.filter((load) => {
+      const loadCalls = allCalls.filter((c) => c.load_id === load.id);
+      if (loadCalls.length === 0) return true;
+      const latest = loadCalls[0];
+      return new Date(latest.created_at).getTime() < twentyFourHoursAgoMs;
+    });
+  }
+}
+
+export const checkCallService = new CheckCallService();
+

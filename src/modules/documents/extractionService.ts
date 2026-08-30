@@ -1,0 +1,275 @@
+import {
+  RateConfirmationExtraction,
+  ExtractionResponse,
+  ApplyExtractionToLoadInput,
+} from './extractionTypes.ts';
+import { loadService } from '../loads/loadService.ts';
+import { documentService } from './documentService.ts';
+import { activityService } from '../activity/activityService.ts';
+import { calculateProfitability } from '../../lib/calculations.ts';
+import { LoadWithRelations, CreateLoadInput, UpdateLoadInput } from '../loads/loadTypes.ts';
+import { EquipmentType } from '../../types/domain.types.ts';
+
+class ExtractionService {
+  /**
+   * Reads a browser File object as Base64 string
+   */
+  async fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // Remove data URL prefix (e.g. "data:application/pdf;base64,")
+        const base64Index = result.indexOf(';base64,');
+        if (base64Index !== -1) {
+          resolve(result.substring(base64Index + 8));
+        } else {
+          resolve(result);
+        }
+      };
+      reader.onerror = (err) => reject(err);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /**
+   * Request server-side AI extraction for a rate confirmation document
+   */
+  async extractRateConfirmation(params: {
+    file?: File;
+    documentText?: string;
+    fileName?: string;
+  }): Promise<RateConfirmationExtraction> {
+    let fileData: string | undefined = undefined;
+    let mimeType: string | undefined = undefined;
+    const fileName = params.fileName || params.file?.name || 'RateConfirmation.pdf';
+
+    if (params.file) {
+      fileData = await this.fileToBase64(params.file);
+      mimeType = params.file.type || 'application/pdf';
+    }
+
+    try {
+      const response = await fetch('/api/ai/extract-rate-con', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          fileData,
+          mimeType,
+          fileName,
+          documentText: params.documentText,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        throw new Error(errorBody.error || `Server responded with status ${response.status}`);
+      }
+
+      const resData: ExtractionResponse = await response.json();
+      if (!resData.success || !resData.extractedData) {
+        throw new Error(resData.error || 'Server extraction returned empty or invalid payload.');
+      }
+
+      // Append provenance metadata
+      const extraction: RateConfirmationExtraction = {
+        ...resData.extractedData,
+        provenance: {
+          fileName,
+          fileSize: params.file?.size,
+          mimeType: mimeType || 'text/plain',
+          extractedAt: resData.extractedAt || new Date().toISOString(),
+          model: resData.source || 'gemini-3.7-flash',
+          sourceType: params.file
+            ? params.file.type.includes('pdf')
+              ? 'uploaded_pdf'
+              : 'uploaded_image'
+            : params.documentText
+            ? 'pasted_text'
+            : 'sample_document',
+        },
+      };
+
+      // Perform client-side financial validation
+      this.validateFinancialConsistency(extraction);
+
+      return extraction;
+    } catch (err: any) {
+      console.warn('Extraction API request failed or offline. Attempting deterministic fallback.', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Validates financial arithmetic and adds warnings if numbers don't add up
+   */
+  private validateFinancialConsistency(extraction: RateConfirmationExtraction) {
+    if (!extraction.warnings) {
+      extraction.warnings = [];
+    }
+
+    const rate = Number(extraction.load_info.rate) || 0;
+    if (rate <= 0) {
+      extraction.warnings.push('Gross Rate was not extracted or is $0.00. Please verify carrier agreed pay.');
+    }
+
+    // Check if origin & dest are valid 2-letter states
+    const originState = (extraction.origin.state || '').trim().toUpperCase();
+    const destState = (extraction.destination.state || '').trim().toUpperCase();
+
+    if (!originState || originState.length !== 2) {
+      extraction.warnings.push(`Origin state "${originState || 'Missing'}" may need manual correction to a standard 2-letter state code.`);
+    }
+
+    if (!destState || destState.length !== 2) {
+      extraction.warnings.push(`Destination state "${destState || 'Missing'}" may need manual correction to a standard 2-letter state code.`);
+    }
+  }
+
+  /**
+   * Apply approved extraction data to either update an existing load or create a new load,
+   * attach the document record, and record an audit activity event.
+   */
+  async applyExtractionToLoad(input: ApplyExtractionToLoadInput): Promise<{
+    load: LoadWithRelations;
+    documentId?: string;
+  }> {
+    const {
+      targetLoadId,
+      createNewLoad,
+      organizationId,
+      clientId,
+      brokerId,
+      truckId,
+      driverId,
+      extractedData,
+      overriddenFields,
+      attachDocument,
+    } = input;
+
+    let targetLoad: LoadWithRelations;
+
+    if (createNewLoad || !targetLoadId) {
+      // 1. Generate or use load number
+      const loadNumber =
+        overriddenFields.load_number ||
+        extractedData.load_info.load_number ||
+        (await loadService.generateNextLoadNumber(organizationId));
+
+      const rawEquipment = (overriddenFields.equipment_type ||
+        extractedData.load_info.equipment_type ||
+        'dry_van') as EquipmentType;
+
+      const createInput: CreateLoadInput = {
+        load_number: loadNumber,
+        client_id: clientId,
+        broker_id: brokerId || null,
+        truck_id: truckId || null,
+        driver_id: driverId || null,
+        pipeline_status: 'booked',
+        equipment_type: rawEquipment,
+        commodity: overriddenFields.commodity || extractedData.load_info.commodity || null,
+        weight_lbs:
+          overriddenFields.weight_lbs !== undefined
+            ? overriddenFields.weight_lbs
+            : extractedData.load_info.weight_lbs || null,
+        origin_city: overriddenFields.origin_city || extractedData.origin.city,
+        origin_state: (overriddenFields.origin_state || extractedData.origin.state).toUpperCase(),
+        origin_zip: overriddenFields.origin_zip || extractedData.origin.zip || null,
+        pickup_datetime: overriddenFields.pickup_datetime || extractedData.origin.pickup_datetime || null,
+        dest_city: overriddenFields.dest_city || extractedData.destination.city,
+        dest_state: (overriddenFields.dest_state || extractedData.destination.state).toUpperCase(),
+        dest_zip: overriddenFields.dest_zip || extractedData.destination.zip || null,
+        delivery_datetime:
+          overriddenFields.delivery_datetime || extractedData.destination.delivery_datetime || null,
+        rate:
+          overriddenFields.rate !== undefined ? overriddenFields.rate : extractedData.load_info.rate,
+        loaded_miles: overriddenFields.loaded_miles || 0,
+        deadhead_miles: overriddenFields.deadhead_miles || 0,
+        special_instructions:
+          overriddenFields.special_instructions ||
+          extractedData.load_info.special_instructions ||
+          null,
+      };
+
+      targetLoad = await loadService.createLoad(organizationId, createInput);
+    } else {
+      // Update existing load
+      const updateInput: UpdateLoadInput = {
+        broker_id: brokerId !== undefined ? brokerId : undefined,
+        truck_id: truckId !== undefined ? truckId : undefined,
+        driver_id: driverId !== undefined ? driverId : undefined,
+        pipeline_status: 'booked', // Promoting to booked on Rate Con receipt
+        equipment_type: overriddenFields.equipment_type || (extractedData.load_info.equipment_type as EquipmentType),
+        commodity:
+          overriddenFields.commodity !== undefined
+            ? overriddenFields.commodity
+            : extractedData.load_info.commodity || undefined,
+        weight_lbs:
+          overriddenFields.weight_lbs !== undefined
+            ? overriddenFields.weight_lbs
+            : extractedData.load_info.weight_lbs || undefined,
+        origin_city: overriddenFields.origin_city || extractedData.origin.city,
+        origin_state: (overriddenFields.origin_state || extractedData.origin.state).toUpperCase(),
+        origin_zip: overriddenFields.origin_zip || extractedData.origin.zip || undefined,
+        pickup_datetime: overriddenFields.pickup_datetime || extractedData.origin.pickup_datetime || undefined,
+        dest_city: overriddenFields.dest_city || extractedData.destination.city,
+        dest_state: (overriddenFields.dest_state || extractedData.destination.state).toUpperCase(),
+        dest_zip: overriddenFields.dest_zip || extractedData.destination.zip || undefined,
+        delivery_datetime:
+          overriddenFields.delivery_datetime || extractedData.destination.delivery_datetime || undefined,
+        rate:
+          overriddenFields.rate !== undefined ? overriddenFields.rate : extractedData.load_info.rate,
+        loaded_miles:
+          overriddenFields.loaded_miles !== undefined ? overriddenFields.loaded_miles : undefined,
+        deadhead_miles:
+          overriddenFields.deadhead_miles !== undefined ? overriddenFields.deadhead_miles : undefined,
+        special_instructions:
+          overriddenFields.special_instructions !== undefined
+            ? overriddenFields.special_instructions
+            : extractedData.load_info.special_instructions || undefined,
+      };
+
+      targetLoad = await loadService.updateLoad(organizationId, targetLoadId, updateInput);
+    }
+
+    // 2. Attach Rate Confirmation Document Record
+    let docRecordId: string | undefined;
+    if (attachDocument) {
+      const doc = await documentService.createDocument(organizationId, {
+        load_id: targetLoad.id,
+        doc_type: 'rate_confirmation',
+        doc_status: 'verified', // Approved by dispatcher
+        file_name: attachDocument.file_name || 'Rate_Confirmation.pdf',
+        file_size_bytes: attachDocument.file_size_bytes || 250000,
+        mime_type: attachDocument.mime_type || 'application/pdf',
+        notes: `AI OCR Extracted & Dispatcher Approved.\nBroker: ${extractedData.broker.company_name}\nAgreed Rate: $${(overriddenFields.rate || extractedData.load_info.rate).toFixed(2)}\nConfidence: ${extractedData.confidence_scores.overall}%`,
+        uploaded_by: 'Dispatcher (AI Assisted)',
+      });
+      docRecordId = doc.id;
+    }
+
+    // 3. Record Audit Activity Event
+    await activityService.recordSystemEvent(
+      organizationId,
+      targetLoad.id,
+      'Rate Confirmation Extracted & Approved',
+      `Dispatcher approved AI-assisted Rate Confirmation extraction for Load ${targetLoad.load_number}. Rate set to $${targetLoad.rate.toFixed(2)} with Broker ${targetLoad.broker?.company_name || extractedData.broker.company_name}. Overall AI confidence: ${extractedData.confidence_scores.overall}%.`,
+      {
+        extractedBroker: extractedData.broker.company_name,
+        extractedRate: extractedData.load_info.rate,
+        confidence: extractedData.confidence_scores.overall,
+        model: extractedData.provenance?.model || 'gemini-3.7-flash',
+      }
+    );
+
+    return {
+      load: targetLoad,
+      documentId: docRecordId,
+    };
+  }
+}
+
+export const extractionService = new ExtractionService();

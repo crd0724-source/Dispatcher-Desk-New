@@ -1,0 +1,6 @@
+{
+  "name": "DispatchDesk",
+  "description": "Multi-tenant dispatcher operating system for trucking dispatchers and back-office teams managing US/Canada fleets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

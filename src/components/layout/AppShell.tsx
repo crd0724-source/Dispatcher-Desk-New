@@ -1,0 +1,94 @@
+import React, { useState } from 'react';
+import { Sidebar, NavModule } from './Sidebar.tsx';
+import { Header } from './Header.tsx';
+import { useAuth } from '../../contexts/AuthContext.tsx';
+import { EmptyState } from '../common/EmptyState.tsx';
+import { Building, Plus } from 'lucide-react';
+
+interface AppShellProps {
+  activeModule: NavModule;
+  onSelectModule: (module: NavModule) => void;
+  children: React.ReactNode;
+  onCreateOrgClick?: () => void;
+  onOpenAuthModal?: () => void;
+}
+
+export const AppShell: React.FC<AppShellProps> = ({
+  activeModule,
+  onSelectModule,
+  children,
+  onCreateOrgClick,
+  onOpenAuthModal,
+}) => {
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const { user, activeOrganization, memberships, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400">
+        <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mb-3" />
+        <p className="text-sm font-medium">Loading DispatchDesk...</p>
+      </div>
+    );
+  }
+
+  // If user has zero organizations yet, show onboarding bootstrap state
+  if (!activeOrganization && memberships.length === 0) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center px-4">
+        <div className="max-w-md w-full space-y-4">
+          <EmptyState
+            id="empty-org-state"
+            icon={Building}
+            title={user ? 'Create Your Dispatch Organization' : 'Welcome to DispatchDesk'}
+            description={
+              user
+                ? 'To begin managing clients, owner-operators, trucks, and loads with multi-tenant isolation, create your dispatch company workspace.'
+                : 'Sign in to access your fleet operations workspace or create a new account to get started.'
+            }
+            actionLabel={user ? 'Create Dispatch Company' : 'Log In / Sign Up'}
+            onAction={user ? onCreateOrgClick : onOpenAuthModal}
+          />
+          {!user && onCreateOrgClick && (
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={onCreateOrgClick}
+                className="text-xs text-slate-400 hover:text-slate-200 underline cursor-pointer"
+              >
+                Or create a local demo workspace
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+      {/* Sidebar Navigation */}
+      <Sidebar
+        activeModule={activeModule}
+        onSelectModule={onSelectModule}
+        userRole={memberships.find(m => m.organization.id === activeOrganization?.id)?.role || null}
+        isOpen={isMobileSidebarOpen}
+        onCloseMobile={() => setIsMobileSidebarOpen(false)}
+        onOpenAuthModal={onOpenAuthModal}
+      />
+
+      {/* Main Content Area */}
+      <div className="lg:pl-64 flex flex-col min-h-screen">
+        <Header
+          onToggleSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
+          onSelectModule={onSelectModule}
+          onOpenAuthModal={onOpenAuthModal}
+        />
+        
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
+          {children}
+        </main>
+      </div>
+    </div>
+  );
+};
