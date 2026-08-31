@@ -12,6 +12,7 @@ interface MetricCardProps {
     isPositive?: boolean;
   };
   accentColor?: 'purple' | 'blue' | 'emerald' | 'amber' | 'slate';
+  className?: string;
 }
 
 export const MetricCard: React.FC<MetricCardProps> = ({
@@ -22,35 +23,54 @@ export const MetricCard: React.FC<MetricCardProps> = ({
   icon: Icon,
   trend,
   accentColor = 'slate',
+  className = '',
 }) => {
   const colorMap = {
     purple: 'text-indigo-400 bg-indigo-950/40 border-indigo-800/40',
     blue: 'text-sky-400 bg-sky-950/40 border-sky-800/40',
     emerald: 'text-emerald-400 bg-emerald-950/40 border-emerald-800/40',
     amber: 'text-amber-400 bg-amber-950/40 border-amber-800/40',
-    slate: 'text-slate-400 bg-slate-900 border-slate-800',
+    slate: 'text-slate-400 bg-slate-800/50 border-slate-700/50',
   };
 
   return (
     <div
       id={id}
-      className="bg-slate-900 border border-slate-800/80 rounded-xl p-4 sm:p-5 flex flex-col justify-between hover:border-slate-700 transition-colors shadow-sm"
+      className={`bg-slate-900/90 border border-slate-800/80 rounded-xl p-3.5 sm:p-4 flex flex-col justify-between hover:border-slate-700/80 transition-colors shadow-xs relative overflow-hidden min-w-0 ${className}`}
     >
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">{title}</p>
-          <p className="text-2xl font-bold text-slate-100 mt-1 tracking-tight">{value}</p>
+      <div>
+        {/* Top row: Section Label + Self-Contained Accent Icon */}
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <p className="text-[11px] font-bold text-slate-400 tracking-wider uppercase truncate" title={title}>
+            {title}
+          </p>
+          <div className={`p-1.5 rounded-lg border shrink-0 ${colorMap[accentColor]}`}>
+            <Icon className="w-3.5 h-3.5" />
+          </div>
         </div>
-        <div className={`p-2.5 rounded-lg border ${colorMap[accentColor]}`}>
-          <Icon className="w-5 h-5" />
+
+        {/* Primary Metric Value: Full width dedicated row, tabular numeric precision, never truncated or clipped */}
+        <div className="mt-1.5 sm:mt-2">
+          <p
+            className="text-lg sm:text-xl xl:text-[22px] font-bold text-slate-100 tracking-tight font-mono tabular-nums whitespace-nowrap"
+            title={typeof value === 'string' ? value : String(value)}
+          >
+            {value}
+          </p>
         </div>
       </div>
+
+      {/* Contextual Subtitle & Trend Footer */}
       {(subtitle || trend) && (
-        <div className="mt-3 pt-3 border-t border-slate-800/60 flex items-center justify-between text-xs">
-          {subtitle && <span className="text-slate-400">{subtitle}</span>}
+        <div className="mt-2.5 sm:mt-3 pt-2 border-t border-slate-800/60 flex items-center justify-between gap-1.5 text-[11px] min-w-0">
+          {subtitle && (
+            <span className="text-slate-400 font-medium truncate min-w-0" title={subtitle}>
+              {subtitle}
+            </span>
+          )}
           {trend && (
             <span
-              className={`font-semibold ${
+              className={`font-semibold font-mono tabular-nums shrink-0 ml-auto pl-1 ${
                 trend.isPositive ? 'text-emerald-400' : 'text-rose-400'
               }`}
             >
@@ -62,3 +82,4 @@ export const MetricCard: React.FC<MetricCardProps> = ({
     </div>
   );
 };
+

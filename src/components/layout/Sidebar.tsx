@@ -129,10 +129,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
           {/* Section 1: Operations */}
           <div>
-            <p className="px-3 text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
+            <p className="px-3 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
               Operations
             </p>
-            <nav className="mt-2 space-y-1">
+            <nav className="mt-1.5 space-y-0.5">
               {mainNavItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = activeModule === item.id;
@@ -141,18 +141,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     key={item.id}
                     id={`nav-item-${item.id}`}
                     onClick={() => handleNavClick(item.id)}
-                    className={`w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer ${
+                    className={`w-full flex items-center justify-between px-3 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
                       isActive
-                        ? 'bg-indigo-600/15 text-indigo-300 border border-indigo-500/30'
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                        ? 'bg-indigo-600/15 text-indigo-300 border border-indigo-500/30 shadow-xs'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/80'
                     }`}
                   >
                     <div className="flex items-center gap-2.5">
-                      <Icon className={`w-4 h-4 ${isActive ? 'text-indigo-400' : 'text-slate-400'}`} />
-                      <span>{item.label}</span>
+                      <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-indigo-400' : 'text-slate-400'}`} />
+                      <span className="truncate">{item.label}</span>
                     </div>
                     {item.badge && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-mono">
+                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800/80 text-slate-400 border border-slate-700/60 font-mono">
                         {item.badge}
                       </span>
                     )}
@@ -164,10 +164,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {/* Section 2: Fleet & Partners */}
           <div>
-            <p className="px-3 text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
+            <p className="px-3 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
               Fleet & Partners
             </p>
-            <nav className="mt-2 space-y-1">
+            <nav className="mt-1.5 space-y-0.5">
               {fleetNavItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = activeModule === item.id;
@@ -176,15 +176,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     key={item.id}
                     id={`nav-item-${item.id}`}
                     onClick={() => handleNavClick(item.id)}
-                    className={`w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer ${
+                    className={`w-full flex items-center justify-between px-3 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
                       isActive
-                        ? 'bg-indigo-600/15 text-indigo-300 border border-indigo-500/30'
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                        ? 'bg-indigo-600/15 text-indigo-300 border border-indigo-500/30 shadow-xs'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/80'
                     }`}
                   >
                     <div className="flex items-center gap-2.5">
-                      <Icon className={`w-4 h-4 ${isActive ? 'text-indigo-400' : 'text-slate-400'}`} />
-                      <span>{item.label}</span>
+                      <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-indigo-400' : 'text-slate-400'}`} />
+                      <span className="truncate">{item.label}</span>
                     </div>
                   </button>
                 );
@@ -194,10 +194,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {/* Section 3: Back Office & Intelligence */}
           <div>
-            <p className="px-3 text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
+            <p className="px-3 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
               Back Office & Intel
             </p>
-            <nav className="mt-2 space-y-1">
+            <nav className="mt-1.5 space-y-0.5">
               {backOfficeItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = activeModule === item.id;
@@ -206,18 +206,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     key={item.id}
                     id={`nav-item-${item.id}`}
                     onClick={() => handleNavClick(item.id)}
-                    className={`w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer ${
+                    className={`w-full flex items-center justify-between px-3 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
                       isActive
-                        ? 'bg-indigo-600/15 text-indigo-300 border border-indigo-500/30'
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                        ? 'bg-indigo-600/15 text-indigo-300 border border-indigo-500/30 shadow-xs'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/80'
                     }`}
                   >
                     <div className="flex items-center gap-2.5">
-                      <Icon className={`w-4 h-4 ${isActive ? 'text-indigo-400' : 'text-slate-400'}`} />
-                      <span>{item.label}</span>
+                      <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-indigo-400' : 'text-slate-400'}`} />
+                      <span className="truncate">{item.label}</span>
                     </div>
                     {item.badge && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-950/60 text-indigo-300 border border-indigo-800/40">
+                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-950/60 text-indigo-300 border border-indigo-800/40">
                         {item.badge}
                       </span>
                     )}
