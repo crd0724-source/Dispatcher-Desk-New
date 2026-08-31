@@ -96,6 +96,8 @@ async function runTests() {
   const notesAfterTruck = await activityService.getActivities(testOrgId, loadId);
   const truckAssignNotes = notesAfterTruck.filter((n) => n.type === 'assignment_change');
   assert(truckAssignNotes.length >= 1, 'Assignment activity note recorded for truck assignment');
+  assert(notesAfterTruck[0].type === 'assignment_change', 'Most recent activity note has note_type = "assignment_change"');
+  assert(notesAfterTruck[0].type !== ('general' as any), 'Activity note is NOT "general"');
   assert(truckAssignNotes[0].metadata?.newTruckId === targetTruck1.id, 'Activity note metadata contains correct truck ID');
 
   // -------------------------------------------------------------
@@ -112,13 +114,18 @@ async function runTests() {
   assert(updatedWithDriver.truck_id === targetTruck1.id, 'Existing truck assignment preserved');
   assert(updatedWithDriver.driver?.id === targetDriver1.id, 'Driver relation properly joined');
 
-  const noteCountAfterDriver = (await activityService.getActivities(testOrgId, loadId)).filter((n) => n.type === 'assignment_change').length;
+  const notesAfterDriver = await activityService.getActivities(testOrgId, loadId);
+  const noteCountAfterDriver = notesAfterDriver.filter((n) => n.type === 'assignment_change').length;
   assert(noteCountAfterDriver === noteCountBeforeDriver + 1, 'Exactly one new assignment activity note recorded for driver assignment');
+  assert(notesAfterDriver[0].type === 'assignment_change', 'New driver assignment note has note_type = "assignment_change"');
+  assert(notesAfterDriver[0].type !== ('general' as any), 'Driver assignment note is NOT "general"');
+  assert(notesAfterDriver[0].metadata?.newDriverId === targetDriver1.id, 'Driver assignment metadata contains new driver ID');
 
   // -------------------------------------------------------------
   // TEST 3: Non-assignment load update still works
   // -------------------------------------------------------------
   console.log('\n--- TEST 3: Non-assignment load update still works ---');
+  const totalNotesBeforeNonAssign = (await activityService.getActivities(testOrgId, loadId)).length;
   const noteCountBeforeNonAssign = (await activityService.getActivities(testOrgId, loadId)).filter((n) => n.type === 'assignment_change').length;
 
   const updatedDetails = await loadService.updateLoad(testOrgId, loadId, {
@@ -139,8 +146,10 @@ async function runTests() {
   // TEST 4: No duplicate assignment activity note on non-assignment update
   // -------------------------------------------------------------
   console.log('\n--- TEST 4: No duplicate assignment activity note ---');
+  const totalNotesAfterNonAssign = (await activityService.getActivities(testOrgId, loadId)).length;
   const noteCountAfterNonAssign = (await activityService.getActivities(testOrgId, loadId)).filter((n) => n.type === 'assignment_change').length;
   assert(noteCountAfterNonAssign === noteCountBeforeNonAssign, 'Zero duplicate assignment activity notes generated on non-assignment update');
+  assert(totalNotesAfterNonAssign === totalNotesBeforeNonAssign, 'Zero general or duplicate notes created on non-assignment update');
 
   // Also verify that updating with unchanged truck_id and driver_id does NOT generate an assignment note
   const updatedSameAssignments = await loadService.updateLoad(testOrgId, loadId, {
@@ -168,8 +177,13 @@ async function runTests() {
   assert(unassignedLoad.truck === null || unassignedLoad.truck === undefined, 'Truck relation unlinked');
   assert(unassignedLoad.driver === null || unassignedLoad.driver === undefined, 'Driver relation unlinked');
 
-  const noteCountAfterRemoval = (await activityService.getActivities(testOrgId, loadId)).filter((n) => n.type === 'assignment_change').length;
+  const notesAfterRemoval = await activityService.getActivities(testOrgId, loadId);
+  const noteCountAfterRemoval = notesAfterRemoval.filter((n) => n.type === 'assignment_change').length;
   assert(noteCountAfterRemoval === noteCountBeforeRemoval + 1, 'Exactly one assignment activity note recorded for unassignment');
+  assert(notesAfterRemoval[0].type === 'assignment_change', 'Unassignment note has exact note_type = "assignment_change"');
+  assert(notesAfterRemoval[0].type !== ('general' as any), 'Unassignment note is NOT "general"');
+  assert(notesAfterRemoval[0].metadata?.newTruckId === null, 'Unassignment metadata has newTruckId = null');
+  assert(notesAfterRemoval[0].metadata?.newDriverId === null, 'Unassignment metadata has newDriverId = null');
 
   // -------------------------------------------------------------
   // TEST 6: S6.4 Integrity enforcement (Wrong client, Inactive, Overlaps, Invoiced)

@@ -16,7 +16,14 @@ export type DriverPayType = 'percentage_gross' | 'per_mile' | 'flat_rate';
 export type PipelineStatus = 'sourced' | 'negotiating' | 'booked' | 'in_transit' | 'delivered' | 'invoiced' | 'paid';
 export type DocumentType = 'rate_confirmation' | 'bol' | 'pod' | 'invoice' | 'other';
 export type DocumentStatus = 'missing' | 'pending' | 'received' | 'verified';
-export type NoteType = 'broker_call' | 'driver_check' | 'handover' | 'general' | 'rate_negotiation';
+export type NoteType =
+  | 'broker_call'
+  | 'driver_check'
+  | 'handover'
+  | 'general'
+  | 'rate_negotiation'
+  | 'assignment_change'
+  | 'status_change';
 
 export type Database = {
   public: {
