@@ -35,18 +35,27 @@ import {
   Calculator,
 } from 'lucide-react';
 
-// 15-minute interval options for dispatcher schedule (00, 15, 30, 45)
+// Format 24-hour time HH:MM with 12-hour AM/PM label
+export const formatTimeOptionLabel = (timeStr: string): string => {
+  if (!timeStr) return '';
+  const [hStr, mStr] = timeStr.split(':');
+  const h = parseInt(hStr, 10);
+  const mm = mStr ? mStr.padStart(2, '0') : '00';
+  if (isNaN(h)) return timeStr;
+  const period = h >= 12 ? 'PM' : 'AM';
+  const displayHour = h % 12 === 0 ? 12 : h % 12;
+  return `${String(h).padStart(2, '0')}:${mm} (${displayHour}:${mm} ${period})`;
+};
+
+// 30-minute interval options for dispatcher schedule (00:00 through 23:30)
 export const TIME_OPTIONS: { value: string; label: string }[] = (() => {
   const options: { value: string; label: string }[] = [];
   for (let h = 0; h < 24; h++) {
-    for (let m = 0; m < 60; m += 15) {
+    for (let m = 0; m < 60; m += 30) {
       const hh = String(h).padStart(2, '0');
       const mm = String(m).padStart(2, '0');
       const value = `${hh}:${mm}`;
-      const period = h >= 12 ? 'PM' : 'AM';
-      const displayHour = h % 12 === 0 ? 12 : h % 12;
-      const label = `${value} (${displayHour}:${mm} ${period})`;
-      options.push({ value, label });
+      options.push({ value, label: formatTimeOptionLabel(value) });
     }
   }
   return options;
@@ -57,26 +66,14 @@ const toLocalDateString = (d: Date): string => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 
-const snapTimeTo15Minutes = (hours: number, minutes: number): string => {
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  const snappedMinutes = Math.round(minutes / 15) * 15;
-  let h = hours;
-  let m = snappedMinutes;
-  if (m >= 60) {
-    h = (h + 1) % 24;
-    m = 0;
-  }
-  return `${pad(h)}:${pad(m)}`;
-};
-
 const parseDateAndTimeToInputs = (isoString?: string | null): { date: string; time: string } => {
   if (!isoString) return { date: '', time: '' };
   try {
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return { date: '', time: '' };
     const date = toLocalDateString(d);
-    const snappedTime = snapTimeTo15Minutes(d.getHours(), d.getMinutes());
-    return { date, time: snappedTime };
+    const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    return { date, time };
   } catch {
     return { date: '', time: '' };
   }
@@ -728,7 +725,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                   className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-indigo-500 cursor-pointer"
                 >
                   {!TIME_OPTIONS.some((opt) => opt.value === pickupTime) && pickupTime && (
-                    <option value={pickupTime}>{pickupTime}</option>
+                    <option value={pickupTime}>{formatTimeOptionLabel(pickupTime)}</option>
                   )}
                   {TIME_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -803,6 +800,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                 <input
                   id="delivery-date-input"
                   type="date"
+                  min={pickupDate || undefined}
                   value={deliveryDate}
                   onChange={(e) => {
                     setDeliveryDate(e.target.value);
@@ -842,7 +840,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                   }`}
                 >
                   {!TIME_OPTIONS.some((opt) => opt.value === deliveryTime) && deliveryTime && (
-                    <option value={deliveryTime}>{deliveryTime}</option>
+                    <option value={deliveryTime}>{formatTimeOptionLabel(deliveryTime)}</option>
                   )}
                   {TIME_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
