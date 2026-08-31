@@ -850,22 +850,12 @@ class LocalLoadService implements ILoadService {
         throw new Error('Client assignment cannot be empty.');
       }
 
-      let targetTruckId = input.truck_id !== undefined ? input.truck_id : currentLoad.truck_id;
-      let targetDriverId = input.driver_id !== undefined ? input.driver_id : currentLoad.driver_id;
+      const rawTruckId = input.truck_id !== undefined ? (input.truck_id ? input.truck_id : null) : currentLoad.truck_id;
+      const rawDriverId = input.driver_id !== undefined ? (input.driver_id ? input.driver_id : null) : currentLoad.driver_id;
 
-      if (targetTruckId) {
-        const truck = trucks.find((t) => t.id === targetTruckId);
-        if (!truck || truck.client_id !== targetClientId) {
-          targetTruckId = null;
-        }
-      }
-
-      if (targetDriverId) {
-        const driver = drivers.find((d) => d.id === targetDriverId);
-        if (!driver || driver.client_id !== targetClientId) {
-          targetDriverId = null;
-        }
-      }
+      const isTruckChanged = input.truck_id !== undefined && (input.truck_id || null) !== (currentLoad.truck_id || null);
+      const isDriverChanged = input.driver_id !== undefined && (input.driver_id || null) !== (currentLoad.driver_id || null);
+      const hasAssignmentChange = isTruckChanged || isDriverChanged;
 
       const pickupDt = input.pickup_datetime !== undefined ? input.pickup_datetime : currentLoad.pickup_datetime;
       const deliveryDt = input.delivery_datetime !== undefined ? input.delivery_datetime : currentLoad.delivery_datetime;
@@ -873,91 +863,112 @@ class LocalLoadService implements ILoadService {
         throw new Error('Delivery date and time cannot be earlier than pickup date and time.');
       }
 
-      const { data, error } = await supabase
-        .from('loads')
-        .update({
-          ...(input.load_number !== undefined ? { load_number: input.load_number.trim().toUpperCase() } : {}),
-          ...(input.client_id !== undefined ? { client_id: targetClientId } : {}),
-          ...(input.broker_id !== undefined ? { broker_id: input.broker_id || null } : {}),
-          ...(input.truck_id !== undefined ? { truck_id: targetTruckId } : {}),
-          ...(input.driver_id !== undefined ? { driver_id: targetDriverId } : {}),
-          ...(input.assigned_dispatcher_id !== undefined ? { assigned_dispatcher_id: input.assigned_dispatcher_id || null } : {}),
-          ...(input.pipeline_status !== undefined ? { pipeline_status: input.pipeline_status } : {}),
-          ...(input.equipment_type !== undefined ? { equipment_type: input.equipment_type } : {}),
-          ...(input.commodity !== undefined ? { commodity: input.commodity?.trim() || null } : {}),
-          ...(input.weight_lbs !== undefined ? { weight_lbs: input.weight_lbs !== null ? Math.max(0, Number(input.weight_lbs)) : null } : {}),
-          ...(input.origin_city !== undefined ? { origin_city: input.origin_city.trim() } : {}),
-          ...(input.origin_state !== undefined ? { origin_state: input.origin_state.trim().toUpperCase() } : {}),
-          ...(input.origin_zip !== undefined ? { origin_zip: input.origin_zip?.trim() || null } : {}),
-          ...(input.pickup_datetime !== undefined ? { pickup_datetime: pickupDt } : {}),
-          ...(input.dest_city !== undefined ? { dest_city: input.dest_city.trim() } : {}),
-          ...(input.dest_state !== undefined ? { dest_state: input.dest_state.trim().toUpperCase() } : {}),
-          ...(input.dest_zip !== undefined ? { dest_zip: input.dest_zip?.trim() || null } : {}),
-          ...(input.delivery_datetime !== undefined ? { delivery_datetime: deliveryDt } : {}),
-          ...(input.rate !== undefined ? { rate: Math.max(0, Number(input.rate) || 0) } : {}),
-          ...(input.loaded_miles !== undefined ? { loaded_miles: Math.max(0, Number(input.loaded_miles) || 0) } : {}),
-          ...(input.deadhead_miles !== undefined ? { deadhead_miles: Math.max(0, Number(input.deadhead_miles) || 0) } : {}),
-          ...(input.fuel_expense !== undefined ? { fuel_expense: Math.max(0, Number(input.fuel_expense) || 0) } : {}),
-          ...(input.driver_pay !== undefined ? { driver_pay: Math.max(0, Number(input.driver_pay) || 0) } : {}),
-          ...(input.other_expenses !== undefined ? { other_expenses: Math.max(0, Number(input.other_expenses) || 0) } : {}),
-          ...(input.special_instructions !== undefined ? { special_instructions: input.special_instructions?.trim() || null } : {}),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id)
-        .eq('organization_id', organizationId)
-        .select()
-        .single();
-
-      if (error) {
-        if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('unique constraint')) {
-          throw new Error(`Load number "${input.load_number?.trim() || ''}" is already in use by another load.`);
-        }
-        console.error('[LoadService] Supabase updateLoad error:', error);
-        throw new Error(error.message || 'Failed to update load in database.');
+      // If assignment has changed, route through authoritative assignDispatchResources / assign_load_dispatch RPC
+      if (hasAssignmentChange) {
+        await this.assignDispatchResources(
+          organizationId,
+          id,
+          rawTruckId,
+          rawDriverId,
+          input.special_instructions || undefined
+        );
       }
 
-      if (data) {
-        const updatedLoad = data as Load;
+      // Check if any non-assignment fields were updated
+      const nonAssignmentFieldsPresent = (
+        input.load_number !== undefined ||
+        input.client_id !== undefined ||
+        input.broker_id !== undefined ||
+        input.assigned_dispatcher_id !== undefined ||
+        input.pipeline_status !== undefined ||
+        input.equipment_type !== undefined ||
+        input.commodity !== undefined ||
+        input.weight_lbs !== undefined ||
+        input.origin_city !== undefined ||
+        input.origin_state !== undefined ||
+        input.origin_zip !== undefined ||
+        input.pickup_datetime !== undefined ||
+        input.dest_city !== undefined ||
+        input.dest_state !== undefined ||
+        input.dest_zip !== undefined ||
+        input.delivery_datetime !== undefined ||
+        input.rate !== undefined ||
+        input.loaded_miles !== undefined ||
+        input.deadhead_miles !== undefined ||
+        input.fuel_expense !== undefined ||
+        input.driver_pay !== undefined ||
+        input.other_expenses !== undefined ||
+        input.special_instructions !== undefined
+      );
 
-        // Auto-record status shift
-        if (input.pipeline_status && input.pipeline_status !== currentLoad.pipeline_status) {
-          activityService.recordStatusChange(
-            organizationId,
-            id,
-            currentLoad.pipeline_status,
-            input.pipeline_status
-          ).catch(() => {});
+      if (nonAssignmentFieldsPresent || !hasAssignmentChange) {
+        const { data, error } = await supabase
+          .from('loads')
+          .update({
+            ...(input.load_number !== undefined ? { load_number: input.load_number.trim().toUpperCase() } : {}),
+            ...(input.client_id !== undefined ? { client_id: targetClientId } : {}),
+            ...(input.broker_id !== undefined ? { broker_id: input.broker_id || null } : {}),
+            ...(!hasAssignmentChange && input.truck_id !== undefined ? { truck_id: rawTruckId } : {}),
+            ...(!hasAssignmentChange && input.driver_id !== undefined ? { driver_id: rawDriverId } : {}),
+            ...(input.assigned_dispatcher_id !== undefined ? { assigned_dispatcher_id: input.assigned_dispatcher_id || null } : {}),
+            ...(input.pipeline_status !== undefined ? { pipeline_status: input.pipeline_status } : {}),
+            ...(input.equipment_type !== undefined ? { equipment_type: input.equipment_type } : {}),
+            ...(input.commodity !== undefined ? { commodity: input.commodity?.trim() || null } : {}),
+            ...(input.weight_lbs !== undefined ? { weight_lbs: input.weight_lbs !== null ? Math.max(0, Number(input.weight_lbs)) : null } : {}),
+            ...(input.origin_city !== undefined ? { origin_city: input.origin_city.trim() } : {}),
+            ...(input.origin_state !== undefined ? { origin_state: input.origin_state.trim().toUpperCase() } : {}),
+            ...(input.origin_zip !== undefined ? { origin_zip: input.origin_zip?.trim() || null } : {}),
+            ...(input.pickup_datetime !== undefined ? { pickup_datetime: pickupDt } : {}),
+            ...(input.dest_city !== undefined ? { dest_city: input.dest_city.trim() } : {}),
+            ...(input.dest_state !== undefined ? { dest_state: input.dest_state.trim().toUpperCase() } : {}),
+            ...(input.dest_zip !== undefined ? { dest_zip: input.dest_zip?.trim() || null } : {}),
+            ...(input.delivery_datetime !== undefined ? { delivery_datetime: deliveryDt } : {}),
+            ...(input.rate !== undefined ? { rate: Math.max(0, Number(input.rate) || 0) } : {}),
+            ...(input.loaded_miles !== undefined ? { loaded_miles: Math.max(0, Number(input.loaded_miles) || 0) } : {}),
+            ...(input.deadhead_miles !== undefined ? { deadhead_miles: Math.max(0, Number(input.deadhead_miles) || 0) } : {}),
+            ...(input.fuel_expense !== undefined ? { fuel_expense: Math.max(0, Number(input.fuel_expense) || 0) } : {}),
+            ...(input.driver_pay !== undefined ? { driver_pay: Math.max(0, Number(input.driver_pay) || 0) } : {}),
+            ...(input.other_expenses !== undefined ? { other_expenses: Math.max(0, Number(input.other_expenses) || 0) } : {}),
+            ...(input.special_instructions !== undefined ? { special_instructions: input.special_instructions?.trim() || null } : {}),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', id)
+          .eq('organization_id', organizationId)
+          .select()
+          .single();
+
+        if (error) {
+          if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('unique constraint')) {
+            throw new Error(`Load number "${input.load_number?.trim() || ''}" is already in use by another load.`);
+          }
+          console.error('[LoadService] Supabase updateLoad error:', error);
+          throw new Error(error.message || 'Failed to update load in database.');
         }
 
-        // Auto-record assignment change
-        if (
-          (targetTruckId !== currentLoad.truck_id) ||
-          (targetDriverId !== currentLoad.driver_id)
-        ) {
-          const prevTruck = trucks.find((t) => t.id === currentLoad.truck_id);
-          const nextTruck = trucks.find((t) => t.id === targetTruckId);
-          const prevDriver = drivers.find((d) => d.id === currentLoad.driver_id);
-          const nextDriver = drivers.find((d) => d.id === targetDriverId);
+        if (data) {
+          const updatedLoad = data as Load;
 
-          activityService.recordAssignmentChange(
-            organizationId,
-            id,
-            {
-              previousTruckId: currentLoad.truck_id,
-              newTruckId: targetTruckId,
-              previousTruckNumber: prevTruck?.truck_number || null,
-              newTruckNumber: nextTruck?.truck_number || null,
-              previousDriverId: currentLoad.driver_id,
-              newDriverId: targetDriverId,
-              previousDriverName: prevDriver?.full_name || null,
-              newDriverName: nextDriver?.full_name || null,
-            }
-          ).catch(() => {});
+          // Auto-record status shift
+          if (input.pipeline_status && input.pipeline_status !== currentLoad.pipeline_status) {
+            activityService.recordStatusChange(
+              organizationId,
+              id,
+              currentLoad.pipeline_status,
+              input.pipeline_status
+            ).catch(() => {});
+          }
+
+          return this.joinRelations(updatedLoad, clients, brokers, trucks, drivers);
         }
-
-        return this.joinRelations(updatedLoad, clients, brokers, trucks, drivers);
+        throw new Error('Unexpected empty response while updating load.');
       }
-      throw new Error('Unexpected empty response while updating load.');
+
+      // If only assignment changed and was processed via assignDispatchResources RPC
+      const latestLoad = await this.getLoadById(organizationId, id);
+      if (!latestLoad) {
+        throw new Error('Load not found after dispatch assignment.');
+      }
+      return latestLoad;
     }
 
     const { loads } = this.ensureInitialized(organizationId);
@@ -993,20 +1004,70 @@ class LocalLoadService implements ILoadService {
       throw new Error('Client assignment cannot be empty.');
     }
 
-    let targetTruckId = input.truck_id !== undefined ? input.truck_id : currentLoad.truck_id;
-    let targetDriverId = input.driver_id !== undefined ? input.driver_id : currentLoad.driver_id;
+    const targetTruckId = input.truck_id !== undefined ? (input.truck_id || null) : currentLoad.truck_id;
+    const targetDriverId = input.driver_id !== undefined ? (input.driver_id || null) : currentLoad.driver_id;
 
-    if (targetTruckId) {
-      const truck = trucks.find((t) => t.id === targetTruckId);
-      if (!truck || truck.client_id !== targetClientId) {
-        targetTruckId = null;
+    const isTruckChanged = input.truck_id !== undefined && (input.truck_id || null) !== (currentLoad.truck_id || null);
+    const isDriverChanged = input.driver_id !== undefined && (input.driver_id || null) !== (currentLoad.driver_id || null);
+    const hasAssignmentChange = isTruckChanged || isDriverChanged;
+
+    const targetStatus = input.pipeline_status !== undefined ? input.pipeline_status : currentLoad.pipeline_status;
+
+    // S6.4 integrity enforcement in demo mode
+    if (hasAssignmentChange) {
+      if (['invoiced', 'paid'].includes(currentLoad.pipeline_status)) {
+        throw new Error(`Integrity Error: Cannot modify dispatch assignment on an ${currentLoad.pipeline_status.toUpperCase()} load. Load must be reopened first.`);
       }
-    }
 
-    if (targetDriverId) {
-      const driver = drivers.find((d) => d.id === targetDriverId);
-      if (!driver || driver.client_id !== targetClientId) {
-        targetDriverId = null;
+      if (targetTruckId) {
+        const truck = trucks.find((t) => t.id === targetTruckId);
+        if (!truck) {
+          throw new Error('Specified Truck does not exist in this organization.');
+        }
+        if (truck.client_id !== targetClientId) {
+          throw new Error('The selected Truck does not belong to the load’s assigned Client.');
+        }
+        if (['booked', 'in_transit'].includes(targetStatus) && ['maintenance', 'inactive'].includes(truck.status)) {
+          throw new Error(`Integrity Error: Truck "${truck.truck_number}" cannot be assigned to an active load because its status is "${truck.status}".`);
+        }
+      }
+
+      if (targetDriverId) {
+        const driver = drivers.find((d) => d.id === targetDriverId);
+        if (!driver) {
+          throw new Error('Specified Driver does not exist in this organization.');
+        }
+        if (driver.client_id !== targetClientId) {
+          throw new Error('The selected Driver does not belong to the load’s assigned Client.');
+        }
+        if (['booked', 'in_transit'].includes(targetStatus) && driver.status === 'off_duty') {
+          throw new Error(`Integrity Error: Driver "${driver.full_name}" cannot be assigned to an active load because status is "off_duty".`);
+        }
+      }
+
+      // Check temporal overlaps in demo mode
+      const pDt = input.pickup_datetime !== undefined ? input.pickup_datetime : currentLoad.pickup_datetime;
+      const dDt = input.delivery_datetime !== undefined ? input.delivery_datetime : currentLoad.delivery_datetime;
+      if (['booked', 'in_transit'].includes(targetStatus) && pDt && dDt) {
+        const pTime = new Date(pDt).getTime();
+        const dTime = new Date(dDt).getTime();
+
+        for (const other of loads) {
+          if (other.id !== id && ['booked', 'in_transit'].includes(other.pipeline_status) && other.pickup_datetime && other.delivery_datetime) {
+            const otherP = new Date(other.pickup_datetime).getTime();
+            const otherD = new Date(other.delivery_datetime).getTime();
+            const overlaps = (pTime < otherD && dTime > otherP);
+
+            if (overlaps) {
+              if (targetTruckId && other.truck_id === targetTruckId) {
+                throw new Error(`Conflict Error: Truck is already assigned to active Load ${other.load_number} which overlaps with this schedule.`);
+              }
+              if (targetDriverId && other.driver_id === targetDriverId) {
+                throw new Error(`Conflict Error: Driver is already assigned to active Load ${other.load_number} which overlaps with this schedule.`);
+              }
+            }
+          }
+        }
       }
     }
 
@@ -1055,7 +1116,7 @@ class LocalLoadService implements ILoadService {
 
     // Auto-record status shift
     if (input.pipeline_status && input.pipeline_status !== currentLoad.pipeline_status) {
-      activityService.recordStatusChange(
+      await activityService.recordStatusChange(
         organizationId,
         id,
         currentLoad.pipeline_status,
@@ -1073,7 +1134,7 @@ class LocalLoadService implements ILoadService {
       const prevDriver = drivers.find((d) => d.id === currentLoad.driver_id);
       const nextDriver = drivers.find((d) => d.id === targetDriverId);
 
-      activityService.recordAssignmentChange(
+      await activityService.recordAssignmentChange(
         organizationId,
         id,
         {
@@ -1124,73 +1185,11 @@ class LocalLoadService implements ILoadService {
       return updated;
     }
 
-    // Demo Mode implementation
-    const [trucks, drivers, clients, brokers] = await this.getDependencies(organizationId);
-    const currentLoad = await this.getLoadById(organizationId, loadId);
-    if (!currentLoad) {
-      throw new Error(`Load with ID "${loadId}" was not found.`);
-    }
-
-    if (['invoiced', 'paid'].includes(currentLoad.pipeline_status)) {
-      throw new Error(`Integrity Error: Cannot modify dispatch assignment on an ${currentLoad.pipeline_status.toUpperCase()} load. Load must be reopened first.`);
-    }
-
-    const finalTruckId = truckId !== undefined ? truckId : currentLoad.truck_id;
-    const finalDriverId = driverId !== undefined ? driverId : currentLoad.driver_id;
-
-    if (finalTruckId) {
-      const trk = trucks.find((t) => t.id === finalTruckId);
-      if (!trk) {
-        throw new Error('Specified Truck does not exist in this organization.');
-      }
-      if (trk.client_id !== currentLoad.client_id) {
-        throw new Error('The selected Truck does not belong to the load’s assigned Client.');
-      }
-      if (['booked', 'in_transit'].includes(currentLoad.pipeline_status) && ['maintenance', 'inactive'].includes(trk.status)) {
-        throw new Error(`Integrity Error: Truck "${trk.truck_number}" cannot be assigned to an active load because its status is "${trk.status}".`);
-      }
-    }
-
-    if (finalDriverId) {
-      const drv = drivers.find((d) => d.id === finalDriverId);
-      if (!drv) {
-        throw new Error('Specified Driver does not exist in this organization.');
-      }
-      if (drv.client_id !== currentLoad.client_id) {
-        throw new Error('The selected Driver does not belong to the load’s assigned Client.');
-      }
-      if (['booked', 'in_transit'].includes(currentLoad.pipeline_status) && drv.status === 'off_duty') {
-        throw new Error(`Integrity Error: Driver "${drv.full_name}" cannot be assigned to an active load because status is "off_duty".`);
-      }
-    }
-
-    // Check temporal overlaps in demo mode
-    if (['booked', 'in_transit'].includes(currentLoad.pipeline_status) && currentLoad.pickup_datetime && currentLoad.delivery_datetime) {
-      const pTime = new Date(currentLoad.pickup_datetime).getTime();
-      const dTime = new Date(currentLoad.delivery_datetime).getTime();
-      const { loads } = this.ensureInitialized(organizationId);
-
-      for (const other of loads) {
-        if (other.id !== loadId && ['booked', 'in_transit'].includes(other.pipeline_status) && other.pickup_datetime && other.delivery_datetime) {
-          const otherP = new Date(other.pickup_datetime).getTime();
-          const otherD = new Date(other.delivery_datetime).getTime();
-          const overlaps = (pTime < otherD && dTime > otherP);
-
-          if (overlaps) {
-            if (finalTruckId && other.truck_id === finalTruckId) {
-              throw new Error(`Conflict Error: Truck is already assigned to active Load ${other.load_number} which overlaps with this schedule.`);
-            }
-            if (finalDriverId && other.driver_id === finalDriverId) {
-              throw new Error(`Conflict Error: Driver is already assigned to active Load ${other.load_number} which overlaps with this schedule.`);
-            }
-          }
-        }
-      }
-    }
-
+    // Demo Mode implementation routes through updateLoad with assignment fields
     return this.updateLoad(organizationId, loadId, {
-      truck_id: finalTruckId,
-      driver_id: finalDriverId,
+      truck_id: truckId,
+      driver_id: driverId,
+      ...(notes ? { special_instructions: notes } : {}),
     });
   }
 
