@@ -204,6 +204,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick }) =>
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to save load.';
       showAlert('error', msg);
+      throw err;
     } finally {
       setIsSaving(false);
     }
@@ -224,6 +225,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick }) =>
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to update load.';
       showAlert('error', msg);
+      throw err;
     } finally {
       setIsSaving(false);
     }

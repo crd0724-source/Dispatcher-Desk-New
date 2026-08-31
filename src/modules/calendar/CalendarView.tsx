@@ -268,6 +268,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onNewLoadClick }) =>
     } catch (err: any) {
       console.error('Failed to save load:', err);
       showToast(err.message || 'Error saving load');
+      throw err;
     }
   };
 

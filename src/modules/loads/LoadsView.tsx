@@ -162,6 +162,7 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
     } catch (err: any) {
       console.error('Error saving load:', err);
       showToast(err?.message || 'Failed to save load.', 'error');
+      throw err;
     } finally {
       setIsSaving(false);
     }

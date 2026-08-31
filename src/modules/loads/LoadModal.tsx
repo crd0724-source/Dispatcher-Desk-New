@@ -97,12 +97,16 @@ export const LoadModal: React.FC<LoadModalProps> = ({
 
   const [specialInstructions, setSpecialInstructions] = useState('');
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Reset or populate on open
   useEffect(() => {
     if (!isOpen) return;
 
     setFormErrors({});
+    setSubmitError(null);
+    setIsSubmitting(false);
 
     if (initialLoad) {
       setLoadNumber(initialLoad.load_number);
@@ -224,6 +228,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
   // When Client changes, enforce relationship integrity:
   // clear truck and driver if they do not belong to the newly selected client.
   const handleClientChange = (newClientId: string) => {
+    setSubmitError(null);
     setClientId(newClientId);
 
     // Validate truck
@@ -241,6 +246,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
 
   // When Truck changes, auto-suggest or link assigned driver if available
   const handleTruckChange = (newTruckId: string) => {
+    setSubmitError(null);
     setTruckId(newTruckId);
     if (newTruckId) {
       const assignedDriver = availableDrivers.find((d) => (d as any).assigned_truck_id === newTruckId);
@@ -319,6 +325,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
     if (!validateForm()) return;
 
     const pickupDatetime = pickupDate ? new Date(`${pickupDate}T${pickupTime || '00:00'}:00`).toISOString() : null;
@@ -351,8 +358,18 @@ export const LoadModal: React.FC<LoadModalProps> = ({
       special_instructions: specialInstructions.trim() || null,
     };
 
-    await onSave(payload);
+    setIsSubmitting(true);
+    try {
+      await onSave(payload);
+    } catch (err: any) {
+      console.error('LoadModal save error:', err);
+      setSubmitError(err?.message || 'Failed to save load. Please check assignments and try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
+
+  const isBusy = isSaving || isSubmitting;
 
   return (
     <Modal
@@ -368,6 +385,20 @@ export const LoadModal: React.FC<LoadModalProps> = ({
       maxWidth="3xl"
     >
       <form onSubmit={handleSubmit} className="space-y-6 text-xs text-slate-200">
+        {/* Error Alert Banner */}
+        {submitError && (
+          <div
+            id="load-modal-error-banner"
+            className="flex items-start gap-2.5 p-3.5 bg-rose-950/60 border border-rose-800/80 rounded-xl text-rose-200 animate-in fade-in duration-200"
+          >
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold text-rose-300 text-xs">Assignment or Save Error</p>
+              <p className="text-[11px] text-rose-200/90 mt-0.5 leading-relaxed">{submitError}</p>
+            </div>
+          </div>
+        )}
+
         {/* Top Header Bar: Load # & Pipeline Status */}
         <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/90 grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -930,7 +961,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            disabled={isSaving}
+            disabled={isBusy}
             className="px-4 py-2 text-xs font-semibold text-slate-300 hover:text-slate-100 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
           >
             Cancel
@@ -938,10 +969,10 @@ export const LoadModal: React.FC<LoadModalProps> = ({
           <button
             id="save-load-btn"
             type="submit"
-            disabled={isSaving}
+            disabled={isBusy}
             className="inline-flex items-center gap-2 px-5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg shadow-sm transition-colors cursor-pointer disabled:opacity-50"
           >
-            {isSaving ? (
+            {isBusy ? (
               <span>Saving Load...</span>
             ) : (
               <span>{isEditing ? 'Save Changes' : 'Confirm & Book Load'}</span>
