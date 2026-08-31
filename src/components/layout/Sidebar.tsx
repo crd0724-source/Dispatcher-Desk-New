@@ -18,6 +18,7 @@ import {
   Timer,
   CheckSquare,
   Calendar,
+  MapPin,
   LogOut,
   LogIn,
 } from 'lucide-react';
@@ -27,6 +28,7 @@ import { useAuth } from '../../contexts/AuthContext.tsx';
 export type NavModule =
   | 'dashboard'
   | 'calendar'
+  | 'map'
   | 'clients'
   | 'trucks'
   | 'drivers'
@@ -64,6 +66,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const mainNavItems = [
     { id: 'dashboard' as NavModule, label: 'Dashboard', icon: LayoutDashboard },
     { id: 'calendar' as NavModule, label: 'Operations Calendar', icon: Calendar, sub: 'Timeline & Docks' },
+    { id: 'map' as NavModule, label: 'Dispatch Map', icon: MapPin, sub: 'Stop Sequence Viz', badge: 'V1' },
     { id: 'pipeline' as NavModule, label: 'Load Pipeline', icon: Kanban, badge: '7 Stages' },
     { id: 'loads' as NavModule, label: 'Loads & Dispatches', icon: PackageCheck },
     { id: 'checkcalls' as NavModule, label: 'Load Tracking', icon: Radio, sub: 'Live Check Calls' },
@@ -109,7 +112,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }`}
       >
         {/* Brand Header */}
-        <div className="h-16 flex items-center px-5 border-b border-slate-800/80 bg-slate-950">
+        <div className="h-16 flex items-center px-5 border-b border-slate-800/80 bg-slate-950 shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-lg shadow-sm shadow-indigo-500/20">
               <Truck className="w-4 h-4" />
@@ -126,7 +129,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Scrollable Navigation */}
-        <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-6 overscroll-contain">
           {/* Section 1: Operations */}
           <div>
             <p className="px-3 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
@@ -229,7 +232,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Multi-Tenant Security Footnote & Auth status */}
-        <div className="p-3 border-t border-slate-800/80 bg-slate-950/90 text-xs space-y-2">
+        <div className="p-3 border-t border-slate-800/80 bg-slate-950/90 text-xs space-y-2 shrink-0">
           <div className="flex items-center gap-2 text-slate-400">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
             <span className="truncate">RLS Tenant Isolation Active</span>

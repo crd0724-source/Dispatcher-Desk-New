@@ -496,7 +496,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
           </div>
         ) : (
           /* STEP 2: EXTRACTION AUDIT & APPROVAL STAGE */
-          <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
+          <div className="space-y-4">
             {/* Header & Confidence Strip */}
             <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 flex flex-wrap items-center justify-between gap-3 shadow-xs">
               <div className="flex items-center gap-3 min-w-0">

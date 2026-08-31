@@ -18,7 +18,7 @@ import { estimateDriverPay } from '../calculations.ts';
 
 export interface DriverSettlementPdfOptions {
   load: LoadWithRelations;
-  driver?: Driver | null;
+  driver?: Driver | LoadWithRelations['driver'] | null;
   accessorials?: AccessorialClaim[];
   organization?: Organization | null;
   settlementNumber?: string;

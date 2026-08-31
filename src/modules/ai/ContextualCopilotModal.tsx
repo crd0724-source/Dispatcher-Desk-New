@@ -372,7 +372,7 @@ export const ContextualCopilotModal: React.FC<ContextualCopilotModalProps> = ({
 
         {/* Content Area */}
         {!isLoading && response && (
-          <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+          <div className="space-y-4">
             {/* Draft Warning Banner (Human-in-the-Loop Safeguard) */}
             {response.isDraft && (
               <div className="p-3 bg-amber-950/30 border border-amber-800/60 rounded-xl flex items-start gap-3">

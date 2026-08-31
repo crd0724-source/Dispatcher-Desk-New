@@ -89,7 +89,7 @@ export const BrokerDetailModal: React.FC<BrokerDetailModalProps> = ({
       subtitle="Broker CRM Profile, Credit Assessment & Dispatch Load History"
       maxWidth="3xl"
     >
-      <div className="p-6 space-y-6 max-h-[calc(85vh-100px)] overflow-y-auto">
+      <div className="space-y-6">
         {/* Top Header Card */}
         <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

@@ -20,6 +20,7 @@ import { LoadDetailModal } from './LoadDetailModal.tsx';
 import { Modal } from '../../components/common/Modal.tsx';
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import { RateConExtractionModal } from '../documents/RateConExtractionModal.tsx';
+import { exportBulkLoadsBillingCsv } from '../billing/utils/billingExportUtils.ts';
 import {
   PackageCheck,
   Plus,
@@ -27,6 +28,7 @@ import {
   CheckCircle2,
   Trash2,
   Sparkles,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 interface LoadsViewProps {
@@ -247,32 +249,50 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
           </p>
         </div>
 
-        {canEdit && (
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {loads.length > 0 && (
             <button
-              id="header-ai-ratecon-btn"
-              type="button"
-              onClick={() => setIsExtractionModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 rounded-lg shadow-sm transition-all cursor-pointer border border-indigo-400/30 self-start sm:self-auto"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
-              <span>AI Rate Con Import</span>
-            </button>
-
-            <button
-              id="header-create-load-btn"
+              id="header-export-bulk-billing-btn"
               type="button"
               onClick={() => {
-                setLoadToEdit(null);
-                setIsAddEditModalOpen(true);
+                exportBulkLoadsBillingCsv(loads);
+                showToast(`Exported billing ledger for ${loads.length} loads to CSV.`);
               }}
-              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-200 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg shadow-sm transition-colors cursor-pointer self-start sm:self-auto"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg shadow-sm transition-colors cursor-pointer self-start sm:self-auto"
+              title="Export Full Billing & Settlement Ledger for All Displayed Loads"
             >
-              <Plus className="w-4 h-4" />
-              <span>Book / Create Load</span>
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Export Billing CSV</span>
             </button>
-          </div>
-        )}
+          )}
+
+          {canEdit && (
+            <div className="flex items-center gap-2">
+              <button
+                id="header-ai-ratecon-btn"
+                type="button"
+                onClick={() => setIsExtractionModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 rounded-lg shadow-sm transition-all cursor-pointer border border-indigo-400/30 self-start sm:self-auto"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                <span>AI Rate Con Import</span>
+              </button>
+
+              <button
+                id="header-create-load-btn"
+                type="button"
+                onClick={() => {
+                  setLoadToEdit(null);
+                  setIsAddEditModalOpen(true);
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-200 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg shadow-sm transition-colors cursor-pointer self-start sm:self-auto"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Book / Create Load</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Load List Table & Filters */}

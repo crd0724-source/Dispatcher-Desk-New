@@ -120,7 +120,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar, onSelectModule,
   return (
     <header
       id="app-header"
-      className="sticky top-0 z-30 h-16 bg-slate-900/95 backdrop-blur-md border-b border-slate-800/80 px-4 sm:px-6 flex items-center justify-between"
+      className="sticky top-0 z-30 h-16 bg-slate-900/95 backdrop-blur-md border-b border-slate-800/80 px-4 sm:px-6 flex items-center justify-between shrink-0"
     >
       {/* Left: Mobile Toggle & Active Organization */}
       <div className="flex items-center gap-3 sm:gap-4">

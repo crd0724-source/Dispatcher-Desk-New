@@ -21,6 +21,7 @@ import { CheckCallsView } from './modules/checkcalls/CheckCallsView.tsx';
 import { AccessorialsView } from './modules/accessorials/AccessorialsView.tsx';
 import { TasksView } from './modules/tasks/TasksView.tsx';
 import { CalendarView } from './modules/calendar/CalendarView.tsx';
+import { DispatchMapView } from './modules/map/DispatchMapView.tsx';
 
 import { NavModule } from './components/layout/Sidebar.tsx';
 
@@ -97,12 +98,24 @@ const MainApp: React.FC = () => {
         return (
           <DashboardView
             onNavigate={(mod: string) => setActiveModule(mod as NavModule)}
-            onNewLoadClick={() => setIsBookLoadModalOpen(true)}
+            onNewLoadClick={() => {
+              setActiveModule('loads');
+              setIsBookLoadModalOpen(true);
+            }}
           />
         );
       case 'calendar':
         return (
           <CalendarView
+            onNewLoadClick={() => {
+              setActiveModule('loads');
+              setIsBookLoadModalOpen(true);
+            }}
+          />
+        );
+      case 'map':
+        return (
+          <DispatchMapView
             onNewLoadClick={() => {
               setActiveModule('loads');
               setIsBookLoadModalOpen(true);
@@ -156,7 +169,10 @@ const MainApp: React.FC = () => {
         return (
           <DashboardView
             onNavigate={(mod: string) => setActiveModule(mod as NavModule)}
-            onNewLoadClick={() => setIsBookLoadModalOpen(true)}
+            onNewLoadClick={() => {
+              setActiveModule('loads');
+              setIsBookLoadModalOpen(true);
+            }}
           />
         );
     }

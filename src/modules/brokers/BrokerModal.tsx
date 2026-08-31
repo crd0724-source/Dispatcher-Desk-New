@@ -151,7 +151,7 @@ export const BrokerModal: React.FC<BrokerModalProps> = ({
       }
       maxWidth="2xl"
     >
-      <form onSubmit={handleSubmit} className="p-6 space-y-6 max-h-[calc(85vh-120px)] overflow-y-auto">
+      <form onSubmit={handleSubmit} className="space-y-6">
         {formError && (
           <div className="flex items-start gap-3 p-3.5 rounded-lg bg-rose-950/60 border border-rose-800 text-rose-200 text-sm">
             <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />

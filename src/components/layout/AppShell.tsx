@@ -78,14 +78,14 @@ export const AppShell: React.FC<AppShellProps> = ({
       />
 
       {/* Main Content Area */}
-      <div className="lg:pl-64 flex flex-col min-h-screen">
+      <div className="lg:pl-64 flex flex-col min-h-screen w-full min-w-0">
         <Header
           onToggleSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
           onSelectModule={onSelectModule}
           onOpenAuthModal={onOpenAuthModal}
         />
         
-        <main className="flex-1 p-4 sm:p-6 lg:p-7 max-w-[1600px] w-full mx-auto">
+        <main className="flex-1 p-4 sm:p-6 lg:p-7 max-w-[1600px] w-full min-w-0 mx-auto">
           {children}
         </main>
       </div>

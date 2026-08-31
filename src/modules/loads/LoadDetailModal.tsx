@@ -49,6 +49,8 @@ import {
   TASK_PRIORITY_CONFIG,
 } from '../tasks/taskTypes.ts';
 import { TaskModal } from '../tasks/TaskModal.tsx';
+import { InvoiceSettlementModal } from '../billing/InvoiceSettlementModal.tsx';
+import { BillingDocumentType } from '../billing/billingTypes.ts';
 import {
   PackageCheck,
   Building2,
@@ -133,6 +135,20 @@ export const LoadDetailModal: React.FC<LoadDetailModalProps> = ({
   // Contextual Copilot State
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
   const [copilotAction, setCopilotAction] = useState<CopilotAction>('analyze_load');
+
+  // Billing & Settlement Generator State
+  const [isBillingModalOpen, setIsBillingModalOpen] = useState(false);
+  const [billingModalType, setBillingModalType] = useState<BillingDocumentType>('broker_invoice');
+
+  const handleOpenInvoiceGenerator = () => {
+    setBillingModalType('broker_invoice');
+    setIsBillingModalOpen(true);
+  };
+
+  const handleOpenSettlementGenerator = () => {
+    setBillingModalType('carrier_settlement');
+    setIsBillingModalOpen(true);
+  };
 
   const handleOpenCopilot = (action: CopilotAction = 'analyze_load') => {
     setCopilotAction(action);
@@ -403,7 +419,32 @@ export const LoadDetailModal: React.FC<LoadDetailModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Operational PDF Export Buttons */}
+            {/* Invoice & Settlement Generator Action Buttons */}
+            <div className="flex items-center gap-1.5">
+              <button
+                id="btn-generate-invoice-header"
+                type="button"
+                onClick={handleOpenInvoiceGenerator}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-300 bg-emerald-950/80 hover:bg-emerald-900/90 hover:text-white rounded-lg transition-colors cursor-pointer border border-emerald-800/60 shadow-xs"
+                title="Open Broker Freight Invoice Generator"
+              >
+                <Receipt className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Generate Invoice</span>
+              </button>
+
+              <button
+                id="btn-generate-settlement-header"
+                type="button"
+                onClick={handleOpenSettlementGenerator}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-300 bg-indigo-950/80 hover:bg-indigo-900/90 hover:text-white rounded-lg transition-colors cursor-pointer border border-indigo-800/60 shadow-xs"
+                title="Open Carrier & Driver Settlement Statement Generator"
+              >
+                <DollarSign className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Generate Settlement</span>
+              </button>
+            </div>
+
+            {/* Operational Quick PDF Export Buttons */}
             <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-lg p-0.5">
               <button
                 id="btn-download-rate-con-pdf"
@@ -425,18 +466,7 @@ export const LoadDetailModal: React.FC<LoadDetailModalProps> = ({
                 title="Download Carrier Invoice PDF"
               >
                 <Download className={`w-3 h-3 ${generatingPdfType === 'invoice' ? 'animate-bounce text-emerald-400' : 'text-emerald-400'}`} />
-                <span>Invoice</span>
-              </button>
-              <button
-                id="btn-download-settlement-pdf"
-                type="button"
-                onClick={handleDownloadSettlementPdf}
-                disabled={generatingPdfType !== null}
-                className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-slate-300 hover:text-white hover:bg-slate-800 rounded transition-colors cursor-pointer disabled:opacity-50"
-                title="Download Driver Settlement Statement PDF"
-              >
-                <Download className={`w-3 h-3 ${generatingPdfType === 'settlement' ? 'animate-bounce text-purple-400' : 'text-purple-400'}`} />
-                <span>Settlement</span>
+                <span>PDF</span>
               </button>
             </div>
 
@@ -723,24 +753,33 @@ export const LoadDetailModal: React.FC<LoadDetailModalProps> = ({
             <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto">
               <button
                 type="button"
+                onClick={handleOpenInvoiceGenerator}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition-all cursor-pointer text-xs shadow-xs"
+                title="Generate and Review Broker Invoice"
+              >
+                <Receipt className="w-3.5 h-3.5" />
+                <span>Generate Invoice</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleOpenSettlementGenerator}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-950/80 hover:bg-indigo-900 text-indigo-300 border border-indigo-800/60 font-semibold transition-colors cursor-pointer text-xs"
+                title="Generate Carrier Settlement Statement"
+              >
+                <DollarSign className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Settlement</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={handleDownloadRateConPdf}
                 disabled={generatingPdfType !== null}
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 font-semibold transition-colors cursor-pointer text-xs disabled:opacity-50"
                 title="Download Rate Con PDF"
               >
                 <Download className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Rate Con PDF</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleDownloadInvoicePdf}
-                disabled={generatingPdfType !== null}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-800/60 font-semibold transition-colors cursor-pointer text-xs disabled:opacity-50"
-                title="Download Carrier Invoice PDF"
-              >
-                <Download className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Invoice PDF</span>
+                <span>Rate Con</span>
               </button>
 
               <button
@@ -749,7 +788,7 @@ export const LoadDetailModal: React.FC<LoadDetailModalProps> = ({
                   setSelectedUploadType('rate_confirmation');
                   setIsUploadModalOpen(true);
                 }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-950/80 hover:bg-indigo-900 text-indigo-300 border border-indigo-800/60 font-semibold transition-colors cursor-pointer text-xs"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 font-semibold transition-colors cursor-pointer text-xs"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Attach Paperwork</span>
@@ -1324,6 +1363,14 @@ export const LoadDetailModal: React.FC<LoadDetailModalProps> = ({
           setSelectedTaskToEdit(null);
           await fetchTasks();
         }}
+      />
+
+      <InvoiceSettlementModal
+        isOpen={isBillingModalOpen}
+        onClose={() => setIsBillingModalOpen(false)}
+        load={load}
+        initialType={billingModalType}
+        onStatusChange={onStatusChange}
       />
     </Modal>
   );
