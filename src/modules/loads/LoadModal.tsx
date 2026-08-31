@@ -196,7 +196,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
       setOtherExpenses('50');
       setSpecialInstructions('');
     }
-  }, [isOpen, initialLoad, nextLoadNumber, clients, brokers, trucks, drivers]);
+  }, [isOpen, initialLoad?.id]);
 
   // Available trucks strictly filtered by selected client
   const availableTrucks = useMemo(() => {
@@ -956,28 +956,43 @@ export const LoadModal: React.FC<LoadModalProps> = ({
           />
         </div>
 
-        {/* Footer Actions */}
-        <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={isBusy}
-            className="px-4 py-2 text-xs font-semibold text-slate-300 hover:text-slate-100 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            id="save-load-btn"
-            type="submit"
-            disabled={isBusy}
-            className="inline-flex items-center gap-2 px-5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg shadow-sm transition-colors cursor-pointer disabled:opacity-50"
-          >
-            {isBusy ? (
-              <span>Saving Load...</span>
-            ) : (
-              <span>{isEditing ? 'Save Changes' : 'Confirm & Book Load'}</span>
-            )}
-          </button>
+        {/* Footer Actions & Error Banner */}
+        <div className="space-y-3 pt-4 border-t border-slate-800">
+          {submitError && (
+            <div
+              id="load-modal-footer-error-banner"
+              className="flex items-start gap-2.5 p-3.5 bg-rose-950/80 border border-rose-700 rounded-xl text-rose-200 animate-in fade-in duration-200"
+            >
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="font-semibold text-rose-300 text-xs">Assignment or Save Error</p>
+                <p className="text-[11px] text-rose-200 mt-0.5 leading-relaxed">{submitError}</p>
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isBusy}
+              className="px-4 py-2 text-xs font-semibold text-slate-300 hover:text-slate-100 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              id="save-load-btn"
+              type="submit"
+              disabled={isBusy}
+              className="inline-flex items-center gap-2 px-5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {isBusy ? (
+                <span>Saving Load...</span>
+              ) : (
+                <span>{isEditing ? 'Save Changes' : 'Confirm & Book Load'}</span>
+              )}
+            </button>
+          </div>
         </div>
       </form>
     </Modal>
