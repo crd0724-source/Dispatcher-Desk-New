@@ -3,7 +3,7 @@ import {
   DocumentType,
   DocumentStatus,
   PipelineStatus,
-  Load,
+  LoadWithRelations,
 } from '../../types/domain.types.ts';
 
 // Allowed MIME types for transportation paperwork
@@ -47,7 +47,7 @@ export const DOCUMENT_STATUS_LABELS: Record<DocumentStatus, string> = {
 // Extended Domain Document Model with joined relations
 export interface FreightDocument extends DatabaseDocument {
   load_number?: string | null;
-  load?: Load | null;
+  load?: LoadWithRelations | null;
 }
 
 // Input for creating a new document metadata record

@@ -16,6 +16,10 @@ import {
   Mail,
   AlertTriangle,
   ChevronRight,
+  X,
+  Building2,
+  Truck,
+  Plus,
 } from 'lucide-react';
 
 interface ClientListProps {
@@ -71,7 +75,8 @@ export const ClientList: React.FC<ClientListProps> = ({
     return matchesSearch && matchesStatus && matchesType;
   });
 
-  const hasActiveFilters = searchQuery !== '' || statusFilter !== 'all' || typeFilter !== 'all';
+  const activeFilterCount = (searchQuery ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + (typeFilter !== 'all' ? 1 : 0);
+  const hasActiveFilters = activeFilterCount > 0;
 
   const clearFilters = () => {
     setSearchQuery('');
@@ -91,13 +96,21 @@ export const ClientList: React.FC<ClientListProps> = ({
             placeholder="Search company, contact, phone, email, lanes..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+            className="w-full h-9 pl-9 pr-8 text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 transition-colors"
           />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           {/* Status Filter */}
-          <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1">
+          <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-xl px-3 h-9">
             <span className="text-[11px] text-slate-400 font-medium">Status:</span>
             <select
               id="clients-status-filter"
@@ -112,7 +125,7 @@ export const ClientList: React.FC<ClientListProps> = ({
           </div>
 
           {/* Client Type Filter */}
-          <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1">
+          <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-xl px-3 h-9">
             <Filter className="w-3.5 h-3.5 text-slate-400" />
             <select
               id="clients-type-filter"
@@ -120,11 +133,22 @@ export const ClientList: React.FC<ClientListProps> = ({
               onChange={(e) => setTypeFilter(e.target.value)}
               className="text-xs bg-transparent text-slate-200 focus:outline-none cursor-pointer"
             >
-              <option value="all" className="bg-slate-900 text-slate-200">All Account Types</option>
+              <option value="all" className="bg-slate-900 text-slate-200">All Types</option>
               <option value="owner_operator" className="bg-slate-900 text-slate-200">Owner-Operators</option>
               <option value="fleet" className="bg-slate-900 text-slate-200">Small Fleets</option>
             </select>
           </div>
+
+          {/* Active Filter Clear Action */}
+          {hasActiveFilters && (
+            <button
+              onClick={clearFilters}
+              className="h-9 px-3 text-xs text-indigo-300 hover:text-indigo-200 bg-indigo-950/60 border border-indigo-800/60 hover:bg-indigo-900/60 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 font-medium"
+            >
+              <X className="w-3 h-3" />
+              <span>Clear ({activeFilterCount})</span>
+            </button>
+          )}
 
           {/* Refresh Button */}
           <button
@@ -132,7 +156,7 @@ export const ClientList: React.FC<ClientListProps> = ({
             onClick={onRefresh}
             disabled={isLoading}
             title="Refresh clients list"
-            className="p-2 text-slate-400 hover:text-slate-200 bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+            className="h-9 w-9 flex items-center justify-center text-slate-400 hover:text-slate-200 bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
             aria-label="Refresh client list"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-indigo-400' : ''}`} />
@@ -144,7 +168,7 @@ export const ClientList: React.FC<ClientListProps> = ({
       {error && (
         <div
           id="clients-error-banner"
-          className="p-4 bg-rose-950/40 border border-rose-800/80 rounded-xl flex items-center justify-between text-rose-200 text-xs"
+          className="p-4 bg-rose-950/40 border border-rose-800/80 rounded-xl flex items-center justify-between text-rose-200 text-xs shadow-xs"
         >
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
@@ -152,21 +176,68 @@ export const ClientList: React.FC<ClientListProps> = ({
           </div>
           <button
             onClick={onRefresh}
-            className="px-3 py-1 bg-rose-900 hover:bg-rose-800 text-rose-100 font-semibold rounded-md transition-colors cursor-pointer"
+            className="px-3 py-1.5 bg-rose-900 hover:bg-rose-800 text-rose-100 font-semibold rounded-lg transition-colors cursor-pointer"
           >
             Retry
           </button>
         </div>
       )}
 
-      {/* Loading Skeleton */}
+      {/* Authentic 5-Row Table Skeleton Loading State */}
       {isLoading && clients.length === 0 && (
-        <div className="bg-slate-900 border border-slate-800/80 rounded-xl p-8 text-center">
-          <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-indigo-950/60 text-indigo-400 border border-indigo-800/50 mb-3 animate-pulse">
-            <Users className="w-5 h-5" />
+        <div className="bg-slate-900 border border-slate-800/80 rounded-xl overflow-hidden shadow-xs">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-950/80 text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-800 text-[11px]">
+                <tr>
+                  <th className="px-4 py-3 min-w-[200px]">Client / Carrier</th>
+                  <th className="px-4 py-3 min-w-[120px]">Type</th>
+                  <th className="px-4 py-3 min-w-[180px]">Primary Contact</th>
+                  <th className="px-4 py-3 min-w-[160px]">Preferred Equipment</th>
+                  <th className="px-4 py-3 min-w-[110px]">Target RPM</th>
+                  <th className="px-4 py-3 min-w-[90px]">Status</th>
+                  <th className="px-4 py-3 min-w-[110px]">Created</th>
+                  <th className="px-4 py-3 text-right min-w-[140px]">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {[1, 2, 3, 4, 5].map((idx) => (
+                  <tr key={idx} className="animate-pulse">
+                    <td className="px-4 py-3.5">
+                      <div className="h-4 bg-slate-800 rounded w-36 mb-1.5" />
+                      <div className="h-3 bg-slate-800/60 rounded w-24" />
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="h-5 bg-slate-800 rounded-md w-20" />
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="h-4 bg-slate-800 rounded w-28 mb-1.5" />
+                      <div className="h-3 bg-slate-800/60 rounded w-32" />
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="h-4 bg-slate-800 rounded w-28" />
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="h-4 bg-slate-800 rounded w-16" />
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="h-5 bg-slate-800 rounded-full w-14" />
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="h-3.5 bg-slate-800 rounded w-20" />
+                    </td>
+                    <td className="px-4 py-3.5 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <div className="h-7 w-7 bg-slate-800 rounded-lg" />
+                        <div className="h-7 w-7 bg-slate-800 rounded-lg" />
+                        <div className="h-7 w-7 bg-slate-800 rounded-lg" />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <p className="text-xs text-slate-300 font-medium">Loading carrier clients from database...</p>
-          <p className="text-[11px] text-slate-500 mt-1">Verifying organization tenant security</p>
         </div>
       )}
 
@@ -183,20 +254,21 @@ export const ClientList: React.FC<ClientListProps> = ({
       )}
 
       {clients.length > 0 && filteredClients.length === 0 && (
-        <div className="bg-slate-900 border border-slate-800/80 rounded-xl p-8 text-center space-y-3">
+        <div className="bg-slate-900 border border-slate-800/80 rounded-xl p-8 text-center space-y-3 shadow-xs">
           <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-slate-800 text-slate-400 mb-1">
             <Search className="w-5 h-5" />
           </div>
           <h3 className="text-sm font-semibold text-slate-200">No Carrier Clients Found</h3>
           <p className="text-xs text-slate-400 max-w-sm mx-auto">
-            No clients match your search query or filter criteria. Try adjusting your filters.
+            No clients match your search query or filter criteria. Try adjusting or clearing your filters.
           </p>
           {hasActiveFilters && (
             <button
               onClick={clearFilters}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-colors cursor-pointer shadow-xs inline-flex items-center gap-1.5"
             >
-              Clear All Filters
+              <X className="w-3.5 h-3.5" />
+              <span>Clear All Filters</span>
             </button>
           )}
         </div>
@@ -208,11 +280,11 @@ export const ClientList: React.FC<ClientListProps> = ({
             <table id="clients-table" className="w-full text-left text-xs text-slate-300">
               <thead className="bg-slate-950/80 text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-800 text-[11px]">
                 <tr>
-                  <th className="px-4 py-3 min-w-[180px]">Client / Carrier</th>
+                  <th className="px-4 py-3 min-w-[200px]">Client / Carrier</th>
                   <th className="px-4 py-3 min-w-[120px]">Type</th>
                   <th className="px-4 py-3 min-w-[180px]">Primary Contact</th>
                   <th className="px-4 py-3 min-w-[160px]">Preferred Equipment</th>
-                  <th className="px-4 py-3 min-w-[100px]">Target RPM</th>
+                  <th className="px-4 py-3 min-w-[110px]">Target RPM</th>
                   <th className="px-4 py-3 min-w-[90px]">Status</th>
                   <th className="px-4 py-3 min-w-[110px]">Created</th>
                   <th className="px-4 py-3 text-right min-w-[140px]">Actions</th>
@@ -222,6 +294,7 @@ export const ClientList: React.FC<ClientListProps> = ({
                 {filteredClients.map((client) => {
                   const isInactive = client.status === 'inactive';
                   const isRowToggling = togglingClientId === client.id;
+                  const isFleet = client.client_type === 'fleet';
 
                   return (
                     <tr
@@ -232,39 +305,63 @@ export const ClientList: React.FC<ClientListProps> = ({
                       }`}
                     >
                       {/* Company Name */}
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() => onViewDetails(client)}
-                          className="font-semibold text-slate-100 hover:text-indigo-400 text-left transition-colors cursor-pointer group-hover:underline flex items-center gap-1.5"
-                        >
-                          <span>{client.company_name}</span>
-                          <ChevronRight className="w-3 h-3 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </button>
-                        {client.preferred_lanes && (
-                          <div className="text-[11px] text-slate-400 truncate max-w-xs mt-0.5" title={client.preferred_lanes}>
-                            {client.preferred_lanes}
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border ${
+                              isFleet
+                                ? 'bg-cyan-950/60 border-cyan-800/50 text-cyan-400'
+                                : 'bg-indigo-950/60 border-indigo-800/50 text-indigo-400'
+                            }`}
+                          >
+                            {isFleet ? <Truck className="w-3.5 h-3.5" /> : <Building2 className="w-3.5 h-3.5" />}
                           </div>
-                        )}
+                          <div className="min-w-0">
+                            <button
+                              onClick={() => onViewDetails(client)}
+                              className="font-semibold text-slate-100 hover:text-indigo-400 text-left transition-colors cursor-pointer group-hover:underline flex items-center gap-1.5 truncate max-w-[200px]"
+                              title={client.company_name}
+                            >
+                              <span className="truncate">{client.company_name}</span>
+                              <ChevronRight className="w-3 h-3 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                            </button>
+                            {client.preferred_lanes ? (
+                              <div className="text-[11px] text-slate-400 truncate max-w-xs mt-0.5" title={client.preferred_lanes}>
+                                {client.preferred_lanes}
+                              </div>
+                            ) : (
+                              <div className="text-[11px] text-slate-500 italic mt-0.5">
+                                No lanes specified
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </td>
 
-                      {/* Client Type */}
-                      <td className="px-4 py-3">
-                        <span className="px-2 py-0.5 rounded bg-slate-800/80 text-slate-300 text-[11px] font-mono capitalize border border-slate-700/50">
-                          {client.client_type === 'owner_operator' ? 'Owner-Op' : 'Fleet'}
+                      {/* Client Type Badge */}
+                      <td className="px-4 py-3.5">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold border ${
+                            isFleet
+                              ? 'bg-cyan-950/60 text-cyan-300 border-cyan-800/50'
+                              : 'bg-indigo-950/60 text-indigo-300 border-indigo-800/50'
+                          }`}
+                        >
+                          {isFleet ? 'Small Fleet' : 'Owner-Op'}
                         </span>
                       </td>
 
                       {/* Contact Info */}
-                      <td className="px-4 py-3 text-slate-300">
+                      <td className="px-4 py-3.5 text-slate-300">
                         <div className="font-medium text-slate-200">
                           {client.contact_name || '—'}
                         </div>
                         <div className="flex flex-col gap-0.5 text-[11px] text-slate-400 mt-0.5">
                           {client.contact_phone && (
-                            <span className="font-mono">{client.contact_phone}</span>
+                            <span className="font-mono tabular-nums">{client.contact_phone}</span>
                           )}
                           {client.contact_email && (
-                            <span className="truncate max-w-[160px]" title={client.contact_email}>
+                            <span className="truncate max-w-[170px]" title={client.contact_email}>
                               {client.contact_email}
                             </span>
                           )}
@@ -272,16 +369,16 @@ export const ClientList: React.FC<ClientListProps> = ({
                       </td>
 
                       {/* Equipment */}
-                      <td className="px-4 py-3 text-slate-300">
+                      <td className="px-4 py-3.5 text-slate-300">
                         <span className="truncate block max-w-[160px]" title={client.preferred_equipment || 'Any'}>
                           {client.preferred_equipment || 'Any standard'}
                         </span>
                       </td>
 
                       {/* Target RPM */}
-                      <td className="px-4 py-3 font-mono">
+                      <td className="px-4 py-3.5 font-mono tabular-nums">
                         {client.minimum_rate_per_mile !== null && client.minimum_rate_per_mile !== undefined ? (
-                          <span className="text-emerald-400 font-bold">
+                          <span className="text-emerald-400 font-bold text-xs">
                             ${client.minimum_rate_per_mile.toFixed(2)}/mi
                           </span>
                         ) : (
@@ -290,12 +387,12 @@ export const ClientList: React.FC<ClientListProps> = ({
                       </td>
 
                       {/* Status */}
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3.5">
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider ${
                             isInactive
                               ? 'bg-slate-800 text-slate-400 border border-slate-700'
-                              : 'bg-emerald-950/40 text-emerald-300 border border-emerald-800/50'
+                              : 'bg-emerald-950/50 text-emerald-300 border border-emerald-800/60'
                           }`}
                         >
                           {client.status}
@@ -303,7 +400,7 @@ export const ClientList: React.FC<ClientListProps> = ({
                       </td>
 
                       {/* Created Date */}
-                      <td className="px-4 py-3 text-slate-400 text-[11px] font-mono">
+                      <td className="px-4 py-3.5 text-slate-400 text-[11px] font-mono tabular-nums">
                         {formatInTimezone(client.created_at, timezone, {
                           includeTime: false,
                           includeTimezoneCode: false,
@@ -311,17 +408,17 @@ export const ClientList: React.FC<ClientListProps> = ({
                       </td>
 
                       {/* Actions */}
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-4 py-3.5 text-right">
                         <div className="inline-flex items-center gap-1 justify-end">
                           {/* View Details */}
                           <button
                             id={`client-view-btn-${client.id}`}
                             onClick={() => onViewDetails(client)}
                             title="View Client Details"
-                            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-md transition-colors cursor-pointer"
+                            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
                             aria-label={`View details for ${client.company_name}`}
                           >
-                            <Eye className="w-3.5 h-3.5" />
+                            <Eye className="w-4 h-4" />
                           </button>
 
                           {/* Edit (Admin & Dispatcher) */}
@@ -330,10 +427,10 @@ export const ClientList: React.FC<ClientListProps> = ({
                               id={`client-edit-btn-${client.id}`}
                               onClick={() => onEditClient(client)}
                               title="Edit Client"
-                              className="p-1.5 text-slate-400 hover:text-indigo-300 hover:bg-indigo-950/50 rounded-md transition-colors cursor-pointer"
+                              className="p-1.5 text-slate-400 hover:text-indigo-300 hover:bg-indigo-950/50 rounded-lg transition-colors cursor-pointer"
                               aria-label={`Edit ${client.company_name}`}
                             >
-                              <Edit2 className="w-3.5 h-3.5" />
+                              <Edit2 className="w-4 h-4" />
                             </button>
                           )}
 
@@ -344,14 +441,14 @@ export const ClientList: React.FC<ClientListProps> = ({
                               onClick={() => onToggleStatus(client)}
                               disabled={isRowToggling}
                               title={isInactive ? 'Reactivate Client' : 'Deactivate Client'}
-                              className={`p-1.5 rounded-md transition-colors cursor-pointer disabled:opacity-50 ${
+                              className={`p-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${
                                 isInactive
                                   ? 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/50'
                                   : 'text-amber-400 hover:text-amber-300 hover:bg-amber-950/50'
                               }`}
                               aria-label={`${isInactive ? 'Reactivate' : 'Deactivate'} ${client.company_name}`}
                             >
-                              <Power className={`w-3.5 h-3.5 ${isRowToggling ? 'animate-spin' : ''}`} />
+                              <Power className={`w-4 h-4 ${isRowToggling ? 'animate-spin' : ''}`} />
                             </button>
                           )}
 
@@ -361,10 +458,10 @@ export const ClientList: React.FC<ClientListProps> = ({
                               id={`client-delete-btn-${client.id}`}
                               onClick={() => onDeleteClient(client)}
                               title="Delete Client"
-                              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/50 rounded-md transition-colors cursor-pointer"
+                              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
                               aria-label={`Delete ${client.company_name}`}
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           )}
                         </div>
@@ -377,12 +474,15 @@ export const ClientList: React.FC<ClientListProps> = ({
           </div>
 
           {/* Table Footer Count */}
-          <div className="px-4 py-2.5 bg-slate-950/80 border-t border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
+          <div className="px-4 py-3 bg-slate-950/80 border-t border-slate-800 text-[11px] text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-2">
             <span>
-              Showing {filteredClients.length} of {clients.length} carrier {clients.length === 1 ? 'client' : 'clients'}
+              Showing <strong className="text-slate-200 font-mono tabular-nums">{filteredClients.length}</strong> of{' '}
+              <strong className="text-slate-200 font-mono tabular-nums">{clients.length}</strong> carrier{' '}
+              {clients.length === 1 ? 'client' : 'clients'}
             </span>
-            <span className="font-mono text-slate-500">
-              Active: {clients.filter((c) => c.status === 'active').length} • Inactive: {clients.filter((c) => c.status === 'inactive').length}
+            <span className="font-mono tabular-nums text-slate-500">
+              Active: {clients.filter((c) => c.status === 'active').length} • Inactive:{' '}
+              {clients.filter((c) => c.status === 'inactive').length}
             </span>
           </div>
         </div>
@@ -390,3 +490,4 @@ export const ClientList: React.FC<ClientListProps> = ({
     </div>
   );
 };
+

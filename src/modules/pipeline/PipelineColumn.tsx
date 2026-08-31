@@ -113,15 +113,15 @@ export const PipelineColumn: React.FC<PipelineColumnProps> = ({
       {/* Column Header */}
       <div className={`p-3.5 rounded-t-2xl space-y-2 ${stageHeaderBg}`}>
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span
-              className={`px-2 py-0.5 rounded-md text-[11px] font-bold uppercase tracking-wider border font-mono ${badgeTheme}`}
+              className={`px-2.5 py-0.5 rounded-lg text-[11px] font-bold uppercase tracking-wider border font-mono ${badgeTheme}`}
             >
               {column.stepNumber}. {column.label}
             </span>
             {isFinancialStage && (
               <span
-                className="text-[9px] font-semibold text-indigo-400 uppercase tracking-widest bg-indigo-950/60 px-1.5 py-0.5 rounded border border-indigo-800/40"
+                className="text-[9px] font-semibold text-indigo-300 uppercase tracking-widest bg-indigo-950/70 px-1.5 py-0.5 rounded-md border border-indigo-800/60"
                 title="Financial settlement stage"
               >
                 Settlement
@@ -129,15 +129,15 @@ export const PipelineColumn: React.FC<PipelineColumnProps> = ({
             )}
           </div>
 
-          <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-slate-800/90 text-slate-200 border border-slate-700/80">
+          <span className="text-xs font-mono tabular-nums font-bold px-2 py-0.5 rounded-full bg-slate-800/90 text-slate-200 border border-slate-700/80 shrink-0">
             {metrics.count}
           </span>
         </div>
 
         {/* Aggregate Revenue & RPM Metrics */}
-        <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-800/60 font-mono">
-          <div className="flex items-center gap-1 text-slate-300">
-            <span className="text-[10px] text-slate-500 uppercase font-sans">Vol:</span>
+        <div className="flex items-center justify-between text-xs pt-1.5 border-t border-slate-800/70 font-mono tabular-nums">
+          <div className="flex items-center gap-1.5 text-slate-300">
+            <span className="text-[10px] text-slate-500 uppercase font-sans font-medium">Vol:</span>
             <span className="font-bold text-slate-100">{formatCurrency(metrics.totalGross)}</span>
           </div>
 
@@ -150,20 +150,20 @@ export const PipelineColumn: React.FC<PipelineColumnProps> = ({
       </div>
 
       {/* Column Body / Drop Zone */}
-      <div className="p-3 flex-1 space-y-3 min-h-[380px] overflow-y-auto max-h-[calc(100vh-280px)]">
+      <div className="p-2.5 sm:p-3 flex-1 space-y-3 min-h-[380px] overflow-y-auto max-h-[calc(100vh-280px)]">
         {loads.length === 0 ? (
           <div
-            className={`h-full min-h-[160px] flex flex-col items-center justify-center p-4 text-center rounded-xl border border-dashed text-slate-500 transition-colors ${
+            className={`h-full min-h-[180px] flex flex-col items-center justify-center p-4 text-center rounded-xl border border-dashed transition-colors ${
               isDragOver
-                ? 'border-sky-400 bg-sky-950/30 text-sky-300'
-                : 'border-slate-800/70 bg-slate-950/30'
+                ? 'border-sky-400/80 bg-sky-950/40 text-sky-300'
+                : 'border-slate-800/80 bg-slate-950/40 text-slate-500'
             }`}
           >
-            <Inbox className="w-5 h-5 mb-1.5 opacity-50" />
-            <span className="text-xs font-medium">No loads in {column.label}</span>
+            <Inbox className="w-5 h-5 mb-2 opacity-50 text-slate-400" />
+            <span className="text-xs font-medium text-slate-400">No loads in {column.label}</span>
             {canMove && (
-              <span className="text-[10px] text-slate-600 mt-0.5">
-                Drop loads here to move
+              <span className="text-[10px] text-slate-500 mt-1">
+                Drop loads here to advance stage
               </span>
             )}
           </div>

@@ -5,6 +5,7 @@ import {
   PIPELINE_STATUS_OPTIONS,
   EQUIPMENT_TYPE_OPTIONS,
 } from './loadTypes.ts';
+import { getAllowedTransitions } from '../pipeline/pipelineTypes.ts';
 import {
   Client,
   Broker,
@@ -427,11 +428,16 @@ export const LoadList: React.FC<LoadListProps> = ({
                             onChange={(e) => handleStatusSelect(load.id, e.target.value as PipelineStatus)}
                             className="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-950/90 border border-slate-700 text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer shadow-xs"
                           >
-                            {PIPELINE_STATUS_OPTIONS.map((opt) => (
-                              <option key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </option>
-                            ))}
+                            {PIPELINE_STATUS_OPTIONS.map((opt) => {
+                              const allowed = getAllowedTransitions(load.pipeline_status);
+                              const isCurrent = opt.value === load.pipeline_status;
+                              const isAllowed = isCurrent || allowed.includes(opt.value);
+                              return (
+                                <option key={opt.value} value={opt.value} disabled={!isAllowed}>
+                                  {opt.label}{!isAllowed && !isCurrent ? ' (Invalid)' : ''}
+                                </option>
+                              );
+                            })}
                           </select>
                         ) : (
                           <StatusBadge status={load.pipeline_status} type="pipeline" size="sm" />

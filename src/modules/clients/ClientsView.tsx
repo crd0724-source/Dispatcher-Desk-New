@@ -6,7 +6,7 @@ import { ClientList } from './ClientList.tsx';
 import { ClientModal } from './ClientModal.tsx';
 import { ClientDetailModal } from './ClientDetailModal.tsx';
 import { Modal } from '../../components/common/Modal.tsx';
-import { Plus, Building2, AlertTriangle, CheckCircle2, RefreshCw } from 'lucide-react';
+import { Plus, Users, AlertTriangle, CheckCircle2, Building2, Truck, DollarSign, Activity } from 'lucide-react';
 
 export const ClientsView: React.FC = () => {
   const { activeOrganization, userRole } = useAuth();
@@ -170,6 +170,18 @@ export const ClientsView: React.FC = () => {
     }
   };
 
+  // Calculate high-level KPIs
+  const totalClients = clients.length;
+  const activeClients = clients.filter((c) => c.status === 'active').length;
+  const fleetUnits = clients.filter((c) => c.client_type === 'fleet').length;
+  const clientsWithRpm = clients.filter(
+    (c) => c.minimum_rate_per_mile !== null && c.minimum_rate_per_mile !== undefined && c.minimum_rate_per_mile > 0
+  );
+  const avgTargetRpm =
+    clientsWithRpm.length > 0
+      ? clientsWithRpm.reduce((sum, c) => sum + (c.minimum_rate_per_mile || 0), 0) / clientsWithRpm.length
+      : null;
+
   return (
     <div id="clients-view" className="space-y-6">
       {/* Header & Main Actions */}
@@ -179,7 +191,7 @@ export const ClientsView: React.FC = () => {
             <h1 className="text-xl sm:text-2xl font-bold text-slate-100 tracking-tight">
               Carrier Clients
             </h1>
-            <span className="text-xs px-2.5 py-0.5 rounded-md bg-indigo-950/60 text-indigo-300 border border-indigo-800/40 font-semibold">
+            <span className="text-[11px] font-mono px-2.5 py-0.5 rounded-lg bg-indigo-950/70 text-indigo-300 border border-indigo-800/60 font-semibold">
               Owner-Operators & Fleets
             </span>
           </div>
@@ -192,7 +204,7 @@ export const ClientsView: React.FC = () => {
           <button
             id="add-client-btn"
             onClick={handleOpenAddModal}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg shadow-sm transition-colors cursor-pointer self-start sm:self-auto"
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-xs transition-colors cursor-pointer self-start sm:self-auto shrink-0"
           >
             <Plus className="w-4 h-4" />
             <span>Add Carrier Client</span>
@@ -200,11 +212,82 @@ export const ClientsView: React.FC = () => {
         )}
       </div>
 
+      {/* 4-Card Operational KPI Strip */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        {/* Total Clients */}
+        <div className="bg-slate-900 border border-slate-800/80 rounded-xl p-3.5 sm:p-4 shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Total Carriers</span>
+            <div className="w-7 h-7 rounded-lg bg-indigo-950/60 border border-indigo-800/50 flex items-center justify-center text-indigo-400">
+              <Building2 className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-xl sm:text-2xl font-bold text-slate-100 font-mono tabular-nums">
+              {isLoading ? '—' : totalClients}
+            </span>
+            <span className="text-[11px] text-slate-500">accounts</span>
+          </div>
+        </div>
+
+        {/* Active Clients */}
+        <div className="bg-slate-900 border border-slate-800/80 rounded-xl p-3.5 sm:p-4 shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Active Dispatch</span>
+            <div className="w-7 h-7 rounded-lg bg-emerald-950/60 border border-emerald-800/50 flex items-center justify-center text-emerald-400">
+              <Activity className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-xl sm:text-2xl font-bold text-emerald-400 font-mono tabular-nums">
+              {isLoading ? '—' : activeClients}
+            </span>
+            <span className="text-[11px] text-slate-500">
+              {totalClients > 0 ? `${Math.round((activeClients / totalClients) * 100)}% roster` : 'available'}
+            </span>
+          </div>
+        </div>
+
+        {/* Fleet Accounts */}
+        <div className="bg-slate-900 border border-slate-800/80 rounded-xl p-3.5 sm:p-4 shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Fleet Units</span>
+            <div className="w-7 h-7 rounded-lg bg-cyan-950/60 border border-cyan-800/50 flex items-center justify-center text-cyan-400">
+              <Truck className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-xl sm:text-2xl font-bold text-cyan-300 font-mono tabular-nums">
+              {isLoading ? '—' : fleetUnits}
+            </span>
+            <span className="text-[11px] text-slate-500">
+              {totalClients > 0 ? `${totalClients - fleetUnits} owner-ops` : 'fleets'}
+            </span>
+          </div>
+        </div>
+
+        {/* Avg Target RPM */}
+        <div className="bg-slate-900 border border-slate-800/80 rounded-xl p-3.5 sm:p-4 shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Avg Target RPM</span>
+            <div className="w-7 h-7 rounded-lg bg-emerald-950/60 border border-emerald-800/50 flex items-center justify-center text-emerald-400">
+              <DollarSign className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-xl sm:text-2xl font-bold text-emerald-400 font-mono tabular-nums">
+              {isLoading ? '—' : avgTargetRpm !== null ? `$${avgTargetRpm.toFixed(2)}` : '—'}
+            </span>
+            <span className="text-[11px] text-slate-500">/ mile baseline</span>
+          </div>
+        </div>
+      </div>
+
       {/* Transient Feedback Banner */}
       {feedbackMessage && (
         <div
           id="clients-feedback-banner"
-          className={`p-3 rounded-lg text-xs flex items-center justify-between transition-all ${
+          className={`p-3.5 rounded-xl text-xs flex items-center justify-between transition-all shadow-xs ${
             feedbackMessage.type === 'success'
               ? 'bg-emerald-950/60 border border-emerald-800/70 text-emerald-200'
               : 'bg-rose-950/60 border border-rose-800/70 text-rose-200'
@@ -284,9 +367,9 @@ export const ClientsView: React.FC = () => {
           maxWidth="md"
         >
           <div className="space-y-4 text-xs text-slate-300">
-            <div className="p-3 rounded-lg bg-rose-950/40 border border-rose-800/80 text-rose-200 flex items-start gap-2">
+            <div className="p-3.5 rounded-xl bg-rose-950/40 border border-rose-800/80 text-rose-200 flex items-start gap-2.5">
               <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-              <p>
+              <p className="leading-relaxed">
                 Are you sure you want to delete <strong className="text-white">{clientToDelete.company_name}</strong>?
                 Any historical associations with trucks or loads will have their client foreign key set to null.
               </p>
@@ -297,7 +380,7 @@ export const ClientsView: React.FC = () => {
                 type="button"
                 onClick={() => setClientToDelete(null)}
                 disabled={isDeleting}
-                className="px-4 py-2 text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                className="px-4 py-2 text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -306,7 +389,7 @@ export const ClientsView: React.FC = () => {
                 type="button"
                 onClick={handleDeleteClientConfirm}
                 disabled={isDeleting}
-                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 rounded-lg transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 rounded-xl transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5 shadow-xs"
               >
                 {isDeleting ? 'Deleting...' : 'Delete Carrier Client'}
               </button>
@@ -317,3 +400,4 @@ export const ClientsView: React.FC = () => {
     </div>
   );
 };
+

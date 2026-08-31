@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { LoadWithRelations, PIPELINE_STATUS_OPTIONS } from './loadTypes.ts';
+import { getAllowedTransitions } from '../pipeline/pipelineTypes.ts';
 import { PipelineStatus, DocumentStatus, DocumentType } from '../../types/domain.types.ts';
 import { Modal } from '../../components/common/Modal.tsx';
 import { StatusBadge } from '../../components/common/StatusBadge.tsx';
@@ -460,11 +461,16 @@ export const LoadDetailModal: React.FC<LoadDetailModalProps> = ({
                   onChange={(e) => onStatusChange(load.id, e.target.value as PipelineStatus)}
                   className="px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 font-semibold focus:outline-none focus:border-indigo-500 cursor-pointer text-xs"
                 >
-                  {PIPELINE_STATUS_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
+                  {PIPELINE_STATUS_OPTIONS.map((opt) => {
+                    const allowed = getAllowedTransitions(load.pipeline_status);
+                    const isCurrent = opt.value === load.pipeline_status;
+                    const isAllowed = isCurrent || allowed.includes(opt.value);
+                    return (
+                      <option key={opt.value} value={opt.value} disabled={!isAllowed}>
+                        {opt.label}{!isAllowed && !isCurrent ? ' (Invalid)' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
             )}

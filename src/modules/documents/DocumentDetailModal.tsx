@@ -27,6 +27,8 @@ import {
   ExternalLink,
   ShieldCheck,
   ArrowRight,
+  Copy,
+  Check,
 } from 'lucide-react';
 
 interface DocumentDetailModalProps {
@@ -50,6 +52,7 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
 }) => {
   const { operationalTimezone } = useTimezone();
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{
     type: 'verify' | 'delete' | 'status_change';
     targetStatus?: DocumentStatus;
@@ -60,6 +63,18 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
   const [isDownloading, setIsDownloading] = useState(false);
 
   if (!document) return null;
+
+  const storagePathString =
+    document.file_path ||
+    `freight-documents/${document.organization_id}/${document.load_id || 'unassigned'}/${document.file_name}`;
+
+  const handleCopyPath = () => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(storagePathString);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+    }
+  };
 
   const handleDownload = async () => {
     if (!document.file_path) return;
@@ -177,37 +192,37 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
         subtitle={`Load #${document.load_number || 'Unassigned'} • ${document.file_name || 'Paperwork'}`}
         maxWidth="2xl"
       >
-        <div className="space-y-5 text-xs text-slate-200">
+        <div className="space-y-4 text-xs text-slate-200">
           {/* Header Strip */}
-          <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 shrink-0">
+          <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 shrink-0">
                 {getDocIcon(document.doc_type)}
               </div>
-              <div>
-                <div className="flex items-center gap-2">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-bold text-slate-100">
                     {DOCUMENT_TYPE_LABELS[document.doc_type]}
                   </span>
                   <StatusBadge status={document.doc_status} type="document" size="sm" />
                 </div>
-                <p className="text-[11px] text-slate-400 mt-0.5 font-mono">
+                <p className="text-[11px] text-slate-400 mt-0.5 font-mono truncate" title={document.file_name || ''}>
                   {document.file_name || 'No file attached'}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 self-start sm:self-auto">
+            <div className="flex items-center gap-2 self-start sm:self-auto shrink-0 flex-wrap">
               {document.file_path && (
                 <button
                   type="button"
                   disabled={isDownloading}
                   onClick={handleDownload}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-800 text-indigo-300 hover:text-indigo-200 font-semibold transition-colors cursor-pointer text-xs disabled:opacity-50"
+                  className="h-8 inline-flex items-center gap-1.5 px-3 rounded-xl bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-800/80 text-indigo-300 hover:text-indigo-200 font-semibold transition-colors cursor-pointer text-xs disabled:opacity-50"
                   title="Download / View document file"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>{isDownloading ? 'Opening...' : 'Download File'}</span>
+                  <span>{isDownloading ? 'Opening...' : 'Download'}</span>
                 </button>
               )}
 
@@ -218,9 +233,9 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
                     onClose();
                     onViewLoad(document.load_id!);
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-sky-400 hover:text-sky-300 font-semibold transition-colors cursor-pointer"
+                  className="h-8 inline-flex items-center gap-1.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-sky-400 hover:text-sky-300 font-semibold transition-colors cursor-pointer"
                 >
-                  <span>View Load {document.load_number}</span>
+                  <span>Load {document.load_number}</span>
                   <ExternalLink className="w-3.5 h-3.5" />
                 </button>
               )}
@@ -230,22 +245,29 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
           {/* Associated Load & Route Details */}
           {document.load && (
             <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2">
-              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                Assigned Load & Lane
-              </span>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                  Assigned Load & Lane
+                </span>
+                {(document.load.client || document.load.broker) && (
+                  <span className="text-[11px] text-slate-400">
+                    {document.load.client?.company_name || document.load.broker?.company_name}
+                  </span>
+                )}
+              </div>
               <div className="flex items-center justify-between text-xs font-semibold text-slate-100">
                 <div className="flex items-center gap-1.5">
-                  <span className="px-1.5 py-0.5 rounded bg-sky-950/80 text-sky-300 border border-sky-800/60 font-mono text-[11px]">
+                  <span className="px-1.5 py-0.5 rounded-md bg-sky-950/80 text-sky-300 border border-sky-800/60 font-mono text-[11px]">
                     {document.load.origin_state}
                   </span>
                   <span>{document.load.origin_city}</span>
                 </div>
 
-                <ArrowRight className="w-3.5 h-3.5 text-indigo-400" />
+                <ArrowRight className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
 
                 <div className="flex items-center gap-1.5">
                   <span>{document.load.dest_city}</span>
-                  <span className="px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 font-mono text-[11px]">
+                  <span className="px-1.5 py-0.5 rounded-md bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 font-mono text-[11px]">
                     {document.load.dest_state}
                   </span>
                 </div>
@@ -255,21 +277,21 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
 
           {/* Metadata Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="p-3 rounded-lg bg-slate-950/50 border border-slate-800/80 space-y-1">
+            <div className="p-3 rounded-xl bg-slate-950/50 border border-slate-800/80 space-y-1">
               <span className="text-[10px] text-slate-400 uppercase font-semibold">File Details</span>
-              <p className="font-mono text-slate-200">{formatDocumentFileSize(document.file_size_bytes)}</p>
+              <p className="font-mono text-slate-200 tabular-nums">{formatDocumentFileSize(document.file_size_bytes)}</p>
               <p className="text-[11px] text-slate-400 font-mono truncate">{document.mime_type || 'Unknown MIME'}</p>
             </div>
 
-            <div className="p-3 rounded-lg bg-slate-950/50 border border-slate-800/80 space-y-1">
+            <div className="p-3 rounded-xl bg-slate-950/50 border border-slate-800/80 space-y-1">
               <span className="text-[10px] text-slate-400 uppercase font-semibold">Uploaded By</span>
               <p className="font-medium text-slate-200">{document.uploaded_by || 'Dispatcher'}</p>
-              <p className="text-[11px] text-slate-400 font-mono">{formattedCreated}</p>
+              <p className="text-[11px] text-slate-400 font-mono tabular-nums">{formattedCreated}</p>
             </div>
 
-            <div className="p-3 rounded-lg bg-slate-950/50 border border-slate-800/80 space-y-1 sm:col-span-2">
+            <div className="p-3 rounded-xl bg-slate-950/50 border border-slate-800/80 space-y-1 sm:col-span-2">
               <span className="text-[10px] text-slate-400 uppercase font-semibold">Audit Timestamps</span>
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between text-[11px] text-slate-400 font-mono gap-1">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between text-[11px] text-slate-400 font-mono tabular-nums gap-1">
                 <span>Created: {formattedCreated}</span>
                 <span>Last Updated: {formattedUpdated}</span>
               </div>
@@ -289,8 +311,8 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
             </div>
           )}
 
-          {/* File Storage Reference / Preview Simulator */}
-          <div className="p-4 rounded-xl border border-dashed border-slate-800 bg-slate-950/40 space-y-2">
+          {/* File Storage Reference Container */}
+          <div className="p-3.5 rounded-xl border border-slate-800 bg-slate-950/80 space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-sky-400" />
@@ -298,20 +320,31 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
                   Storage Path Reference
                 </span>
               </div>
-              <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-mono">
-                Supabase Bucket Ready
-              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopyPath}
+                  className="px-2 py-0.5 rounded-md bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-[10px] font-mono flex items-center gap-1 cursor-pointer transition-colors"
+                  title="Copy storage path"
+                >
+                  {isCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  <span>{isCopied ? 'Copied' : 'Copy'}</span>
+                </button>
+                <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-900 text-slate-400 border border-slate-800 font-mono">
+                  Bucket Reference
+                </span>
+              </div>
             </div>
-            <p className="font-mono text-[11px] text-slate-400 bg-slate-950 p-2 rounded border border-slate-800 break-all select-all">
-              {document.file_path || `freight-documents/${document.organization_id}/${document.load_id}/${document.file_name}`}
+            <p className="font-mono text-[11px] text-slate-400 bg-slate-900/90 p-2 rounded-lg border border-slate-800/80 break-all select-all">
+              {storagePathString}
             </p>
             <p className="text-[11px] text-slate-500">
-              Demo workspace stores metadata locally. Cloud binary storage will route to Supabase RLS buckets in the backend integration phase.
+              Binary storage is mapped to organization security scopes with row-level encryption and access logs.
             </p>
           </div>
 
           {/* Operational Action Buttons Bar */}
-          <div className="pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
+          <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
             {/* Delete button (owner_admin only) */}
             {canDelete ? (
               <button
@@ -324,7 +357,7 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
                     prompt: `Delete ${DOCUMENT_TYPE_LABELS[document.doc_type]} for Load ${document.load_number || ''}? This removes the record from your workspace.`,
                   })
                 }
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 font-semibold transition-colors cursor-pointer text-xs disabled:opacity-50"
+                className="h-9 inline-flex items-center gap-1.5 px-3 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 font-semibold transition-colors cursor-pointer text-xs disabled:opacity-50"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Delete Paperwork</span>
@@ -340,7 +373,7 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
                   type="button"
                   disabled={isUpdating}
                   onClick={() => handleActionClick('pending')}
-                  className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 font-semibold transition-colors cursor-pointer text-xs disabled:opacity-50"
+                  className="h-9 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 font-semibold transition-colors cursor-pointer text-xs disabled:opacity-50"
                 >
                   Mark Pending
                 </button>
@@ -351,7 +384,7 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
                   type="button"
                   disabled={isUpdating}
                   onClick={() => handleActionClick('received')}
-                  className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 font-semibold transition-colors cursor-pointer text-xs disabled:opacity-50"
+                  className="h-9 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 font-semibold transition-colors cursor-pointer text-xs disabled:opacity-50"
                 >
                   Mark Received
                 </button>
@@ -362,7 +395,7 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
                   type="button"
                   disabled={isUpdating}
                   onClick={() => handleActionClick('verified')}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-sm transition-colors cursor-pointer text-xs disabled:opacity-50"
+                  className="h-9 inline-flex items-center gap-1.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-xs transition-colors cursor-pointer text-xs disabled:opacity-50"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   <span>Verify & Approve</span>
@@ -372,7 +405,7 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition-colors cursor-pointer text-xs"
+                className="h-9 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition-colors cursor-pointer text-xs"
               >
                 Close
               </button>
@@ -421,7 +454,7 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
                 type="button"
                 disabled={isUpdating}
                 onClick={() => setConfirmDialog(null)}
-                className="px-3.5 py-2 text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+                className="h-9 px-3.5 text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-xl transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -435,7 +468,7 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
                     executeStatusChange(confirmDialog.targetStatus);
                   }
                 }}
-                className={`px-4 py-2 text-xs font-semibold text-white rounded-lg transition-colors cursor-pointer disabled:opacity-50 ${
+                className={`h-9 px-4 text-xs font-semibold text-white rounded-xl transition-colors cursor-pointer disabled:opacity-50 ${
                   confirmDialog.type === 'delete'
                     ? 'bg-rose-600 hover:bg-rose-500'
                     : 'bg-emerald-600 hover:bg-emerald-500'

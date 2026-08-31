@@ -5,6 +5,7 @@ import {
   UpdateLoadInput,
   LoadFilterCriteria,
 } from './loadTypes.ts';
+import { validateStatusTransition } from '../pipeline/pipelineTypes.ts';
 import {
   Client,
   Broker,
@@ -170,6 +171,15 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
 
   // Handle Quick Status Change
   const handleStatusChange = async (loadId: string, newStatus: PipelineStatus) => {
+    const currentLoad = loads.find((l) => l.id === loadId);
+    if (!currentLoad || currentLoad.pipeline_status === newStatus) return;
+
+    const validation = validateStatusTransition(currentLoad.pipeline_status, newStatus);
+    if (!validation.allowed) {
+      showToast(validation.reason || `Cannot move load to ${newStatus.replace('_', ' ')}.`, 'error');
+      return;
+    }
+
     try {
       const updated = await loadService.updateLoadStatus(orgId, loadId, newStatus);
       setLoads((prev) => prev.map((l) => (l.id === loadId ? updated : l)));

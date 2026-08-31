@@ -30,10 +30,13 @@ import {
   DollarSign,
   TrendingUp,
   X,
+  Calendar,
+  Layers,
 } from 'lucide-react';
 
 interface PipelineViewProps {
   onNewLoadClick?: () => void;
+  onNavigate?: (module: string) => void;
 }
 
 interface AlertNotification {
@@ -49,7 +52,7 @@ interface StatusConfirmationState {
   prompt: string;
 }
 
-export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick }) => {
+export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick, onNavigate }) => {
   const { activeOrganization, userRole } = useAuth();
   const orgId = activeOrganization?.id || 'demo-org-1';
 
@@ -323,16 +326,16 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick }) =>
 
   return (
     <div id="pipeline-orchestrator-view" className="space-y-5">
-      {/* Header & Quick Action */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {/* Header & Quick Action Hierarchy */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-1">
         <div>
           <div className="flex items-center gap-2.5">
-            <Kanban className="w-6 h-6 text-sky-400" />
+            <Kanban className="w-5 h-5 sm:w-6 sm:h-6 text-sky-400" />
             <h1 className="text-xl sm:text-2xl font-bold text-slate-100 tracking-tight">
               Load Pipeline Flow
             </h1>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-sky-950/80 text-sky-300 border border-sky-800/60 font-semibold font-mono">
-              7-Stage Operational Lifecycle
+            <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-sky-950/80 text-sky-300 border border-sky-800/60 font-semibold font-mono">
+              7-Stage Lifecycle
             </span>
           </div>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
@@ -340,18 +343,53 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick }) =>
           </p>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
-          <button
-            id="pipeline-refresh-btn"
-            type="button"
-            onClick={loadData}
-            disabled={isLoading}
-            className="p-2 text-slate-300 hover:text-slate-100 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg transition-colors cursor-pointer"
-            title="Refresh Pipeline"
-          >
-            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-sky-400' : ''}`} />
-          </button>
+        {/* Action Controls Hierarchy */}
+        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 self-start lg:self-auto">
+          {/* Secondary Tools Group */}
+          <div className="inline-flex items-center bg-slate-900/90 p-1 border border-slate-800/90 rounded-xl shadow-xs gap-1">
+            <button
+              id="pipeline-refresh-btn"
+              type="button"
+              onClick={loadData}
+              disabled={isLoading}
+              className="p-1.5 text-slate-300 hover:text-slate-100 hover:bg-slate-800/90 rounded-lg transition-colors cursor-pointer"
+              title="Refresh Pipeline"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-sky-400' : ''}`} />
+            </button>
+            <button
+              id="pipeline-clear-filters-quick-btn"
+              type="button"
+              onClick={() =>
+                setFilters({
+                  search: '',
+                  clientId: '',
+                  brokerId: '',
+                  equipmentType: '',
+                  dateRange: 'all',
+                })
+              }
+              className="px-2.5 py-1 text-xs font-semibold text-slate-300 hover:text-slate-100 hover:bg-slate-800/90 rounded-lg transition-colors cursor-pointer"
+              title="Reset Filters"
+            >
+              Reset Filters
+            </button>
+          </div>
 
+          {/* Strong Secondary Navigation: Operations Calendar */}
+          {onNavigate && (
+            <button
+              id="pipeline-calendar-btn"
+              type="button"
+              onClick={() => onNavigate('calendar')}
+              className="px-3.5 py-2 text-xs font-semibold text-slate-200 hover:text-white bg-slate-800/90 hover:bg-slate-700 border border-slate-700/80 rounded-xl shadow-xs transition-colors cursor-pointer inline-flex items-center gap-1.5 shrink-0"
+            >
+              <Calendar className="w-3.5 h-3.5 text-amber-400" />
+              <span>Operations Calendar</span>
+            </button>
+          )}
+
+          {/* Dominant Primary CTA: Book New Load */}
           {canEdit && (
             <button
               id="pipeline-create-load-btn"
@@ -363,7 +401,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick }) =>
                   setIsCreateModalOpen(true);
                 }
               }}
-              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-lg shadow-sm transition-colors cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-sm transition-colors cursor-pointer shrink-0"
             >
               <Plus className="w-4 h-4" />
               <span>Book New Load</span>
@@ -405,36 +443,42 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick }) =>
 
       {/* Pipeline Quick Stats Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800/80 flex items-center justify-between">
+        <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800/80 flex items-center justify-between shadow-xs">
           <div>
-            <span className="text-[10px] text-slate-400 uppercase font-semibold">Active Dispatches</span>
-            <p className="text-lg font-bold font-mono text-slate-100">{pipelineMetrics.activeLoads}</p>
+            <span className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Active Dispatches</span>
+            <p className="text-lg sm:text-xl font-bold font-mono tabular-nums text-slate-100 mt-0.5">{pipelineMetrics.activeLoads}</p>
           </div>
-          <Kanban className="w-5 h-5 text-sky-400 opacity-60" />
+          <div className="p-1.5 rounded-lg bg-sky-950/40 border border-sky-800/40 text-sky-400">
+            <Kanban className="w-4 h-4" />
+          </div>
         </div>
 
-        <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800/80 flex items-center justify-between">
+        <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800/80 flex items-center justify-between shadow-xs">
           <div>
-            <span className="text-[10px] text-slate-400 uppercase font-semibold">Total Pipeline Value</span>
-            <p className="text-lg font-bold font-mono text-emerald-400">{formatCurrency(pipelineMetrics.totalGross)}</p>
+            <span className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Total Pipeline Value</span>
+            <p className="text-lg sm:text-xl font-bold font-mono tabular-nums text-emerald-400 mt-0.5">{formatCurrency(pipelineMetrics.totalGross)}</p>
           </div>
-          <DollarSign className="w-5 h-5 text-emerald-400 opacity-60" />
+          <div className="p-1.5 rounded-lg bg-emerald-950/40 border border-emerald-800/40 text-emerald-400">
+            <DollarSign className="w-4 h-4" />
+          </div>
         </div>
 
-        <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800/80 flex items-center justify-between">
+        <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800/80 flex items-center justify-between shadow-xs">
           <div>
-            <span className="text-[10px] text-slate-400 uppercase font-semibold">Total Fleet Volume</span>
-            <p className="text-lg font-bold font-mono text-slate-100">{pipelineMetrics.totalLoads} Loads</p>
+            <span className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Total Fleet Volume</span>
+            <p className="text-lg sm:text-xl font-bold font-mono tabular-nums text-slate-100 mt-0.5">{pipelineMetrics.totalLoads} Loads</p>
           </div>
-          <TrendingUp className="w-5 h-5 text-indigo-400 opacity-60" />
+          <div className="p-1.5 rounded-lg bg-indigo-950/40 border border-indigo-800/40 text-indigo-400">
+            <TrendingUp className="w-4 h-4" />
+          </div>
         </div>
 
-        <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800/80 flex items-center justify-between">
+        <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800/80 flex items-center justify-between shadow-xs">
           <div>
-            <span className="text-[10px] text-slate-400 uppercase font-semibold">Loaded Distance</span>
-            <p className="text-lg font-bold font-mono text-slate-100">{pipelineMetrics.totalLoadedMiles.toLocaleString()} mi</p>
+            <span className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Loaded Distance</span>
+            <p className="text-lg sm:text-xl font-bold font-mono tabular-nums text-slate-100 mt-0.5">{pipelineMetrics.totalLoadedMiles.toLocaleString()} mi</p>
           </div>
-          <span className="text-xs font-mono font-bold text-slate-400 px-2 py-1 rounded bg-slate-800">
+          <span className="text-xs font-mono tabular-nums font-bold text-slate-300 px-2 py-1 rounded-lg bg-slate-800 border border-slate-700/60">
             {pipelineMetrics.totalLoads > 0 ? (pipelineMetrics.totalGross / Math.max(1, pipelineMetrics.totalLoadedMiles)).toFixed(2) : '0.00'}/mi
           </span>
         </div>
@@ -452,17 +496,51 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick }) =>
 
       {/* Loading Skeleton / Error / Kanban Board */}
       {isLoading ? (
-        <div id="pipeline-loading-skeleton" className="flex gap-4 overflow-x-auto pb-4 min-w-[1400px]">
-          {PIPELINE_COLUMNS.map((c) => (
-            <div
-              key={c.id}
-              className="flex-1 min-w-[280px] max-w-[320px] h-96 rounded-2xl bg-slate-900/40 border border-slate-800/60 p-4 animate-pulse space-y-4"
-            >
-              <div className="h-6 bg-slate-800/80 rounded w-2/3" />
-              <div className="h-28 bg-slate-800/40 rounded-xl" />
-              <div className="h-28 bg-slate-800/40 rounded-xl" />
-            </div>
-          ))}
+        <div
+          id="pipeline-loading-skeleton"
+          className="w-full overflow-x-auto pb-6 pt-1 select-none scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-900"
+        >
+          <div className="flex gap-4 min-w-[1400px] items-start animate-pulse">
+            {PIPELINE_COLUMNS.map((c) => (
+              <div
+                key={c.id}
+                className="flex flex-col flex-1 min-w-[280px] max-w-[320px] rounded-2xl bg-slate-900/60 border border-slate-800/80 overflow-hidden"
+              >
+                {/* Column Header Skeleton */}
+                <div className="p-3.5 bg-slate-950/80 border-b border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="h-5 w-24 bg-slate-800 rounded-md" />
+                    <div className="h-5 w-6 bg-slate-800 rounded-full" />
+                  </div>
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-800/60">
+                    <div className="h-3.5 w-16 bg-slate-800/80 rounded" />
+                    <div className="h-3.5 w-12 bg-slate-800/80 rounded" />
+                  </div>
+                </div>
+
+                {/* Column Body Cards Skeleton */}
+                <div className="p-3 space-y-3 min-h-[380px]">
+                  <div className="rounded-xl bg-slate-900/90 border border-slate-800/90 p-3.5 space-y-3">
+                    <div className="flex justify-between items-center">
+                      <div className="h-4 w-24 bg-slate-800 rounded" />
+                      <div className="h-4 w-12 bg-slate-800 rounded" />
+                    </div>
+                    <div className="h-10 bg-slate-950/80 rounded-lg" />
+                    <div className="h-4 w-full bg-slate-800/60 rounded" />
+                    <div className="h-4 w-2/3 bg-slate-800/60 rounded" />
+                  </div>
+                  <div className="rounded-xl bg-slate-900/90 border border-slate-800/90 p-3.5 space-y-3">
+                    <div className="flex justify-between items-center">
+                      <div className="h-4 w-20 bg-slate-800 rounded" />
+                      <div className="h-4 w-14 bg-slate-800 rounded" />
+                    </div>
+                    <div className="h-10 bg-slate-950/80 rounded-lg" />
+                    <div className="h-4 w-4/5 bg-slate-800/60 rounded" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       ) : error ? (
         <div

@@ -127,6 +127,7 @@ const MainApp: React.FC = () => {
       case 'pipeline':
         return (
           <PipelineView
+            onNavigate={(mod: string) => setActiveModule(mod as NavModule)}
             onNewLoadClick={() => {
               setActiveModule('loads');
               setIsBookLoadModalOpen(true);

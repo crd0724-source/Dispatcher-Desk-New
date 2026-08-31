@@ -56,7 +56,7 @@ export const DocumentFilters: React.FC<DocumentFiltersProps> = ({
             placeholder="Search load #, file name, document type or notes..."
             value={filters.search || ''}
             onChange={(e) => onFilterChange({ ...filters, search: e.target.value })}
-            className="w-full pl-9 pr-8 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs sm:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+            className="w-full h-9 pl-9 pr-8 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-colors"
           />
           {filters.search && (
             <button
@@ -77,7 +77,7 @@ export const DocumentFilters: React.FC<DocumentFiltersProps> = ({
               id="doc-type-filter"
               value={filters.doc_type || 'all'}
               onChange={(e) => onFilterChange({ ...filters, doc_type: e.target.value })}
-              className="w-full px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors cursor-pointer"
+              className="w-full h-9 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-colors cursor-pointer"
             >
               <option value="all">All Doc Types</option>
               <option value="rate_confirmation">Rate Confirmation</option>
@@ -94,7 +94,7 @@ export const DocumentFilters: React.FC<DocumentFiltersProps> = ({
               id="doc-status-filter"
               value={filters.doc_status || 'all'}
               onChange={(e) => onFilterChange({ ...filters, doc_status: e.target.value })}
-              className="w-full px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors cursor-pointer"
+              className="w-full h-9 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-colors cursor-pointer"
             >
               <option value="all">All Review Statuses</option>
               <option value="verified">Verified & Approved</option>
@@ -110,7 +110,7 @@ export const DocumentFilters: React.FC<DocumentFiltersProps> = ({
               id="doc-load-status-filter"
               value={filters.load_status || 'all'}
               onChange={(e) => onFilterChange({ ...filters, load_status: e.target.value })}
-              className="w-full px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors cursor-pointer"
+              className="w-full h-9 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-colors cursor-pointer"
             >
               <option value="all">All Load Stages</option>
               {PIPELINE_STATUS_OPTIONS.map((opt) => (
@@ -132,7 +132,7 @@ export const DocumentFilters: React.FC<DocumentFiltersProps> = ({
                   date_range: e.target.value as 'all' | 'today' | 'this_week' | 'this_month',
                 })
               }
-              className="w-full px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors cursor-pointer"
+              className="w-full h-9 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-colors cursor-pointer"
             >
               <option value="all">All Time</option>
               <option value="today">Uploaded Today</option>
@@ -147,25 +147,25 @@ export const DocumentFilters: React.FC<DocumentFiltersProps> = ({
               id="doc-clear-filters-btn"
               type="button"
               onClick={handleClear}
-              className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="h-9 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <X className="w-3.5 h-3.5" />
-              <span>Clear ({activeFiltersCount})</span>
+              <span>Clear (<span className="font-mono tabular-nums">{activeFiltersCount}</span>)</span>
             </button>
           )}
         </div>
       </div>
 
       {/* Filter Feedback Status Bar */}
-      <div className="flex items-center justify-between text-xs text-slate-400 pt-1 border-t border-slate-800/60 font-mono">
+      <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800/60 font-mono">
         <div className="flex items-center gap-2">
           <span>
-            Displaying <strong className="text-slate-100">{filteredDocsCount}</strong> of{' '}
-            <strong className="text-slate-100">{totalDocsCount}</strong> paperwork records
+            Displaying <strong className="text-slate-100 tabular-nums">{filteredDocsCount}</strong> of{' '}
+            <strong className="text-slate-100 tabular-nums">{totalDocsCount}</strong> paperwork records
           </span>
           {activeFiltersCount > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-950/80 text-indigo-300 border border-indigo-800/50">
-              Filtered
+            <span className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-950/80 text-indigo-300 border border-indigo-800/50 font-sans font-medium">
+              Filtered View
             </span>
           )}
         </div>

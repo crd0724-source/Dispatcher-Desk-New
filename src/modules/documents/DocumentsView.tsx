@@ -55,6 +55,7 @@ export const DocumentsView: React.FC = () => {
   const [brokers, setBrokers] = useState<Broker[]>([]);
   const [trucks, setTrucks] = useState<Truck[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [isMissingExpanded, setIsMissingExpanded] = useState<boolean>(false);
 
   const [missingDocLoads, setMissingDocLoads] = useState<
     { load: Load; missingDocs: string[]; summary: LoadDocumentSummary }[]
@@ -197,30 +198,43 @@ export const DocumentsView: React.FC = () => {
     setIsTaskModalOpen(true);
   };
 
+  const handleResetFilters = () => {
+    setFilters({
+      search: '',
+      doc_type: 'all',
+      doc_status: 'all',
+      load_status: 'all',
+      date_range: 'all',
+      load_id: '',
+    });
+  };
+
+  const visibleMissingLoads = isMissingExpanded ? missingDocLoads : missingDocLoads.slice(0, 3);
+
   return (
     <div id="documents-view" className="space-y-6">
       {/* Top Header & Actions Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <h1 className="text-xl sm:text-2xl font-bold text-slate-100 tracking-tight">
               Dispatch Document Center
             </h1>
-            <span className="px-2.5 py-0.5 rounded-full bg-indigo-950/80 border border-indigo-800/60 text-indigo-300 font-mono text-xs">
-              Phase 2D
+            <span className="px-2.5 py-0.5 rounded-full bg-indigo-950/90 border border-indigo-800/70 text-indigo-300 font-sans font-medium text-xs">
+              Audit & Compliance
             </span>
           </div>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Rate confirmations, signed bills of lading (BOL), proof of delivery (POD), and invoicing packets.
+            Rate confirmations, signed bills of lading (BOL), proof of delivery (POD), and carrier invoicing packets.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
           <button
             id="refresh-documents-btn"
             type="button"
             onClick={() => loadData()}
-            className="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 transition-colors cursor-pointer"
+            className="h-9 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-slate-100 transition-colors cursor-pointer flex items-center justify-center"
             title="Refresh Paperwork Feed"
           >
             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
@@ -233,9 +247,9 @@ export const DocumentsView: React.FC = () => {
               setExtractionPreselectLoadId(undefined);
               setIsExtractionModalOpen(true);
             }}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 rounded-lg shadow-sm transition-all cursor-pointer border border-indigo-400/30"
+            className="h-9 inline-flex items-center gap-2 px-3.5 text-xs font-semibold text-slate-200 hover:text-slate-100 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 rounded-xl transition-all cursor-pointer shadow-xs"
           >
-            <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+            <Sparkles className="w-4 h-4 text-amber-400" />
             <span>AI Rate Con OCR</span>
           </button>
 
@@ -246,7 +260,7 @@ export const DocumentsView: React.FC = () => {
               setUploadPreselectLoadId(undefined);
               setIsUploadModalOpen(true);
             }}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-200 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg shadow-sm transition-colors cursor-pointer"
+            className="h-9 inline-flex items-center gap-2 px-4 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-xs transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Upload Paperwork</span>
@@ -255,7 +269,7 @@ export const DocumentsView: React.FC = () => {
       </div>
 
       {/* KPI Metric Cards Strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
         <MetricCard
           id="metric-total-docs"
           title="Total Documents"
@@ -268,7 +282,7 @@ export const DocumentsView: React.FC = () => {
           id="metric-pending-audit"
           title="Pending Verification"
           value={stats.pendingVerificationCount.toString()}
-          subtitle="Requires dispatcher signature audit"
+          subtitle="Requires dispatcher audit"
           icon={FileCheck}
           accentColor="blue"
         />
@@ -276,7 +290,7 @@ export const DocumentsView: React.FC = () => {
           id="metric-missing-rc"
           title="Missing Rate Cons"
           value={stats.missingRateConsCount.toString()}
-          subtitle="Mandatory for booked / transit loads"
+          subtitle="Booked / transit loads"
           icon={FileWarning}
           accentColor="amber"
         />
@@ -284,7 +298,7 @@ export const DocumentsView: React.FC = () => {
           id="metric-ready-invoice"
           title="Ready to Invoice"
           value={stats.readyToInvoiceLoadsCount.toString()}
-          subtitle="Delivered loads with clean signed PODs"
+          subtitle="Delivered loads with clean PODs"
           icon={Receipt}
           accentColor="emerald"
         />
@@ -294,44 +308,57 @@ export const DocumentsView: React.FC = () => {
       {missingDocLoads.length > 0 && (
         <div
           id="missing-paperwork-alert-panel"
-          className="p-4 rounded-xl bg-amber-950/20 border border-amber-800/40 space-y-3"
+          className="p-4 rounded-xl bg-amber-950/20 border border-amber-800/40 space-y-3 shadow-xs"
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-amber-300">
-              <AlertTriangle className="w-4 h-4" />
+              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
               <h2 className="text-xs font-bold uppercase tracking-wider">
                 Missing Required Paperwork ({missingDocLoads.length} Active Loads)
               </h2>
             </div>
-            <span className="text-[11px] text-amber-400 font-mono">
-              Audit Checklist Active
-            </span>
+            <div className="flex items-center gap-3">
+              {missingDocLoads.length > 3 && (
+                <button
+                  type="button"
+                  onClick={() => setIsMissingExpanded((prev) => !prev)}
+                  className="text-xs font-semibold text-amber-300 hover:text-amber-200 underline cursor-pointer"
+                >
+                  {isMissingExpanded ? 'Show Less' : `View All (${missingDocLoads.length})`}
+                </button>
+              )}
+              <span className="text-[11px] text-amber-400 font-mono tabular-nums">
+                Audit Active
+              </span>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
-            {missingDocLoads.slice(0, 3).map(({ load, missingDocs }) => (
+            {visibleMissingLoads.map(({ load, missingDocs }) => (
               <div
                 key={load.id}
-                className="p-3 rounded-lg bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-3 text-xs"
+                className="p-3 rounded-xl bg-slate-950/90 border border-slate-800/90 flex items-center justify-between gap-3 text-xs"
               >
-                <div>
-                  <div className="flex items-center gap-1.5 font-mono">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 font-mono tabular-nums">
                     <button
                       type="button"
                       onClick={() => handleOpenLoadDetail(load.id)}
-                      className="font-bold text-sky-400 hover:text-sky-300 cursor-pointer"
+                      className="font-bold text-sky-400 hover:text-sky-300 cursor-pointer truncate"
                     >
                       {load.load_number}
                     </button>
-                    <span className="text-[10px] text-slate-500">
-                      ({load.origin_state} &rarr; {load.dest_state})
+                    <span className="text-[10px] text-slate-400 flex items-center gap-1 shrink-0">
+                      <span>{load.origin_state}</span>
+                      <ArrowRight className="w-2.5 h-2.5 text-slate-500 inline" />
+                      <span>{load.dest_state}</span>
                     </span>
                   </div>
-                  <div className="flex flex-wrap gap-1 mt-1">
+                  <div className="flex flex-wrap gap-1 mt-1.5">
                     {missingDocs.map((docType) => (
                       <span
                         key={docType}
-                        className="text-[10px] px-1.5 py-0.2 rounded bg-rose-950/60 text-rose-300 border border-rose-800/60 font-mono"
+                        className="text-[10px] px-2 py-0.5 rounded-md bg-rose-950/70 text-rose-300 border border-rose-800/60 font-mono"
                       >
                         Missing {DOCUMENT_TYPE_LABELS[docType as keyof typeof DOCUMENT_TYPE_LABELS]}
                       </span>
@@ -345,7 +372,7 @@ export const DocumentsView: React.FC = () => {
                       type="button"
                       onClick={() => handleCreateDocumentCollectionTask(load, missingDocs)}
                       title="Create Document Collection Task"
-                      className="px-2 py-1 text-[11px] font-semibold text-amber-300 hover:text-amber-200 bg-amber-950/80 hover:bg-amber-900 border border-amber-800/60 rounded transition-colors cursor-pointer flex items-center gap-1"
+                      className="h-7 px-2 text-[11px] font-semibold text-amber-300 hover:text-amber-200 bg-amber-950/80 hover:bg-amber-900 border border-amber-800/60 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
                     >
                       <CheckSquare className="w-3 h-3 text-amber-400" />
                       <span>Task</span>
@@ -354,7 +381,7 @@ export const DocumentsView: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => handleQuickUploadForMissingLoad(load.id)}
-                    className="px-2.5 py-1 text-[11px] font-semibold text-indigo-300 hover:text-indigo-200 bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-800/60 rounded transition-colors cursor-pointer"
+                    className="h-7 px-2.5 text-[11px] font-semibold text-indigo-300 hover:text-indigo-200 bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-800/60 rounded-lg transition-colors cursor-pointer"
                   >
                     Upload
                   </button>
@@ -394,6 +421,15 @@ export const DocumentsView: React.FC = () => {
           setUploadPreselectLoadId(undefined);
           setIsUploadModalOpen(true);
         }}
+        onResetFilters={handleResetFilters}
+        hasActiveFilters={
+          Boolean(filters.search) ||
+          (Boolean(filters.doc_type) && filters.doc_type !== 'all') ||
+          (Boolean(filters.doc_status) && filters.doc_status !== 'all') ||
+          (Boolean(filters.load_status) && filters.load_status !== 'all') ||
+          (Boolean(filters.date_range) && filters.date_range !== 'all') ||
+          Boolean(filters.load_id)
+        }
       />
 
       {/* Upload Paperwork Modal */}

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Client, ClientType } from '../../types/domain.types.ts';
 import { Modal } from '../../components/common/Modal.tsx';
 import { clientService } from './clientService.ts';
-import { AlertCircle, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Building2, Users, Truck, FileText, Check } from 'lucide-react';
 
 interface ClientModalProps {
   isOpen: boolean;
@@ -172,11 +172,11 @@ export const ClientModal: React.FC<ClientModalProps> = ({
       }
       maxWidth="lg"
     >
-      <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+      <form onSubmit={handleSubmit} className="space-y-5 text-xs">
         {formError && (
           <div
             id="client-form-error"
-            className="p-3 bg-rose-950/50 border border-rose-800/80 rounded-lg text-rose-200 flex items-start gap-2"
+            className="p-3.5 bg-rose-950/50 border border-rose-800/80 rounded-xl text-rose-200 flex items-start gap-2.5 shadow-xs"
           >
             <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
             <div>
@@ -186,204 +186,243 @@ export const ClientModal: React.FC<ClientModalProps> = ({
           </div>
         )}
 
-        {/* Company Name & Client Type */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="sm:col-span-2">
-            <label className="block text-slate-300 font-medium mb-1">
-              Carrier / Company Name <span className="text-rose-400">*</span>
-            </label>
-            <input
-              id="client-company-name-input"
-              type="text"
-              placeholder="e.g. Apex Hauling LLC / John Smith Trucking"
-              value={companyName}
-              onChange={(e) => setCompanyName(e.target.value)}
-              className={`w-full px-3 py-2 bg-slate-950 border rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 ${
-                fieldErrors.companyName ? 'border-rose-500' : 'border-slate-800'
-              }`}
-            />
-            {fieldErrors.companyName && (
-              <p className="text-[11px] text-rose-400 mt-1">{fieldErrors.companyName}</p>
-            )}
+        {/* Section 1: Carrier Identity & Classification */}
+        <div className="space-y-3 p-4 bg-slate-950/40 border border-slate-800/80 rounded-xl">
+          <div className="flex items-center gap-1.5 text-slate-300 font-semibold uppercase tracking-wider text-[11px] border-b border-slate-800/60 pb-2">
+            <Building2 className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Carrier Identity & Classification</span>
           </div>
 
-          <div>
-            <label className="block text-slate-300 font-medium mb-1">
-              Client Type <span className="text-rose-400">*</span>
-            </label>
-            <select
-              id="client-type-select"
-              value={clientType}
-              onChange={(e) => setClientType(e.target.value as ClientType)}
-              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
-            >
-              <option value="owner_operator">Owner-Operator (1 Truck)</option>
-              <option value="fleet">Small Fleet (Multi-Truck)</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Primary Contact Name & Phone */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="block text-slate-300 font-medium mb-1">Primary Contact Name</label>
-            <input
-              id="client-contact-name-input"
-              type="text"
-              placeholder="e.g. John Smith"
-              value={contactName}
-              onChange={(e) => setContactName(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-slate-300 font-medium mb-1">Contact Phone</label>
-            <input
-              id="client-contact-phone-input"
-              type="tel"
-              placeholder="+1 (555) 123-4567"
-              value={contactPhone}
-              onChange={(e) => setContactPhone(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 font-mono"
-            />
-          </div>
-        </div>
-
-        {/* Email Addresses */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="block text-slate-300 font-medium mb-1">Contact Email</label>
-            <input
-              id="client-contact-email-input"
-              type="email"
-              placeholder="dispatch@carrier.com"
-              value={contactEmail}
-              onChange={(e) => setContactEmail(e.target.value)}
-              className={`w-full px-3 py-2 bg-slate-950 border rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 ${
-                fieldErrors.contactEmail ? 'border-rose-500' : 'border-slate-800'
-              }`}
-            />
-            {fieldErrors.contactEmail && (
-              <p className="text-[11px] text-rose-400 mt-1">{fieldErrors.contactEmail}</p>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-slate-300 font-medium mb-1">Billing / Factoring Email</label>
-            <input
-              id="client-billing-email-input"
-              type="email"
-              placeholder="invoicing@carrier.com"
-              value={billingEmail}
-              onChange={(e) => setBillingEmail(e.target.value)}
-              className={`w-full px-3 py-2 bg-slate-950 border rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 ${
-                fieldErrors.billingEmail ? 'border-rose-500' : 'border-slate-800'
-              }`}
-            />
-            {fieldErrors.billingEmail && (
-              <p className="text-[11px] text-rose-400 mt-1">{fieldErrors.billingEmail}</p>
-            )}
-          </div>
-        </div>
-
-        {/* Dispatch Preferences: Equipment, Lanes & Target RPM */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div>
-            <label className="block text-slate-300 font-medium mb-1">Preferred Equipment</label>
-            <input
-              id="client-equipment-input"
-              type="text"
-              placeholder="53' Dry Van, Reefer"
-              value={preferredEquipment}
-              onChange={(e) => setPreferredEquipment(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-slate-300 font-medium mb-1">Preferred Lanes</label>
-            <input
-              id="client-lanes-input"
-              type="text"
-              placeholder="IL -> TX, Midwest Regional"
-              value={preferredLanes}
-              onChange={(e) => setPreferredLanes(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-slate-300 font-medium mb-1">Target Min RPM ($/mi)</label>
-            <input
-              id="client-min-rpm-input"
-              type="number"
-              step="0.01"
-              min="0"
-              placeholder="2.50"
-              value={minRpm}
-              onChange={(e) => setMinRpm(e.target.value)}
-              className={`w-full px-3 py-2 bg-slate-950 border rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 font-mono ${
-                fieldErrors.minRpm ? 'border-rose-500' : 'border-slate-800'
-              }`}
-            />
-            {fieldErrors.minRpm && (
-              <p className="text-[11px] text-rose-400 mt-1">{fieldErrors.minRpm}</p>
-            )}
-          </div>
-        </div>
-
-        {/* Status (Edit mode or creation) */}
-        {isEdit && (
-          <div>
-            <label className="block text-slate-300 font-medium mb-1">Client Account Status</label>
-            <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2 cursor-pointer text-slate-200">
-                <input
-                  type="radio"
-                  name="client-status"
-                  value="active"
-                  checked={status === 'active'}
-                  onChange={() => setStatus('active')}
-                  className="text-indigo-600 focus:ring-indigo-500"
-                />
-                <span>Active (Active dispatching)</span>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="sm:col-span-2">
+              <label className="block text-slate-300 font-medium mb-1">
+                Carrier / Company Name <span className="text-rose-400">*</span>
               </label>
-              <label className="flex items-center gap-2 cursor-pointer text-slate-400">
-                <input
-                  type="radio"
-                  name="client-status"
-                  value="inactive"
-                  checked={status === 'inactive'}
-                  onChange={() => setStatus('inactive')}
-                  className="text-indigo-600 focus:ring-indigo-500"
-                />
-                <span>Inactive (Suspended / Off-duty)</span>
+              <input
+                id="client-company-name-input"
+                type="text"
+                placeholder="e.g. Apex Hauling LLC / John Smith Trucking"
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                className={`w-full h-9 px-3 bg-slate-950 border rounded-xl text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 transition-colors ${
+                  fieldErrors.companyName ? 'border-rose-500' : 'border-slate-800'
+                }`}
+              />
+              {fieldErrors.companyName && (
+                <p className="text-[11px] text-rose-400 mt-1">{fieldErrors.companyName}</p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">
+                Account Type <span className="text-rose-400">*</span>
               </label>
+              <select
+                id="client-type-select"
+                value={clientType}
+                onChange={(e) => setClientType(e.target.value as ClientType)}
+                className="w-full h-9 px-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 cursor-pointer"
+              >
+                <option value="owner_operator">Owner-Operator (1 Truck)</option>
+                <option value="fleet">Small Fleet (Multi-Truck)</option>
+              </select>
             </div>
           </div>
-        )}
+        </div>
 
-        {/* Notes */}
-        <div>
-          <label className="block text-slate-300 font-medium mb-1">Dispatcher Operational Notes</label>
-          <textarea
-            id="client-notes-textarea"
-            rows={3}
-            placeholder="Driver home time requirements, factoring company terms, special freight preferences, etc."
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
-          />
+        {/* Section 2: Contact & Factoring Roster */}
+        <div className="space-y-3 p-4 bg-slate-950/40 border border-slate-800/80 rounded-xl">
+          <div className="flex items-center gap-1.5 text-slate-300 font-semibold uppercase tracking-wider text-[11px] border-b border-slate-800/60 pb-2">
+            <Users className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Contact & Billing Roster</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Primary Contact Name</label>
+              <input
+                id="client-contact-name-input"
+                type="text"
+                placeholder="e.g. John Smith"
+                value={contactName}
+                onChange={(e) => setContactName(e.target.value)}
+                className="w-full h-9 px-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Contact Phone</label>
+              <input
+                id="client-contact-phone-input"
+                type="tel"
+                placeholder="+1 (555) 123-4567"
+                value={contactPhone}
+                onChange={(e) => setContactPhone(e.target.value)}
+                className="w-full h-9 px-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 font-mono tabular-nums"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Contact Email</label>
+              <input
+                id="client-contact-email-input"
+                type="email"
+                placeholder="dispatch@carrier.com"
+                value={contactEmail}
+                onChange={(e) => setContactEmail(e.target.value)}
+                className={`w-full h-9 px-3 bg-slate-950 border rounded-xl text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 ${
+                  fieldErrors.contactEmail ? 'border-rose-500' : 'border-slate-800'
+                }`}
+              />
+              {fieldErrors.contactEmail && (
+                <p className="text-[11px] text-rose-400 mt-1">{fieldErrors.contactEmail}</p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Billing / Factoring Email</label>
+              <input
+                id="client-billing-email-input"
+                type="email"
+                placeholder="invoicing@carrier.com"
+                value={billingEmail}
+                onChange={(e) => setBillingEmail(e.target.value)}
+                className={`w-full h-9 px-3 bg-slate-950 border rounded-xl text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 font-mono ${
+                  fieldErrors.billingEmail ? 'border-rose-500' : 'border-slate-800'
+                }`}
+              />
+              {fieldErrors.billingEmail && (
+                <p className="text-[11px] text-rose-400 mt-1">{fieldErrors.billingEmail}</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Section 3: Dispatch & Rate Preferences */}
+        <div className="space-y-3 p-4 bg-slate-950/40 border border-slate-800/80 rounded-xl">
+          <div className="flex items-center gap-1.5 text-slate-300 font-semibold uppercase tracking-wider text-[11px] border-b border-slate-800/60 pb-2">
+            <Truck className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Dispatch & Rate Preferences</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Preferred Equipment</label>
+              <input
+                id="client-equipment-input"
+                type="text"
+                placeholder="53' Dry Van, Reefer"
+                value={preferredEquipment}
+                onChange={(e) => setPreferredEquipment(e.target.value)}
+                className="w-full h-9 px-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Preferred Lanes</label>
+              <input
+                id="client-lanes-input"
+                type="text"
+                placeholder="IL -> TX, Midwest Regional"
+                value={preferredLanes}
+                onChange={(e) => setPreferredLanes(e.target.value)}
+                className="w-full h-9 px-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">Target Min RPM ($/mi)</label>
+              <input
+                id="client-min-rpm-input"
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="2.50"
+                value={minRpm}
+                onChange={(e) => setMinRpm(e.target.value)}
+                className={`w-full h-9 px-3 bg-slate-950 border rounded-xl text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 font-mono tabular-nums ${
+                  fieldErrors.minRpm ? 'border-rose-500' : 'border-slate-800'
+                }`}
+              />
+              {fieldErrors.minRpm && (
+                <p className="text-[11px] text-rose-400 mt-1">{fieldErrors.minRpm}</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Section 4: Operational Status & Dispatcher Notes */}
+        <div className="space-y-3 p-4 bg-slate-950/40 border border-slate-800/80 rounded-xl">
+          <div className="flex items-center gap-1.5 text-slate-300 font-semibold uppercase tracking-wider text-[11px] border-b border-slate-800/60 pb-2">
+            <FileText className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Dispatcher Notes & Account Status</span>
+          </div>
+
+          {/* Polished Segmented Status Controls */}
+          <div>
+            <label className="block text-slate-300 font-medium mb-1.5">Client Account Status</label>
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setStatus('active')}
+                className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                  status === 'active'
+                    ? 'bg-emerald-950/40 border-emerald-700/80 text-emerald-200'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <div>
+                  <div className="font-semibold text-xs flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    Active Client
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">Available for load dispatch</div>
+                </div>
+                {status === 'active' && <Check className="w-4 h-4 text-emerald-400" />}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setStatus('inactive')}
+                className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                  status === 'inactive'
+                    ? 'bg-amber-950/40 border-amber-700/80 text-amber-200'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <div>
+                  <div className="font-semibold text-xs flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-400" />
+                    Inactive Client
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">Suspended / Off-duty</div>
+                </div>
+                {status === 'inactive' && <Check className="w-4 h-4 text-amber-400" />}
+              </button>
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="block text-slate-300 font-medium mb-1">Dispatcher Operational Notes</label>
+            <textarea
+              id="client-notes-textarea"
+              rows={3}
+              placeholder="Driver home time requirements, factoring company terms, special freight preferences, etc."
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50"
+            />
+          </div>
         </div>
 
         {/* Action Buttons */}
-        <div className="pt-4 border-t border-slate-800 flex items-center justify-end gap-3">
+        <div className="pt-3 border-t border-slate-800 flex items-center justify-end gap-3">
           <button
             type="button"
             onClick={onClose}
             disabled={isSubmitting}
-            className="px-4 py-2 text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+            className="px-4 py-2 text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
           >
             Cancel
           </button>
@@ -391,7 +430,7 @@ export const ClientModal: React.FC<ClientModalProps> = ({
             id="client-submit-btn"
             type="submit"
             disabled={isSubmitting}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors cursor-pointer disabled:opacity-50 shadow-sm"
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition-colors cursor-pointer disabled:opacity-50 shadow-xs"
           >
             {isSubmitting ? (
               <>
@@ -410,3 +449,4 @@ export const ClientModal: React.FC<ClientModalProps> = ({
     </Modal>
   );
 };
+

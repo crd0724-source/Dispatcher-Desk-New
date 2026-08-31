@@ -197,11 +197,14 @@ class ExtractionService {
       targetLoad = await loadService.createLoad(organizationId, createInput);
     } else {
       // Update existing load
+      const existingLoad = await loadService.getLoadById(organizationId, targetLoadId);
+      const shouldPromoteToBooked = existingLoad && (existingLoad.pipeline_status === 'sourced' || existingLoad.pipeline_status === 'negotiating');
+
       const updateInput: UpdateLoadInput = {
         broker_id: brokerId !== undefined ? brokerId : undefined,
         truck_id: truckId !== undefined ? truckId : undefined,
         driver_id: driverId !== undefined ? driverId : undefined,
-        pipeline_status: 'booked', // Promoting to booked on Rate Con receipt
+        pipeline_status: shouldPromoteToBooked ? 'booked' : undefined,
         equipment_type: overriddenFields.equipment_type || (extractedData.load_info.equipment_type as EquipmentType),
         commodity:
           overriddenFields.commodity !== undefined

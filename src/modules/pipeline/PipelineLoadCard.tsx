@@ -140,21 +140,21 @@ export const PipelineLoadCard: React.FC<PipelineLoadCardProps> = ({
         <div className="flex items-center gap-1.5 min-w-0">
           {canMove && (
             <span
-              className="text-slate-600 group-hover:text-slate-400 cursor-grab active:cursor-grabbing p-0.5 -ml-1 rounded transition-colors"
+              className="text-slate-500 group-hover:text-slate-300 cursor-grab active:cursor-grabbing p-0.5 -ml-1 rounded transition-colors"
               title="Drag to move status"
               onClick={(e) => e.stopPropagation()}
             >
               <GripVertical className="w-3.5 h-3.5" />
             </span>
           )}
-          <span className="font-mono text-xs font-bold text-sky-400 tracking-tight truncate">
+          <span className="font-mono tabular-nums text-xs font-bold text-sky-400 tracking-tight truncate">
             {load.load_number}
           </span>
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
           {/* Equipment Tag */}
-          <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded bg-slate-800/90 text-slate-300 border border-slate-700/60 font-mono">
+          <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-md bg-slate-800/90 text-slate-300 border border-slate-700/60 font-mono">
             {load.equipment_type.replace('_', ' ')}
           </span>
 
@@ -164,7 +164,7 @@ export const PipelineLoadCard: React.FC<PipelineLoadCardProps> = ({
               id={`load-menu-btn-${load.id}`}
               type="button"
               onClick={() => setIsMenuOpen((prev) => !prev)}
-              className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
+              className="p-1 rounded-md text-slate-400 hover:text-slate-100 hover:bg-slate-800 border border-transparent hover:border-slate-700 transition-colors cursor-pointer"
               title="Actions"
             >
               <MoreVertical className="w-3.5 h-3.5" />
@@ -249,7 +249,7 @@ export const PipelineLoadCard: React.FC<PipelineLoadCardProps> = ({
       <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800/80 space-y-1.5">
         <div className="flex items-center justify-between text-xs font-semibold text-slate-100">
           <div className="flex items-center gap-1.5 truncate">
-            <span className="px-1.5 py-0.5 rounded bg-sky-950/80 text-sky-300 border border-sky-800/60 font-mono text-[11px]">
+            <span className="px-1.5 py-0.5 rounded bg-sky-950/80 text-sky-300 border border-sky-800/60 font-mono text-[11px] shrink-0">
               {load.origin_state}
             </span>
             <span className="truncate">{load.origin_city}</span>
@@ -259,7 +259,7 @@ export const PipelineLoadCard: React.FC<PipelineLoadCardProps> = ({
 
           <div className="flex items-center gap-1.5 truncate justify-end">
             <span className="truncate">{load.dest_city}</span>
-            <span className="px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 font-mono text-[11px]">
+            <span className="px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 font-mono text-[11px] shrink-0">
               {load.dest_state}
             </span>
           </div>
@@ -267,18 +267,18 @@ export const PipelineLoadCard: React.FC<PipelineLoadCardProps> = ({
 
         {/* Pickup & Delivery Times */}
         {(formattedPickup || formattedDelivery) && (
-          <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-1 border-t border-slate-800/60">
-            <div className="flex items-center gap-1">
-              <Clock className="w-2.5 h-2.5 text-slate-500" />
-              <span>PU: {formattedPickup || 'TBD'}</span>
+          <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono tabular-nums pt-1 border-t border-slate-800/60">
+            <div className="flex items-center gap-1 truncate max-w-[48%]">
+              <Clock className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+              <span className="truncate">PU: {formattedPickup || 'TBD'}</span>
             </div>
-            <span>DEL: {formattedDelivery || 'TBD'}</span>
+            <span className="truncate max-w-[48%] text-right">DEL: {formattedDelivery || 'TBD'}</span>
           </div>
         )}
       </div>
 
       {/* Assignments & Stakeholders */}
-      <div className="space-y-1 text-[11px]">
+      <div className="space-y-1.5 text-[11px]">
         {/* Carrier Client / Broker */}
         <div className="flex items-center justify-between text-slate-300">
           <div className="flex items-center gap-1.5 truncate max-w-[50%]">
@@ -299,7 +299,7 @@ export const PipelineLoadCard: React.FC<PipelineLoadCardProps> = ({
         <div className="flex items-center justify-between text-slate-400">
           <div className="flex items-center gap-1.5 truncate max-w-[50%]">
             <TruckIcon className="w-3 h-3 text-purple-400 shrink-0" />
-            <span className="truncate font-mono">
+            <span className="truncate font-mono tabular-nums">
               {load.truck?.truck_number ? `Unit #${load.truck.truck_number}` : 'Unassigned Truck'}
             </span>
           </div>
@@ -319,7 +319,7 @@ export const PipelineLoadCard: React.FC<PipelineLoadCardProps> = ({
               {load.commodity || 'General Freight'}
             </span>
             {load.weight_lbs ? (
-              <span className="font-mono">
+              <span className="font-mono tabular-nums">
                 {Number(load.weight_lbs).toLocaleString()} lbs
               </span>
             ) : null}
@@ -361,7 +361,7 @@ export const PipelineLoadCard: React.FC<PipelineLoadCardProps> = ({
               </span>
             </div>
 
-            <span className="font-mono text-slate-400 text-[10px]">
+            <span className="font-mono tabular-nums text-slate-400 text-[10px]">
               {docSummary.totalCompleted}/{docSummary.totalRequired} Docs
             </span>
           </div>
@@ -397,7 +397,7 @@ export const PipelineLoadCard: React.FC<PipelineLoadCardProps> = ({
 
             <div className="flex items-center gap-1 shrink-0">
               {trackingSummary.isMissingRecentCheckIn ? (
-                <span className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded bg-amber-950 text-amber-300 border border-amber-800/50 font-mono text-[9px]">
+                <span className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded bg-amber-950 text-amber-300 border border-amber-800/50 font-mono tabular-nums text-[9px]">
                   <Clock className="w-2.5 h-2.5" /> &gt;24h
                 </span>
               ) : trackingSummary.currentStatus ? (
@@ -427,17 +427,17 @@ export const PipelineLoadCard: React.FC<PipelineLoadCardProps> = ({
       <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
         <div className="flex items-baseline justify-between">
           <div className="flex items-baseline gap-1.5">
-            <span className="text-sm font-bold font-mono text-emerald-400">
+            <span className="text-sm font-bold font-mono tabular-nums text-emerald-400">
               {formatCurrency(load.rate)}
             </span>
-            <span className="text-[10px] font-mono text-slate-400">
+            <span className="text-[10px] font-mono tabular-nums text-slate-400">
               ({formatRPM(financialMetrics.rpm)})
             </span>
           </div>
 
           {/* Margin indicator */}
           <div
-            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold border ${
+            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono tabular-nums font-bold border ${
               !isProfitable
                 ? 'bg-rose-950/60 text-rose-300 border-rose-800/60'
                 : isHighMargin
@@ -455,7 +455,7 @@ export const PipelineLoadCard: React.FC<PipelineLoadCardProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+        <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono tabular-nums">
           <span>{formatMiles(totalMiles)} ({load.loaded_miles || 0}L + {load.deadhead_miles || 0}DH)</span>
           <span>Net: <strong className={isProfitable ? 'text-slate-200' : 'text-rose-400'}>{formatCurrency(financialMetrics.estimatedProfit)}</strong></span>
         </div>

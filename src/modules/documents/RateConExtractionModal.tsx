@@ -294,7 +294,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
     }
 
     return (
-      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono border ${color}`}>
+      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono tabular-nums border ${color}`}>
         <Sparkles className="w-3 h-3" />
         <span>{val}% Conf</span>
       </span>
@@ -306,13 +306,13 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
       id="rate-con-extraction-modal"
       isOpen={isOpen}
       onClose={onClose}
-      title="AI Rate Confirmation OCR & Assisted Load Extraction"
+      title="AI Rate Confirmation OCR & Extraction"
       subtitle="Extract broker agreements, lanes, rates, and accessorials with mandatory dispatcher review and approval"
       maxWidth="3xl"
     >
       <div className="space-y-4 p-1 text-xs text-slate-200">
         {errorMessage && (
-          <div className="p-3 rounded-lg bg-rose-950/80 border border-rose-800 text-rose-200 flex items-start gap-2">
+          <div className="p-3 rounded-xl bg-rose-950/80 border border-rose-800 text-rose-200 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
             <div className="space-y-0.5">
               <p className="font-semibold">Extraction Notice</p>
@@ -329,9 +329,9 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
               <button
                 type="button"
                 onClick={() => setInputTab('sample')}
-                className={`px-3 py-1.5 rounded-lg font-semibold text-xs transition-colors cursor-pointer ${
+                className={`h-8 px-3 rounded-xl font-semibold text-xs transition-colors cursor-pointer ${
                   inputTab === 'sample'
-                    ? 'bg-indigo-600 text-white'
+                    ? 'bg-indigo-600 text-white shadow-xs'
                     : 'bg-slate-900 text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -340,9 +340,9 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
               <button
                 type="button"
                 onClick={() => setInputTab('upload')}
-                className={`px-3 py-1.5 rounded-lg font-semibold text-xs transition-colors cursor-pointer ${
+                className={`h-8 px-3 rounded-xl font-semibold text-xs transition-colors cursor-pointer ${
                   inputTab === 'upload'
-                    ? 'bg-indigo-600 text-white'
+                    ? 'bg-indigo-600 text-white shadow-xs'
                     : 'bg-slate-900 text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -351,9 +351,9 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
               <button
                 type="button"
                 onClick={() => setInputTab('text')}
-                className={`px-3 py-1.5 rounded-lg font-semibold text-xs transition-colors cursor-pointer ${
+                className={`h-8 px-3 rounded-xl font-semibold text-xs transition-colors cursor-pointer ${
                   inputTab === 'text'
-                    ? 'bg-indigo-600 text-white'
+                    ? 'bg-indigo-600 text-white shadow-xs'
                     : 'bg-slate-900 text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -376,13 +376,13 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                         onClick={() => setSelectedSample(sample)}
                         className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
                           isSelected
-                            ? 'bg-indigo-950/50 border-indigo-500 shadow-md'
+                            ? 'bg-indigo-950/50 border-indigo-500 ring-1 ring-indigo-500/50 shadow-xs'
                             : 'bg-slate-950 border-slate-800 hover:border-slate-700'
                         }`}
                       >
                         <div className="flex items-center justify-between gap-1 mb-1.5">
                           <span className="font-bold text-slate-100 text-xs truncate">{sample.title}</span>
-                          <span className="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/60 font-mono text-[11px] shrink-0">
+                          <span className="px-1.5 py-0.5 rounded-md bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 font-mono tabular-nums text-[11px] shrink-0 font-bold">
                             {formatCurrency(sample.rate)}
                           </span>
                         </div>
@@ -423,19 +423,19 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                     <p className="font-semibold text-slate-200 text-xs">
                       Click to upload Rate Confirmation PDF or scanned paperwork
                     </p>
-                    <p className="text-[11px] text-slate-500 font-mono mt-1">
+                    <p className="text-[11px] text-slate-500 font-mono tabular-nums mt-1">
                       PDF, JPG, PNG, WEBP (Max 15 MB)
                     </p>
                   </div>
                 ) : (
-                  <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-lg bg-indigo-950 text-indigo-400 border border-indigo-800/50">
+                  <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="p-2 rounded-xl bg-indigo-950 text-indigo-400 border border-indigo-800/50 shrink-0">
                         <FileCheck className="w-5 h-5" />
                       </div>
-                      <div>
-                        <p className="font-semibold text-slate-100">{selectedFile.name}</p>
-                        <p className="text-[11px] text-slate-400 font-mono">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-slate-100 truncate" title={selectedFile.name}>{selectedFile.name}</p>
+                        <p className="text-[11px] text-slate-400 font-mono tabular-nums">
                           {(selectedFile.size / 1024).toFixed(1)} KB • {selectedFile.type || 'Document'}
                         </p>
                       </div>
@@ -443,7 +443,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                     <button
                       type="button"
                       onClick={() => setSelectedFile(null)}
-                      className="p-1.5 text-slate-400 hover:text-rose-400 rounded-lg hover:bg-slate-900 transition-colors"
+                      className="p-1.5 text-slate-400 hover:text-rose-400 rounded-lg hover:bg-slate-900 transition-colors cursor-pointer shrink-0"
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -463,7 +463,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                   value={pastedText}
                   onChange={(e) => setPastedText(e.target.value)}
                   placeholder="Paste load confirmation text here (e.g. Apex Freight, Rate: $2,450, Dallas TX to Atlanta GA...)"
-                  className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder-slate-600 resize-none"
+                  className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 placeholder-slate-600 resize-none"
                 />
               </div>
             )}
@@ -478,7 +478,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200 bg-slate-900 rounded-lg"
+                  className="h-9 px-4 text-xs font-semibold text-slate-400 hover:text-slate-200 bg-slate-900 rounded-xl transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -486,7 +486,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                   type="button"
                   onClick={handleRunExtraction}
                   disabled={isExtracting}
-                  className="inline-flex items-center gap-2 px-5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-lg shadow-sm transition-colors cursor-pointer"
+                  className="h-9 inline-flex items-center gap-2 px-5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl shadow-xs transition-colors cursor-pointer"
                 >
                   <Sparkles className={`w-4 h-4 ${isExtracting ? 'animate-spin' : ''}`} />
                   <span>{isExtracting ? 'Running AI OCR Extraction...' : 'Extract Rate Con Details'}</span>
@@ -498,29 +498,29 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
           /* STEP 2: EXTRACTION AUDIT & APPROVAL STAGE */
           <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
             {/* Header & Confidence Strip */}
-            <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-indigo-950/70 border border-indigo-800/60 text-indigo-400">
+            <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="p-2 rounded-xl bg-indigo-950/70 border border-indigo-800/60 text-indigo-400 shrink-0">
                   <FileSpreadsheet className="w-5 h-5" />
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-slate-100 text-sm">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-slate-100 text-sm truncate">
                       {extraction.broker.company_name || 'Extracted Rate Confirmation'}
                     </span>
                     {renderConfidenceBadge(extraction.confidence_scores.overall)}
                   </div>
-                  <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                  <p className="text-[11px] text-slate-400 font-mono tabular-nums mt-0.5 truncate">
                     Source: {extraction.provenance?.fileName} • Model: {extraction.provenance?.model || 'Gemini 3.7 Flash'}
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowRawText(!showRawText)}
-                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[11px] font-semibold flex items-center gap-1.5"
+                  className="h-8 px-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[11px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <Eye className="w-3.5 h-3.5" />
                   <span>{showRawText ? 'Hide Source' : 'View Source Text'}</span>
@@ -528,7 +528,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setExtraction(null)}
-                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-800 text-[11px] font-semibold flex items-center gap-1.5"
+                  className="h-8 px-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-800 text-[11px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
                   <span>Re-scan / Change</span>
@@ -538,9 +538,9 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
 
             {/* Optional Raw Source Text Collapsible */}
             {showRawText && (
-              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-1">
+              <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 space-y-1.5">
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Raw Document Text</span>
-                <pre className="text-[11px] text-slate-300 font-mono max-h-36 overflow-y-auto whitespace-pre-wrap bg-slate-900/80 p-2.5 rounded">
+                <pre className="text-[11px] text-slate-300 font-mono max-h-36 overflow-y-auto whitespace-pre-wrap bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
                   {selectedSample?.rawText || extraction.load_info.raw_text || 'Document binary analyzed directly by Gemini Vision.'}
                 </pre>
               </div>
@@ -548,7 +548,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
 
             {/* Warnings Box if any */}
             {extraction.warnings && extraction.warnings.length > 0 && (
-              <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-800/60 text-amber-200 space-y-1">
+              <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-800/60 text-amber-200 space-y-1">
                 <div className="flex items-center gap-1.5 font-semibold text-xs">
                   <AlertTriangle className="w-4 h-4 text-amber-400" />
                   <span>Verification Warnings & Discrepancies</span>
@@ -571,9 +571,9 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setTargetMode('new')}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer ${
+                    className={`h-7 px-3 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
                       targetMode === 'new'
-                        ? 'bg-indigo-600 text-white'
+                        ? 'bg-indigo-600 text-white shadow-xs'
                         : 'bg-slate-900 text-slate-400 hover:text-slate-200'
                     }`}
                   >
@@ -582,9 +582,9 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setTargetMode('existing')}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer ${
+                    className={`h-7 px-3 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
                       targetMode === 'existing'
-                        ? 'bg-indigo-600 text-white'
+                        ? 'bg-indigo-600 text-white shadow-xs'
                         : 'bg-slate-900 text-slate-400 hover:text-slate-200'
                     }`}
                   >
@@ -599,7 +599,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                   <select
                     value={targetLoadId}
                     onChange={(e) => setTargetLoadId(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 font-mono text-xs focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                    className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 cursor-pointer"
                   >
                     {loads.map((l) => (
                       <option key={l.id} value={l.id}>
@@ -608,14 +608,14 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                     ))}
                   </select>
                   {selectedLoad && (
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-[11px] text-slate-400 font-mono tabular-nums">
                       Current: {selectedLoad.origin_city}, {selectedLoad.origin_state} &rarr; {selectedLoad.dest_city}, {selectedLoad.dest_state} ({formatCurrency(selectedLoad.rate)})
                     </p>
                   )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <label className="block text-slate-300 font-semibold">
                       Carrier Client <span className="text-rose-400">*</span>
                     </label>
@@ -623,7 +623,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                       value={selectedClientId}
                       onChange={(e) => setSelectedClientId(e.target.value)}
                       required
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 text-xs focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                      className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 cursor-pointer"
                     >
                       {clients.map((c) => (
                         <option key={c.id} value={c.id}>
@@ -633,12 +633,12 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                     </select>
                   </div>
 
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <label className="block text-slate-300 font-semibold">Matched Broker</label>
                     <select
                       value={selectedBrokerId}
                       onChange={(e) => setSelectedBrokerId(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 text-xs focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                      className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 cursor-pointer"
                     >
                       <option value="">-- Select or Match Broker --</option>
                       {brokers.map((b) => (
@@ -667,32 +667,32 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       <label className="text-[11px] text-slate-400 font-semibold">Load / Order #</label>
                       <input
                         type="text"
                         value={formFields.load_number}
                         onChange={(e) => setFormFields({ ...formFields, load_number: e.target.value })}
-                        className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 font-mono text-xs"
+                        className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
                       />
                     </div>
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       <label className="text-[11px] text-slate-400 font-semibold">Gross Rate ($)</label>
                       <input
                         type="number"
                         step="0.01"
                         value={formFields.rate}
                         onChange={(e) => setFormFields({ ...formFields, rate: parseFloat(e.target.value) || 0 })}
-                        className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-emerald-300 font-mono font-bold text-xs"
+                        className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-emerald-300 font-mono font-bold tabular-nums text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
                       />
                     </div>
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       <label className="text-[11px] text-slate-400 font-semibold">Loaded Miles</label>
                       <input
                         type="number"
                         value={formFields.loaded_miles}
                         onChange={(e) => setFormFields({ ...formFields, loaded_miles: parseFloat(e.target.value) || 0 })}
-                        className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 font-mono text-xs"
+                        className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono tabular-nums text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
                       />
                     </div>
                   </div>
@@ -717,7 +717,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                         placeholder="Origin City"
                         value={formFields.origin_city}
                         onChange={(e) => setFormFields({ ...formFields, origin_city: e.target.value })}
-                        className="px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 text-xs"
+                        className="h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
                       />
                       <input
                         type="text"
@@ -725,14 +725,14 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                         maxLength={2}
                         value={formFields.origin_state}
                         onChange={(e) => setFormFields({ ...formFields, origin_state: e.target.value.toUpperCase() })}
-                        className="px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 font-mono text-xs uppercase"
+                        className="h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs uppercase focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
                       />
                       <input
                         type="text"
                         placeholder="Zip"
                         value={formFields.origin_zip}
                         onChange={(e) => setFormFields({ ...formFields, origin_zip: e.target.value })}
-                        className="px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 font-mono text-xs"
+                        className="h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
                       />
                     </div>
                   </div>
@@ -746,7 +746,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                         placeholder="Dest City"
                         value={formFields.dest_city}
                         onChange={(e) => setFormFields({ ...formFields, dest_city: e.target.value })}
-                        className="px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 text-xs"
+                        className="h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
                       />
                       <input
                         type="text"
@@ -754,14 +754,14 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                         maxLength={2}
                         value={formFields.dest_state}
                         onChange={(e) => setFormFields({ ...formFields, dest_state: e.target.value.toUpperCase() })}
-                        className="px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 font-mono text-xs uppercase"
+                        className="h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs uppercase focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
                       />
                       <input
                         type="text"
                         placeholder="Zip"
                         value={formFields.dest_zip}
                         onChange={(e) => setFormFields({ ...formFields, dest_zip: e.target.value })}
-                        className="px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 font-mono text-xs"
+                        className="h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
                       />
                     </div>
                   </div>
@@ -778,12 +778,12 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       <label className="text-[11px] text-slate-400 font-semibold">Equipment</label>
                       <select
                         value={formFields.equipment_type}
                         onChange={(e) => setFormFields({ ...formFields, equipment_type: e.target.value as EquipmentType })}
-                        className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 text-xs cursor-pointer"
+                        className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs cursor-pointer focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
                       >
                         <option value="dry_van">Dry Van</option>
                         <option value="reefer">Reefer</option>
@@ -796,24 +796,24 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                       </select>
                     </div>
 
-                    <div className="space-y-1 sm:col-span-2">
+                    <div className="space-y-1.5 sm:col-span-2">
                       <label className="text-[11px] text-slate-400 font-semibold">Commodity</label>
                       <input
                         type="text"
                         value={formFields.commodity}
                         onChange={(e) => setFormFields({ ...formFields, commodity: e.target.value })}
-                        className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 text-xs"
+                        className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
                       />
                     </div>
                   </div>
 
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <label className="text-[11px] text-slate-400 font-semibold">Special Instructions & Handling Terms</label>
                     <textarea
                       rows={2}
                       value={formFields.special_instructions}
                       onChange={(e) => setFormFields({ ...formFields, special_instructions: e.target.value })}
-                      className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 text-xs resize-none"
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs resize-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
                     />
                   </div>
                 </div>
@@ -828,25 +828,25 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                     <span>Financial Sanity Engine</span>
                   </div>
 
-                  <div className="space-y-2 font-mono text-xs">
+                  <div className="space-y-2 font-mono tabular-nums text-xs">
                     <div className="flex justify-between py-1 border-b border-slate-900">
-                      <span className="text-slate-400">Gross Revenue</span>
+                      <span className="text-slate-400 font-sans">Gross Revenue</span>
                       <span className="font-bold text-emerald-300">{formatCurrency(currentProfitability.grossRate)}</span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-900">
-                      <span className="text-slate-400">Rate Per Mile (RPM)</span>
+                      <span className="text-slate-400 font-sans">Rate Per Mile (RPM)</span>
                       <span className="font-bold text-slate-100">{formatRPM(currentProfitability.rpm)}</span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-900">
-                      <span className="text-slate-400">Est. Fuel Cost</span>
+                      <span className="text-slate-400 font-sans">Est. Fuel Cost</span>
                       <span className="text-slate-300">{formatCurrency(currentProfitability.fuelExpense)}</span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-900">
-                      <span className="text-slate-400">Est. Driver Pay</span>
+                      <span className="text-slate-400 font-sans">Est. Driver Pay</span>
                       <span className="text-slate-300">{formatCurrency(currentProfitability.driverPay)}</span>
                     </div>
-                    <div className="flex justify-between py-1.5 bg-slate-900/60 px-2 rounded font-bold">
-                      <span className="text-indigo-300">Net Estimated Profit</span>
+                    <div className="flex justify-between py-1.5 bg-slate-900/60 px-2 rounded-lg font-bold">
+                      <span className="text-indigo-300 font-sans">Net Estimated Profit</span>
                       <span className="text-indigo-200">{formatCurrency(currentProfitability.estimatedProfit)} ({currentProfitability.profitMargin}%)</span>
                     </div>
                   </div>
@@ -858,9 +858,9 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                     <span className="text-[10px] uppercase font-semibold text-slate-400">Extracted Accessorials</span>
                     <div className="space-y-1.5">
                       {extraction.accessorials.map((acc, idx) => (
-                        <div key={idx} className="p-2 rounded bg-slate-900/70 border border-slate-800 text-[11px]">
-                          <div className="flex justify-between font-semibold text-slate-200">
-                            <span className="capitalize">{acc.type.replace(/_/g, ' ')}</span>
+                        <div key={idx} className="p-2.5 rounded-lg bg-slate-900/70 border border-slate-800 text-[11px]">
+                          <div className="flex justify-between font-semibold text-slate-200 font-mono tabular-nums">
+                            <span className="capitalize font-sans">{acc.type.replace(/_/g, ' ')}</span>
                             {acc.amount ? <span>{formatCurrency(acc.amount)}</span> : null}
                           </div>
                           {acc.notes && <p className="text-slate-400 mt-0.5 text-[10px]">{acc.notes}</p>}
@@ -877,7 +877,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200 bg-slate-900 rounded-lg"
+                className="h-9 px-4 text-xs font-semibold text-slate-400 hover:text-slate-200 bg-slate-900 rounded-xl transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -886,7 +886,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                 type="button"
                 onClick={handleApplyToLoad}
                 disabled={isApplying}
-                className="inline-flex items-center gap-2 px-6 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg shadow-md transition-colors cursor-pointer"
+                className="h-9 inline-flex items-center gap-2 px-6 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-xl shadow-xs transition-colors cursor-pointer"
               >
                 <CheckCircle2 className="w-4 h-4" />
                 <span>
