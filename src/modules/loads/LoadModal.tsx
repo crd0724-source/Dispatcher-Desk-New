@@ -35,6 +35,64 @@ import {
   Calculator,
 } from 'lucide-react';
 
+// 15-minute interval options for dispatcher schedule (00, 15, 30, 45)
+export const TIME_OPTIONS: { value: string; label: string }[] = (() => {
+  const options: { value: string; label: string }[] = [];
+  for (let h = 0; h < 24; h++) {
+    for (let m = 0; m < 60; m += 15) {
+      const hh = String(h).padStart(2, '0');
+      const mm = String(m).padStart(2, '0');
+      const value = `${hh}:${mm}`;
+      const period = h >= 12 ? 'PM' : 'AM';
+      const displayHour = h % 12 === 0 ? 12 : h % 12;
+      const label = `${value} (${displayHour}:${mm} ${period})`;
+      options.push({ value, label });
+    }
+  }
+  return options;
+})();
+
+const toLocalDateString = (d: Date): string => {
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+const snapTimeTo15Minutes = (hours: number, minutes: number): string => {
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  const snappedMinutes = Math.round(minutes / 15) * 15;
+  let h = hours;
+  let m = snappedMinutes;
+  if (m >= 60) {
+    h = (h + 1) % 24;
+    m = 0;
+  }
+  return `${pad(h)}:${pad(m)}`;
+};
+
+const parseDateAndTimeToInputs = (isoString?: string | null): { date: string; time: string } => {
+  if (!isoString) return { date: '', time: '' };
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return { date: '', time: '' };
+    const date = toLocalDateString(d);
+    const snappedTime = snapTimeTo15Minutes(d.getHours(), d.getMinutes());
+    return { date, time: snappedTime };
+  } catch {
+    return { date: '', time: '' };
+  }
+};
+
+const constructIsoDatetime = (dateStr: string, timeStr: string): string | null => {
+  if (!dateStr) return null;
+  const time = timeStr || '00:00';
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const [hour, minute] = time.split(':').map(Number);
+  if (!year || !month || !day) return null;
+  const dateObj = new Date(year, month - 1, day, isNaN(hour) ? 0 : hour, isNaN(minute) ? 0 : minute, 0);
+  if (isNaN(dateObj.getTime())) return null;
+  return dateObj.toISOString();
+};
+
 interface LoadModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -124,9 +182,9 @@ export const LoadModal: React.FC<LoadModalProps> = ({
       setOriginZip(initialLoad.origin_zip || '');
 
       if (initialLoad.pickup_datetime) {
-        const pDate = new Date(initialLoad.pickup_datetime);
-        setPickupDate(pDate.toISOString().substring(0, 10));
-        setPickupTime(pDate.toTimeString().substring(0, 5));
+        const parsed = parseDateAndTimeToInputs(initialLoad.pickup_datetime);
+        setPickupDate(parsed.date);
+        setPickupTime(parsed.time || '08:00');
       } else {
         setPickupDate('');
         setPickupTime('08:00');
@@ -137,9 +195,9 @@ export const LoadModal: React.FC<LoadModalProps> = ({
       setDestZip(initialLoad.dest_zip || '');
 
       if (initialLoad.delivery_datetime) {
-        const dDate = new Date(initialLoad.delivery_datetime);
-        setDeliveryDate(dDate.toISOString().substring(0, 10));
-        setDeliveryTime(dDate.toTimeString().substring(0, 5));
+        const parsed = parseDateAndTimeToInputs(initialLoad.delivery_datetime);
+        setDeliveryDate(parsed.date);
+        setDeliveryTime(parsed.time || '17:00');
       } else {
         setDeliveryDate('');
         setDeliveryTime('17:00');
@@ -175,18 +233,17 @@ export const LoadModal: React.FC<LoadModalProps> = ({
       setOriginState('TX');
       setOriginZip('75207');
 
-      const today = new Date();
       const tomorrow = new Date(Date.now() + 86400000);
       const dayAfter = new Date(Date.now() + 2 * 86400000);
 
-      setPickupDate(tomorrow.toISOString().substring(0, 10));
+      setPickupDate(toLocalDateString(tomorrow));
       setPickupTime('08:00');
 
       setDestCity('Atlanta');
       setDestState('GA');
       setDestZip('30301');
-      setDeliveryDate(dayAfter.toISOString().substring(0, 10));
-      setDeliveryTime('16:00');
+      setDeliveryDate(toLocalDateString(dayAfter));
+      setDeliveryTime('17:00');
 
       setRate('2450');
       setLoadedMiles('780');
@@ -308,10 +365,10 @@ export const LoadModal: React.FC<LoadModalProps> = ({
     }
 
     if (pickupDate && deliveryDate) {
-      const pDateTime = new Date(`${pickupDate}T${pickupTime || '00:00'}:00`).getTime();
-      const dDateTime = new Date(`${deliveryDate}T${deliveryTime || '00:00'}:00`).getTime();
-      if (!isNaN(pDateTime) && !isNaN(dDateTime) && dDateTime < pDateTime) {
-        errors.deliveryDate = 'Delivery cannot be before pickup.';
+      const pIso = constructIsoDatetime(pickupDate, pickupTime);
+      const dIso = constructIsoDatetime(deliveryDate, deliveryTime);
+      if (pIso && dIso && new Date(dIso).getTime() < new Date(pIso).getTime()) {
+        errors.deliveryDate = 'Delivery datetime cannot be earlier than pickup datetime.';
       }
     }
 
@@ -328,8 +385,8 @@ export const LoadModal: React.FC<LoadModalProps> = ({
     setSubmitError(null);
     if (!validateForm()) return;
 
-    const pickupDatetime = pickupDate ? new Date(`${pickupDate}T${pickupTime || '00:00'}:00`).toISOString() : null;
-    const deliveryDatetime = deliveryDate ? new Date(`${deliveryDate}T${deliveryTime || '00:00'}:00`).toISOString() : null;
+    const pickupDatetime = constructIsoDatetime(pickupDate, pickupTime);
+    const deliveryDatetime = constructIsoDatetime(deliveryDate, deliveryTime);
 
     const payload: CreateLoadInput = {
       load_number: loadNumber.trim().toUpperCase(),
@@ -637,20 +694,48 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                   id="pickup-date-input"
                   type="date"
                   value={pickupDate}
-                  onChange={(e) => setPickupDate(e.target.value)}
-                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  onChange={(e) => {
+                    setPickupDate(e.target.value);
+                    setSubmitError(null);
+                    if (formErrors.deliveryDate) {
+                      setFormErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.deliveryDate;
+                        return next;
+                      });
+                    }
+                  }}
+                  className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-indigo-500 cursor-pointer"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-400 text-[11px] mb-1 font-medium">Time</label>
-                <input
-                  id="pickup-time-input"
-                  type="time"
+                <label className="block text-slate-400 text-[11px] mb-1 font-medium">Pickup Time</label>
+                <select
+                  id="pickup-time-select"
                   value={pickupTime}
-                  onChange={(e) => setPickupTime(e.target.value)}
-                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
-                />
+                  onChange={(e) => {
+                    setPickupTime(e.target.value);
+                    setSubmitError(null);
+                    if (formErrors.deliveryDate) {
+                      setFormErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.deliveryDate;
+                        return next;
+                      });
+                    }
+                  }}
+                  className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  {!TIME_OPTIONS.some((opt) => opt.value === pickupTime) && pickupTime && (
+                    <option value={pickupTime}>{pickupTime}</option>
+                  )}
+                  {TIME_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>
@@ -719,24 +804,59 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                   id="delivery-date-input"
                   type="date"
                   value={deliveryDate}
-                  onChange={(e) => setDeliveryDate(e.target.value)}
-                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  onChange={(e) => {
+                    setDeliveryDate(e.target.value);
+                    setSubmitError(null);
+                    if (formErrors.deliveryDate) {
+                      setFormErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.deliveryDate;
+                        return next;
+                      });
+                    }
+                  }}
+                  className={`w-full px-2 py-1.5 bg-slate-900 border rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-indigo-500 cursor-pointer ${
+                    formErrors.deliveryDate ? 'border-rose-500 ring-1 ring-rose-500/50' : 'border-slate-700'
+                  }`}
                 />
               </div>
 
               <div>
-                <label className="block text-slate-400 text-[11px] mb-1 font-medium">Time</label>
-                <input
-                  id="delivery-time-input"
-                  type="time"
+                <label className="block text-slate-400 text-[11px] mb-1 font-medium">Delivery Time</label>
+                <select
+                  id="delivery-time-select"
                   value={deliveryTime}
-                  onChange={(e) => setDeliveryTime(e.target.value)}
-                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
-                />
+                  onChange={(e) => {
+                    setDeliveryTime(e.target.value);
+                    setSubmitError(null);
+                    if (formErrors.deliveryDate) {
+                      setFormErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.deliveryDate;
+                        return next;
+                      });
+                    }
+                  }}
+                  className={`w-full px-2 py-1.5 bg-slate-900 border rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-indigo-500 cursor-pointer ${
+                    formErrors.deliveryDate ? 'border-rose-500 ring-1 ring-rose-500/50' : 'border-slate-700'
+                  }`}
+                >
+                  {!TIME_OPTIONS.some((opt) => opt.value === deliveryTime) && deliveryTime && (
+                    <option value={deliveryTime}>{deliveryTime}</option>
+                  )}
+                  {TIME_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
             {formErrors.deliveryDate && (
-              <p className="text-rose-400 text-[10px]">{formErrors.deliveryDate}</p>
+              <p id="delivery-date-error" className="text-rose-400 text-[11px] mt-1 flex items-center gap-1.5 font-medium bg-rose-950/40 p-2 rounded-lg border border-rose-800/60 animate-in fade-in duration-200">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 text-rose-400" />
+                <span>{formErrors.deliveryDate}</span>
+              </p>
             )}
           </div>
         </div>
