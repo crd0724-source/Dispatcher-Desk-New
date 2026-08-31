@@ -36,18 +36,33 @@ const MainApp: React.FC = () => {
   const [isOnboardingModalOpen, setIsOnboardingModalOpen] = useState(false);
   const [invitationToken, setInvitationToken] = useState<string | null>(null);
 
-  // Detect invitation token in URL query params or hash
+  // Detect invitation token in URL query params or hash and clean URL immediately
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const urlParams = new URLSearchParams(window.location.search);
-      const queryToken = urlParams.get('invitation_token') || urlParams.get('token');
+      const url = new URL(window.location.href);
+      const queryToken = url.searchParams.get('invitation_token') || url.searchParams.get('token');
+      let extractedToken: string | null = null;
 
       if (queryToken) {
-        setInvitationToken(queryToken);
+        extractedToken = queryToken;
       } else if (window.location.hash.includes('invitation_token=')) {
         const hashMatch = window.location.hash.match(/invitation_token=([^&]+)/);
         if (hashMatch && hashMatch[1]) {
-          setInvitationToken(decodeURIComponent(hashMatch[1]));
+          extractedToken = decodeURIComponent(hashMatch[1]);
+        }
+      }
+
+      if (extractedToken) {
+        setInvitationToken(extractedToken);
+        // Clean URL immediately so raw token does not linger in address bar or history
+        if (window.history && window.history.replaceState) {
+          url.searchParams.delete('invitation_token');
+          url.searchParams.delete('token');
+          if (url.hash.includes('invitation_token=')) {
+            url.hash = url.hash.replace(/invitation_token=[^&]+&?/, '').replace(/[?&]$/, '').replace(/#$/, '');
+          }
+          const cleanPath = url.pathname + (url.search ? url.search : '') + (url.hash ? url.hash : '');
+          window.history.replaceState({}, document.title, cleanPath || '/');
         }
       }
     }
@@ -56,8 +71,7 @@ const MainApp: React.FC = () => {
   const handleDismissInvitation = () => {
     setInvitationToken(null);
     if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
-      const cleanUrl = window.location.pathname;
-      window.history.replaceState({}, document.title, cleanUrl);
+      window.history.replaceState({}, document.title, window.location.pathname);
     }
   };
 

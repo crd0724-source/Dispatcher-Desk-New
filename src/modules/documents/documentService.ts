@@ -250,7 +250,30 @@ class DocumentService implements IDocumentService {
   async listDocuments(orgId: string, filters?: DocumentFilterCriteria): Promise<FreightDocument[]> {
     let rawDocs: Document[] = [];
 
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && isUUID(orgId)) {
+      let query = supabase
+        .from('documents')
+        .select('*')
+        .eq('organization_id', orgId)
+        .order('created_at', { ascending: false });
+
+      if (filters?.doc_type && filters.doc_type !== 'all') {
+        query = query.eq('doc_type', filters.doc_type as DocumentType);
+      }
+      if (filters?.doc_status && filters.doc_status !== 'all') {
+        query = query.eq('doc_status', filters.doc_status as DocumentStatus);
+      }
+      if (filters?.load_id && isUUID(filters.load_id)) {
+        query = query.eq('load_id', filters.load_id);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        console.error('[DocumentService] Supabase listDocuments error:', error);
+        throw new Error(error.message || 'Failed to fetch documents from database.');
+      }
+      rawDocs = (data || []) as Document[];
+    } else if (isSupabaseConfigured) {
       try {
         let query = supabase
           .from('documents')
@@ -278,7 +301,7 @@ class DocumentService implements IDocumentService {
       }
     }
 
-    if (rawDocs.length === 0) {
+    if (rawDocs.length === 0 && !isUUID(orgId)) {
       rawDocs = this.readRawDocs(orgId);
     }
 
@@ -346,6 +369,26 @@ class DocumentService implements IDocumentService {
   }
 
   async getDocument(orgId: string, id: string): Promise<FreightDocument | null> {
+    if (isSupabaseConfigured && isUUID(orgId) && isUUID(id)) {
+      const { data, error } = await supabase
+        .from('documents')
+        .select('*')
+        .eq('organization_id', orgId)
+        .eq('id', id)
+        .maybeSingle();
+
+      if (error) {
+        console.error('[DocumentService] Supabase getDocument error:', error);
+        throw new Error(error.message || 'Failed to fetch document from database.');
+      }
+
+      if (data) {
+        const [joined] = await this.joinLoads(orgId, [data as Document]);
+        return joined || null;
+      }
+      return null;
+    }
+
     if (isSupabaseConfigured) {
       try {
         const { data, error } = await supabase
@@ -398,6 +441,61 @@ class DocumentService implements IDocumentService {
     }
 
     // 2. Persist to Supabase Database
+    if (isSupabaseConfigured && isUUID(orgId)) {
+      let uploaderUserId: string | null = null;
+      if (isUUID(input.uploaded_by)) {
+        uploaderUserId = input.uploaded_by!;
+      } else {
+        uploaderUserId = await this.getCurrentUserId();
+      }
+
+      const insertPayload = {
+        organization_id: orgId,
+        load_id: isUUID(input.load_id) ? input.load_id : null,
+        doc_type: input.doc_type,
+        doc_status: input.doc_status || 'received',
+        file_path: finalFilePath,
+        file_name: cleanFileName,
+        file_size_bytes: input.file_size_bytes || null,
+        mime_type: input.mime_type || 'application/pdf',
+        uploaded_by: uploaderUserId,
+        notes: input.notes?.trim() || null,
+      };
+
+      const { data, error } = await supabase
+        .from('documents')
+        .insert(insertPayload)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[DocumentService] Supabase createDocument error:', error);
+        throw new Error(error.message || 'Failed to create document in database.');
+      }
+
+      if (data) {
+        const createdDoc = data as Document;
+
+        // Auto-record document activity
+        if (createdDoc.load_id) {
+          activityService.recordDocumentEvent(
+            orgId,
+            createdDoc.load_id,
+            createdDoc.doc_type,
+            createdDoc.file_name || 'document',
+            'uploaded',
+            input.uploaded_by || 'Dispatcher',
+            undefined,
+            createdDoc.doc_status
+          ).catch(() => {});
+        }
+
+        const [joined] = await this.joinLoads(orgId, [createdDoc]);
+        return joined;
+      }
+      throw new Error('Unexpected empty response while creating document.');
+    }
+
     if (isSupabaseConfigured) {
       try {
         let uploaderUserId: string | null = null;
@@ -491,6 +589,41 @@ class DocumentService implements IDocumentService {
   }
 
   async updateDocument(orgId: string, id: string, input: UpdateDocumentInput): Promise<FreightDocument> {
+    if (isSupabaseConfigured && isUUID(orgId) && isUUID(id)) {
+      const updatePayload: Database['public']['Tables']['documents']['Update'] = {
+        updated_at: new Date().toISOString(),
+      };
+
+      if (input.doc_type !== undefined) updatePayload.doc_type = input.doc_type;
+      if (input.doc_status !== undefined) updatePayload.doc_status = input.doc_status;
+      if (input.file_name !== undefined) updatePayload.file_name = input.file_name?.trim() || null;
+      if (input.file_size_bytes !== undefined) updatePayload.file_size_bytes = input.file_size_bytes;
+      if (input.mime_type !== undefined) updatePayload.mime_type = input.mime_type;
+      if (input.notes !== undefined) updatePayload.notes = input.notes ? input.notes.trim() : null;
+      if (input.file_path !== undefined) updatePayload.file_path = input.file_path;
+      if (input.uploaded_by !== undefined) updatePayload.uploaded_by = input.uploaded_by;
+
+      const { data, error } = await supabase
+        .from('documents')
+        .update(updatePayload)
+        .eq('organization_id', orgId)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[DocumentService] Supabase updateDocument error:', error);
+        throw new Error(error.message || 'Failed to update document in database.');
+      }
+
+      if (data) {
+        const updatedDoc = data as Document;
+        const [joined] = await this.joinLoads(orgId, [updatedDoc]);
+        return joined;
+      }
+      throw new Error('Document not found or update failed.');
+    }
+
     if (isSupabaseConfigured) {
       try {
         const updatePayload: Database['public']['Tables']['documents']['Update'] = {
@@ -556,6 +689,52 @@ class DocumentService implements IDocumentService {
     status: DocumentStatus,
     notes?: string
   ): Promise<FreightDocument> {
+    if (isSupabaseConfigured && isUUID(orgId) && isUUID(id)) {
+      const updatePayload: { doc_status: DocumentStatus; notes?: string | null; updated_at: string } = {
+        doc_status: status,
+        updated_at: new Date().toISOString(),
+      };
+      if (notes !== undefined) {
+        updatePayload.notes = notes ? notes.trim() : null;
+      }
+
+      const { data, error } = await supabase
+        .from('documents')
+        .update(updatePayload)
+        .eq('organization_id', orgId)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[DocumentService] Supabase updateDocumentStatus error:', error);
+        throw new Error(error.message || 'Failed to update document status in database.');
+      }
+
+      if (data) {
+        const updatedDoc = data as Document;
+
+        // Auto-record document status update activity
+        if (updatedDoc.load_id) {
+          const action = status === 'verified' ? 'verified' : status === 'missing' ? 'rejected' : 'status_updated';
+          activityService.recordDocumentEvent(
+            orgId,
+            updatedDoc.load_id,
+            updatedDoc.doc_type,
+            updatedDoc.file_name || 'document',
+            action,
+            'Dispatcher',
+            undefined,
+            status
+          ).catch(() => {});
+        }
+
+        const [joined] = await this.joinLoads(orgId, [updatedDoc]);
+        return joined;
+      }
+      throw new Error('Document not found or status update failed.');
+    }
+
     if (isSupabaseConfigured) {
       try {
         const updatePayload: { doc_status: DocumentStatus; notes?: string | null; updated_at: string } = {
@@ -637,6 +816,53 @@ class DocumentService implements IDocumentService {
   }
 
   async deleteDocument(orgId: string, id: string): Promise<void> {
+    if (isSupabaseConfigured && isUUID(orgId) && isUUID(id)) {
+      // Fetch target doc to get file path and load ID
+      const { data: targetDoc, error: fetchErr } = await supabase
+        .from('documents')
+        .select('*')
+        .eq('organization_id', orgId)
+        .eq('id', id)
+        .maybeSingle();
+
+      if (fetchErr) {
+        console.error('[DocumentService] Supabase deleteDocument fetch error:', fetchErr);
+        throw new Error(fetchErr.message || 'Failed to locate document for deletion.');
+      }
+
+      if (targetDoc) {
+        // Remove from storage bucket if file_path exists
+        if (targetDoc.file_path) {
+          const cleanPath = targetDoc.file_path.replace(/^freight-documents\//, '');
+          await supabase.storage.from('freight-documents').remove([cleanPath]);
+        }
+
+        // Delete from database
+        const { error: delError } = await supabase
+          .from('documents')
+          .delete()
+          .eq('organization_id', orgId)
+          .eq('id', id);
+
+        if (delError) {
+          console.error('[DocumentService] Supabase deleteDocument error:', delError);
+          throw new Error(delError.message || 'Failed to delete document from database.');
+        }
+
+        if (targetDoc.load_id) {
+          activityService.recordDocumentEvent(
+            orgId,
+            targetDoc.load_id,
+            targetDoc.doc_type,
+            targetDoc.file_name || 'document',
+            'deleted',
+            'Dispatcher'
+          ).catch(() => {});
+        }
+      }
+      return;
+    }
+
     if (isSupabaseConfigured) {
       try {
         // Fetch target doc to get file path and load ID
@@ -698,6 +924,22 @@ class DocumentService implements IDocumentService {
   }
 
   async getDocumentsForLoad(orgId: string, loadId: string): Promise<FreightDocument[]> {
+    if (isSupabaseConfigured && isUUID(orgId) && isUUID(loadId)) {
+      const { data, error } = await supabase
+        .from('documents')
+        .select('*')
+        .eq('organization_id', orgId)
+        .eq('load_id', loadId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('[DocumentService] Supabase getDocumentsForLoad error:', error);
+        throw new Error(error.message || 'Failed to fetch documents for load from database.');
+      }
+
+      return this.joinLoads(orgId, (data || []) as Document[]);
+    }
+
     if (isSupabaseConfigured) {
       try {
         const { data, error } = await supabase

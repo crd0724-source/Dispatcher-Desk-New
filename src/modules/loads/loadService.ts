@@ -1,11 +1,17 @@
 import { Load, Client, Broker, Truck, Driver, PipelineStatus, EquipmentType } from '../../types/domain.types.ts';
 import { LoadWithRelations, CreateLoadInput, UpdateLoadInput, LoadFilterCriteria, isValidUsState } from './loadTypes.ts';
+import { validateStatusTransition } from '../pipeline/pipelineTypes.ts';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase.ts';
 import { clientService } from '../clients/clientService.ts';
 import { brokerService } from '../brokers/brokerService.ts';
 import { truckService } from '../trucks/truckService.ts';
 import { driverService } from '../drivers/driverService.ts';
 import { activityService } from '../activity/activityService.ts';
+
+function isUUID(str?: string | null): boolean {
+  if (!str) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
 
 // Storage keys
 const LOADS_STORAGE_PREFIX = 'dispatchdesk_demo_loads_';
@@ -280,6 +286,13 @@ export interface ILoadService {
   updateLoad(organizationId: string, id: string, input: UpdateLoadInput): Promise<LoadWithRelations>;
   deleteLoad(organizationId: string, id: string): Promise<void>;
   updateLoadStatus(organizationId: string, id: string, status: PipelineStatus): Promise<LoadWithRelations>;
+  assignDispatchResources(
+    organizationId: string,
+    loadId: string,
+    truckId?: string | null,
+    driverId?: string | null,
+    notes?: string
+  ): Promise<LoadWithRelations>;
   getClients(organizationId: string): Promise<Client[]>;
   getBrokers(organizationId: string): Promise<Broker[]>;
   getTrucks(organizationId: string, clientId?: string): Promise<Truck[]>;
@@ -410,23 +423,19 @@ class LocalLoadService implements ILoadService {
   async getLoads(organizationId: string, filters?: LoadFilterCriteria): Promise<LoadWithRelations[]> {
     let rawLoads: Load[] = [];
 
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error } = await supabase
-          .from('loads')
-          .select('*')
-          .eq('organization_id', organizationId)
-          .order('created_at', { ascending: false });
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      const { data, error } = await supabase
+        .from('loads')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .order('created_at', { ascending: false });
 
-        if (!error && data) {
-          rawLoads = data as Load[];
-        }
-      } catch (err) {
-        console.warn('Supabase getLoads failed, falling back to local storage:', err);
+      if (error) {
+        console.error('[LoadService] Supabase getLoads error:', error);
+        throw new Error(error.message || 'Failed to fetch loads from database.');
       }
-    }
-
-    if (rawLoads.length === 0) {
+      rawLoads = (data || []) as Load[];
+    } else {
       const { loads } = this.ensureInitialized(organizationId);
       rawLoads = loads;
     }
@@ -512,24 +521,21 @@ class LocalLoadService implements ILoadService {
   async getLoadById(organizationId: string, id: string): Promise<LoadWithRelations | null> {
     let rawLoad: Load | null = null;
 
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error } = await supabase
-          .from('loads')
-          .select('*')
-          .eq('id', id)
-          .eq('organization_id', organizationId)
-          .maybeSingle();
+    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(id)) {
+      const { data, error } = await supabase
+        .from('loads')
+        .select('*')
+        .eq('id', id)
+        .eq('organization_id', organizationId)
+        .maybeSingle();
 
-        if (!error && data) {
-          rawLoad = data as Load;
-        }
-      } catch (err) {
-        console.warn('Supabase getLoadById failed, falling back to local storage:', err);
+      if (error) {
+        console.error('[LoadService] Supabase getLoadById error:', error);
+        throw new Error(error.message || 'Failed to fetch load from database.');
       }
-    }
-
-    if (!rawLoad) {
+      if (!data) return null;
+      rawLoad = data as Load;
+    } else {
       const { loads } = this.ensureInitialized(organizationId);
       rawLoad = loads.find((l) => l.id === id) || null;
     }
@@ -600,100 +606,100 @@ class LocalLoadService implements ILoadService {
       }
     }
 
-    if (isSupabaseConfigured) {
-      try {
-        // Check duplicate load number in same org
-        const { data: existingLoad } = await supabase
-          .from('loads')
-          .select('id')
-          .eq('organization_id', organizationId)
-          .ilike('load_number', input.load_number.trim())
-          .maybeSingle();
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      // Check duplicate load number in same org
+      const { data: existingLoad, error: checkErr } = await supabase
+        .from('loads')
+        .select('id')
+        .eq('organization_id', organizationId)
+        .ilike('load_number', input.load_number.trim())
+        .maybeSingle();
 
-        if (existingLoad) {
+      if (checkErr) {
+        console.error('[LoadService] Supabase check duplicate error:', checkErr);
+        throw new Error(checkErr.message || 'Database error verifying load number uniqueness.');
+      }
+
+      if (existingLoad) {
+        throw new Error(`Load number "${input.load_number.trim()}" already exists in this organization.`);
+      }
+
+      const { data, error } = await supabase
+        .from('loads')
+        .insert({
+          organization_id: organizationId,
+          load_number: input.load_number.trim().toUpperCase(),
+          client_id: input.client_id,
+          broker_id: input.broker_id || null,
+          truck_id: finalTruckId,
+          driver_id: finalDriverId,
+          assigned_dispatcher_id: input.assigned_dispatcher_id || null,
+          pipeline_status: input.pipeline_status || 'sourced',
+          equipment_type: input.equipment_type || 'dry_van',
+          commodity: input.commodity?.trim() || null,
+          weight_lbs: input.weight_lbs !== undefined && input.weight_lbs !== null ? Math.max(0, Number(input.weight_lbs)) : null,
+          origin_city: input.origin_city.trim(),
+          origin_state: input.origin_state.trim().toUpperCase(),
+          origin_zip: input.origin_zip?.trim() || null,
+          pickup_datetime: input.pickup_datetime || null,
+          dest_city: input.dest_city.trim(),
+          dest_state: input.dest_state.trim().toUpperCase(),
+          dest_zip: input.dest_zip?.trim() || null,
+          delivery_datetime: input.delivery_datetime || null,
+          rate: Math.max(0, Number(input.rate) || 0),
+          loaded_miles: Math.max(0, Number(input.loaded_miles) || 0),
+          deadhead_miles: Math.max(0, Number(input.deadhead_miles) || 0),
+          fuel_expense: Math.max(0, Number(input.fuel_expense) || 0),
+          driver_pay: Math.max(0, Number(input.driver_pay) || 0),
+          other_expenses: Math.max(0, Number(input.other_expenses) || 0),
+          special_instructions: input.special_instructions?.trim() || null,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('unique constraint')) {
           throw new Error(`Load number "${input.load_number.trim()}" already exists in this organization.`);
         }
+        console.error('[LoadService] Supabase createLoad error:', error);
+        throw new Error(error.message || 'Failed to create load in database.');
+      }
 
-        const { data, error } = await supabase
-          .from('loads')
-          .insert({
-            organization_id: organizationId,
-            load_number: input.load_number.trim().toUpperCase(),
-            client_id: input.client_id,
-            broker_id: input.broker_id || null,
-            truck_id: finalTruckId,
-            driver_id: finalDriverId,
-            assigned_dispatcher_id: input.assigned_dispatcher_id || null,
-            pipeline_status: input.pipeline_status || 'sourced',
-            equipment_type: input.equipment_type || 'dry_van',
-            commodity: input.commodity?.trim() || null,
-            weight_lbs: input.weight_lbs !== undefined && input.weight_lbs !== null ? Math.max(0, Number(input.weight_lbs)) : null,
-            origin_city: input.origin_city.trim(),
-            origin_state: input.origin_state.trim().toUpperCase(),
-            origin_zip: input.origin_zip?.trim() || null,
-            pickup_datetime: input.pickup_datetime || null,
-            dest_city: input.dest_city.trim(),
-            dest_state: input.dest_state.trim().toUpperCase(),
-            dest_zip: input.dest_zip?.trim() || null,
-            delivery_datetime: input.delivery_datetime || null,
-            rate: Math.max(0, Number(input.rate) || 0),
-            loaded_miles: Math.max(0, Number(input.loaded_miles) || 0),
-            deadhead_miles: Math.max(0, Number(input.deadhead_miles) || 0),
-            fuel_expense: Math.max(0, Number(input.fuel_expense) || 0),
-            driver_pay: Math.max(0, Number(input.driver_pay) || 0),
-            other_expenses: Math.max(0, Number(input.other_expenses) || 0),
-            special_instructions: input.special_instructions?.trim() || null,
-          })
-          .select()
-          .single();
+      if (data) {
+        const createdLoad = data as Load;
 
-        if (error) {
-          if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('unique constraint')) {
-            throw new Error(`Load number "${input.load_number.trim()}" already exists in this organization.`);
+        // Auto-record activity events for initial creation and assignment
+        activityService.recordSystemEvent(
+          organizationId,
+          createdLoad.id,
+          `Load ${createdLoad.load_number} Created`,
+          `Load initialized from ${createdLoad.origin_city}, ${createdLoad.origin_state} to ${createdLoad.dest_city}, ${createdLoad.dest_state}. Status set to ${createdLoad.pipeline_status.toUpperCase()}.`,
+          {
+            initialStatus: createdLoad.pipeline_status,
+            commodity: createdLoad.commodity,
+            rate: createdLoad.rate,
+            equipmentType: createdLoad.equipment_type,
           }
-          throw error;
-        }
+        ).catch(() => {});
 
-        if (data) {
-          const createdLoad = data as Load;
-
-          // Auto-record activity events for initial creation and assignment
-          activityService.recordSystemEvent(
+        if (finalTruckId || finalDriverId) {
+          const trk = trucks.find((t) => t.id === finalTruckId);
+          const drv = drivers.find((d) => d.id === finalDriverId);
+          activityService.recordAssignmentChange(
             organizationId,
             createdLoad.id,
-            `Load ${createdLoad.load_number} Created`,
-            `Load initialized from ${createdLoad.origin_city}, ${createdLoad.origin_state} to ${createdLoad.dest_city}, ${createdLoad.dest_state}. Status set to ${createdLoad.pipeline_status.toUpperCase()}.`,
             {
-              initialStatus: createdLoad.pipeline_status,
-              commodity: createdLoad.commodity,
-              rate: createdLoad.rate,
-              equipmentType: createdLoad.equipment_type,
+              newTruckId: finalTruckId,
+              newTruckNumber: trk?.truck_number || null,
+              newDriverId: finalDriverId,
+              newDriverName: drv?.full_name || null,
             }
           ).catch(() => {});
-
-          if (finalTruckId || finalDriverId) {
-            const trk = trucks.find((t) => t.id === finalTruckId);
-            const drv = drivers.find((d) => d.id === finalDriverId);
-            activityService.recordAssignmentChange(
-              organizationId,
-              createdLoad.id,
-              {
-                newTruckId: finalTruckId,
-                newTruckNumber: trk?.truck_number || null,
-                newDriverId: finalDriverId,
-                newDriverName: drv?.full_name || null,
-              }
-            ).catch(() => {});
-          }
-
-          return this.joinRelations(createdLoad, clients, brokers, trucks, drivers);
         }
-      } catch (err) {
-        if ((err as Error).message?.includes('already exists')) {
-          throw err;
-        }
-        console.warn('Supabase createLoad failed, saving locally:', err);
+
+        return this.joinRelations(createdLoad, clients, brokers, trucks, drivers);
       }
+      throw new Error('Unexpected empty response while creating load.');
     }
 
     const { loads } = this.ensureInitialized(organizationId);
@@ -739,9 +745,9 @@ class LocalLoadService implements ILoadService {
       updated_at: now,
     };
 
-    const updatedLoads = [newLoad, ...loads];
+    loads.unshift(newLoad);
     const loadsKey = `${LOADS_STORAGE_PREFIX}${organizationId}`;
-    saveToStorage(loadsKey, updatedLoads);
+    saveToStorage(loadsKey, loads);
 
     // Auto-record activity events for initial creation and assignment
     activityService.recordSystemEvent(
@@ -793,151 +799,165 @@ class LocalLoadService implements ILoadService {
       }
     }
 
-    if (isSupabaseConfigured) {
-      try {
-        const { data: currentLoadData, error: fetchErr } = await supabase
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      const { data: currentLoadData, error: fetchErr } = await supabase
+        .from('loads')
+        .select('*')
+        .eq('id', id)
+        .eq('organization_id', organizationId)
+        .maybeSingle();
+
+      if (fetchErr) {
+        console.error('[LoadService] Supabase fetch current load error:', fetchErr);
+        throw new Error(fetchErr.message || 'Database error fetching load.');
+      }
+      if (!currentLoadData) {
+        throw new Error(`Load with ID "${id}" was not found.`);
+      }
+
+      const currentLoad = currentLoadData as Load;
+
+      // State Transition Validation
+      if (input.pipeline_status && input.pipeline_status !== currentLoad.pipeline_status) {
+        const transitionCheck = validateStatusTransition(currentLoad.pipeline_status, input.pipeline_status);
+        if (!transitionCheck.allowed) {
+          throw new Error(transitionCheck.reason || `Invalid load status transition from "${currentLoad.pipeline_status}" to "${input.pipeline_status}".`);
+        }
+      }
+
+      // Check duplicate load number if changed
+      if (input.load_number && input.load_number.trim().toUpperCase() !== currentLoad.load_number) {
+        const { data: duplicate, error: dupErr } = await supabase
           .from('loads')
-          .select('*')
-          .eq('id', id)
+          .select('id')
           .eq('organization_id', organizationId)
+          .ilike('load_number', input.load_number.trim())
+          .neq('id', id)
           .maybeSingle();
 
-        if (!fetchErr && currentLoadData) {
-          const currentLoad = currentLoadData as Load;
-
-          // Check duplicate load number if changed
-          if (input.load_number && input.load_number.trim().toUpperCase() !== currentLoad.load_number) {
-            const { data: duplicate } = await supabase
-              .from('loads')
-              .select('id')
-              .eq('organization_id', organizationId)
-              .ilike('load_number', input.load_number.trim())
-              .neq('id', id)
-              .maybeSingle();
-
-            if (duplicate) {
-              throw new Error(`Load number "${input.load_number.trim()}" is already in use by another load.`);
-            }
-          }
-
-          const targetClientId = input.client_id !== undefined ? input.client_id : currentLoad.client_id;
-          if (!targetClientId) {
-            throw new Error('Client assignment cannot be empty.');
-          }
-
-          let targetTruckId = input.truck_id !== undefined ? input.truck_id : currentLoad.truck_id;
-          let targetDriverId = input.driver_id !== undefined ? input.driver_id : currentLoad.driver_id;
-
-          if (targetTruckId) {
-            const truck = trucks.find((t) => t.id === targetTruckId);
-            if (!truck || truck.client_id !== targetClientId) {
-              targetTruckId = null;
-            }
-          }
-
-          if (targetDriverId) {
-            const driver = drivers.find((d) => d.id === targetDriverId);
-            if (!driver || driver.client_id !== targetClientId) {
-              targetDriverId = null;
-            }
-          }
-
-          const pickupDt = input.pickup_datetime !== undefined ? input.pickup_datetime : currentLoad.pickup_datetime;
-          const deliveryDt = input.delivery_datetime !== undefined ? input.delivery_datetime : currentLoad.delivery_datetime;
-          if (pickupDt && deliveryDt && new Date(deliveryDt).getTime() < new Date(pickupDt).getTime()) {
-            throw new Error('Delivery date and time cannot be earlier than pickup date and time.');
-          }
-
-          const { data, error } = await supabase
-            .from('loads')
-            .update({
-              ...(input.load_number !== undefined ? { load_number: input.load_number.trim().toUpperCase() } : {}),
-              ...(input.client_id !== undefined ? { client_id: targetClientId } : {}),
-              ...(input.broker_id !== undefined ? { broker_id: input.broker_id || null } : {}),
-              ...(input.truck_id !== undefined ? { truck_id: targetTruckId } : {}),
-              ...(input.driver_id !== undefined ? { driver_id: targetDriverId } : {}),
-              ...(input.assigned_dispatcher_id !== undefined ? { assigned_dispatcher_id: input.assigned_dispatcher_id || null } : {}),
-              ...(input.pipeline_status !== undefined ? { pipeline_status: input.pipeline_status } : {}),
-              ...(input.equipment_type !== undefined ? { equipment_type: input.equipment_type } : {}),
-              ...(input.commodity !== undefined ? { commodity: input.commodity?.trim() || null } : {}),
-              ...(input.weight_lbs !== undefined ? { weight_lbs: input.weight_lbs !== null ? Math.max(0, Number(input.weight_lbs)) : null } : {}),
-              ...(input.origin_city !== undefined ? { origin_city: input.origin_city.trim() } : {}),
-              ...(input.origin_state !== undefined ? { origin_state: input.origin_state.trim().toUpperCase() } : {}),
-              ...(input.origin_zip !== undefined ? { origin_zip: input.origin_zip?.trim() || null } : {}),
-              ...(input.pickup_datetime !== undefined ? { pickup_datetime: pickupDt } : {}),
-              ...(input.dest_city !== undefined ? { dest_city: input.dest_city.trim() } : {}),
-              ...(input.dest_state !== undefined ? { dest_state: input.dest_state.trim().toUpperCase() } : {}),
-              ...(input.dest_zip !== undefined ? { dest_zip: input.dest_zip?.trim() || null } : {}),
-              ...(input.delivery_datetime !== undefined ? { delivery_datetime: deliveryDt } : {}),
-              ...(input.rate !== undefined ? { rate: Math.max(0, Number(input.rate) || 0) } : {}),
-              ...(input.loaded_miles !== undefined ? { loaded_miles: Math.max(0, Number(input.loaded_miles) || 0) } : {}),
-              ...(input.deadhead_miles !== undefined ? { deadhead_miles: Math.max(0, Number(input.deadhead_miles) || 0) } : {}),
-              ...(input.fuel_expense !== undefined ? { fuel_expense: Math.max(0, Number(input.fuel_expense) || 0) } : {}),
-              ...(input.driver_pay !== undefined ? { driver_pay: Math.max(0, Number(input.driver_pay) || 0) } : {}),
-              ...(input.other_expenses !== undefined ? { other_expenses: Math.max(0, Number(input.other_expenses) || 0) } : {}),
-              ...(input.special_instructions !== undefined ? { special_instructions: input.special_instructions?.trim() || null } : {}),
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', id)
-            .eq('organization_id', organizationId)
-            .select()
-            .single();
-
-          if (error) {
-            if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('unique constraint')) {
-              throw new Error(`Load number "${input.load_number?.trim() || ''}" is already in use by another load.`);
-            }
-            throw error;
-          }
-
-          if (data) {
-            const updatedLoad = data as Load;
-
-            // Auto-record status shift
-            if (input.pipeline_status && input.pipeline_status !== currentLoad.pipeline_status) {
-              activityService.recordStatusChange(
-                organizationId,
-                id,
-                currentLoad.pipeline_status,
-                input.pipeline_status
-              ).catch(() => {});
-            }
-
-            // Auto-record assignment change
-            if (
-              (targetTruckId !== currentLoad.truck_id) ||
-              (targetDriverId !== currentLoad.driver_id)
-            ) {
-              const prevTruck = trucks.find((t) => t.id === currentLoad.truck_id);
-              const nextTruck = trucks.find((t) => t.id === targetTruckId);
-              const prevDriver = drivers.find((d) => d.id === currentLoad.driver_id);
-              const nextDriver = drivers.find((d) => d.id === targetDriverId);
-
-              activityService.recordAssignmentChange(
-                organizationId,
-                id,
-                {
-                  previousTruckId: currentLoad.truck_id,
-                  newTruckId: targetTruckId,
-                  previousTruckNumber: prevTruck?.truck_number || null,
-                  newTruckNumber: nextTruck?.truck_number || null,
-                  previousDriverId: currentLoad.driver_id,
-                  newDriverId: targetDriverId,
-                  previousDriverName: prevDriver?.full_name || null,
-                  newDriverName: nextDriver?.full_name || null,
-                }
-              ).catch(() => {});
-            }
-
-            return this.joinRelations(updatedLoad, clients, brokers, trucks, drivers);
-          }
+        if (dupErr) {
+          console.error('[LoadService] Supabase check duplicate error:', dupErr);
+          throw new Error(dupErr.message || 'Database error verifying load number uniqueness.');
         }
-      } catch (err) {
-        if ((err as Error).message?.includes('already in use') || (err as Error).message?.includes('Delivery date')) {
-          throw err;
+
+        if (duplicate) {
+          throw new Error(`Load number "${input.load_number.trim()}" is already in use by another load.`);
         }
-        console.warn('Supabase updateLoad failed, updating locally:', err);
       }
+
+      const targetClientId = input.client_id !== undefined ? input.client_id : currentLoad.client_id;
+      if (!targetClientId) {
+        throw new Error('Client assignment cannot be empty.');
+      }
+
+      let targetTruckId = input.truck_id !== undefined ? input.truck_id : currentLoad.truck_id;
+      let targetDriverId = input.driver_id !== undefined ? input.driver_id : currentLoad.driver_id;
+
+      if (targetTruckId) {
+        const truck = trucks.find((t) => t.id === targetTruckId);
+        if (!truck || truck.client_id !== targetClientId) {
+          targetTruckId = null;
+        }
+      }
+
+      if (targetDriverId) {
+        const driver = drivers.find((d) => d.id === targetDriverId);
+        if (!driver || driver.client_id !== targetClientId) {
+          targetDriverId = null;
+        }
+      }
+
+      const pickupDt = input.pickup_datetime !== undefined ? input.pickup_datetime : currentLoad.pickup_datetime;
+      const deliveryDt = input.delivery_datetime !== undefined ? input.delivery_datetime : currentLoad.delivery_datetime;
+      if (pickupDt && deliveryDt && new Date(deliveryDt).getTime() < new Date(pickupDt).getTime()) {
+        throw new Error('Delivery date and time cannot be earlier than pickup date and time.');
+      }
+
+      const { data, error } = await supabase
+        .from('loads')
+        .update({
+          ...(input.load_number !== undefined ? { load_number: input.load_number.trim().toUpperCase() } : {}),
+          ...(input.client_id !== undefined ? { client_id: targetClientId } : {}),
+          ...(input.broker_id !== undefined ? { broker_id: input.broker_id || null } : {}),
+          ...(input.truck_id !== undefined ? { truck_id: targetTruckId } : {}),
+          ...(input.driver_id !== undefined ? { driver_id: targetDriverId } : {}),
+          ...(input.assigned_dispatcher_id !== undefined ? { assigned_dispatcher_id: input.assigned_dispatcher_id || null } : {}),
+          ...(input.pipeline_status !== undefined ? { pipeline_status: input.pipeline_status } : {}),
+          ...(input.equipment_type !== undefined ? { equipment_type: input.equipment_type } : {}),
+          ...(input.commodity !== undefined ? { commodity: input.commodity?.trim() || null } : {}),
+          ...(input.weight_lbs !== undefined ? { weight_lbs: input.weight_lbs !== null ? Math.max(0, Number(input.weight_lbs)) : null } : {}),
+          ...(input.origin_city !== undefined ? { origin_city: input.origin_city.trim() } : {}),
+          ...(input.origin_state !== undefined ? { origin_state: input.origin_state.trim().toUpperCase() } : {}),
+          ...(input.origin_zip !== undefined ? { origin_zip: input.origin_zip?.trim() || null } : {}),
+          ...(input.pickup_datetime !== undefined ? { pickup_datetime: pickupDt } : {}),
+          ...(input.dest_city !== undefined ? { dest_city: input.dest_city.trim() } : {}),
+          ...(input.dest_state !== undefined ? { dest_state: input.dest_state.trim().toUpperCase() } : {}),
+          ...(input.dest_zip !== undefined ? { dest_zip: input.dest_zip?.trim() || null } : {}),
+          ...(input.delivery_datetime !== undefined ? { delivery_datetime: deliveryDt } : {}),
+          ...(input.rate !== undefined ? { rate: Math.max(0, Number(input.rate) || 0) } : {}),
+          ...(input.loaded_miles !== undefined ? { loaded_miles: Math.max(0, Number(input.loaded_miles) || 0) } : {}),
+          ...(input.deadhead_miles !== undefined ? { deadhead_miles: Math.max(0, Number(input.deadhead_miles) || 0) } : {}),
+          ...(input.fuel_expense !== undefined ? { fuel_expense: Math.max(0, Number(input.fuel_expense) || 0) } : {}),
+          ...(input.driver_pay !== undefined ? { driver_pay: Math.max(0, Number(input.driver_pay) || 0) } : {}),
+          ...(input.other_expenses !== undefined ? { other_expenses: Math.max(0, Number(input.other_expenses) || 0) } : {}),
+          ...(input.special_instructions !== undefined ? { special_instructions: input.special_instructions?.trim() || null } : {}),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .eq('organization_id', organizationId)
+        .select()
+        .single();
+
+      if (error) {
+        if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('unique constraint')) {
+          throw new Error(`Load number "${input.load_number?.trim() || ''}" is already in use by another load.`);
+        }
+        console.error('[LoadService] Supabase updateLoad error:', error);
+        throw new Error(error.message || 'Failed to update load in database.');
+      }
+
+      if (data) {
+        const updatedLoad = data as Load;
+
+        // Auto-record status shift
+        if (input.pipeline_status && input.pipeline_status !== currentLoad.pipeline_status) {
+          activityService.recordStatusChange(
+            organizationId,
+            id,
+            currentLoad.pipeline_status,
+            input.pipeline_status
+          ).catch(() => {});
+        }
+
+        // Auto-record assignment change
+        if (
+          (targetTruckId !== currentLoad.truck_id) ||
+          (targetDriverId !== currentLoad.driver_id)
+        ) {
+          const prevTruck = trucks.find((t) => t.id === currentLoad.truck_id);
+          const nextTruck = trucks.find((t) => t.id === targetTruckId);
+          const prevDriver = drivers.find((d) => d.id === currentLoad.driver_id);
+          const nextDriver = drivers.find((d) => d.id === targetDriverId);
+
+          activityService.recordAssignmentChange(
+            organizationId,
+            id,
+            {
+              previousTruckId: currentLoad.truck_id,
+              newTruckId: targetTruckId,
+              previousTruckNumber: prevTruck?.truck_number || null,
+              newTruckNumber: nextTruck?.truck_number || null,
+              previousDriverId: currentLoad.driver_id,
+              newDriverId: targetDriverId,
+              previousDriverName: prevDriver?.full_name || null,
+              newDriverName: nextDriver?.full_name || null,
+            }
+          ).catch(() => {});
+        }
+
+        return this.joinRelations(updatedLoad, clients, brokers, trucks, drivers);
+      }
+      throw new Error('Unexpected empty response while updating load.');
     }
 
     const { loads } = this.ensureInitialized(organizationId);
@@ -948,6 +968,14 @@ class LocalLoadService implements ILoadService {
     }
 
     const currentLoad = loads[index];
+
+    // State Transition Validation
+    if (input.pipeline_status && input.pipeline_status !== currentLoad.pipeline_status) {
+      const transitionCheck = validateStatusTransition(currentLoad.pipeline_status, input.pipeline_status);
+      if (!transitionCheck.allowed) {
+        throw new Error(transitionCheck.reason || `Invalid load status transition from "${currentLoad.pipeline_status}" to "${input.pipeline_status}".`);
+      }
+    }
 
     // Check duplicate load number if changed
     if (input.load_number && input.load_number.trim().toUpperCase() !== currentLoad.load_number) {
@@ -1068,25 +1096,117 @@ class LocalLoadService implements ILoadService {
     return this.updateLoad(organizationId, id, { pipeline_status: status });
   }
 
-  async deleteLoad(organizationId: string, id: string): Promise<void> {
-    if (isSupabaseConfigured) {
-      try {
-        const { error } = await supabase
-          .from('loads')
-          .delete()
-          .eq('id', id)
-          .eq('organization_id', organizationId);
+  async assignDispatchResources(
+    organizationId: string,
+    loadId: string,
+    truckId?: string | null,
+    driverId?: string | null,
+    notes?: string
+  ): Promise<LoadWithRelations> {
+    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(loadId)) {
+      const { data, error } = await supabase.rpc('assign_load_dispatch', {
+        p_organization_id: organizationId,
+        p_load_id: loadId,
+        p_truck_id: (truckId && isUUID(truckId)) ? truckId : null,
+        p_driver_id: (driverId && isUUID(driverId)) ? driverId : null,
+        p_notes: notes || null,
+      });
 
-        if (!error) {
-          const { loads } = this.ensureInitialized(organizationId);
-          const filtered = loads.filter((l) => l.id !== id);
-          const loadsKey = `${LOADS_STORAGE_PREFIX}${organizationId}`;
-          saveToStorage(loadsKey, filtered);
-          return;
-        }
-      } catch (err) {
-        console.warn('Supabase deleteLoad failed, deleting locally:', err);
+      if (error) {
+        console.error('[LoadService] Supabase assign_load_dispatch error:', error);
+        throw new Error(error.message || 'Failed to update dispatch assignment.');
       }
+
+      const updated = await this.getLoadById(organizationId, loadId);
+      if (!updated) {
+        throw new Error('Load not found after dispatch assignment.');
+      }
+      return updated;
+    }
+
+    // Demo Mode implementation
+    const [trucks, drivers, clients, brokers] = await this.getDependencies(organizationId);
+    const currentLoad = await this.getLoadById(organizationId, loadId);
+    if (!currentLoad) {
+      throw new Error(`Load with ID "${loadId}" was not found.`);
+    }
+
+    if (['invoiced', 'paid'].includes(currentLoad.pipeline_status)) {
+      throw new Error(`Integrity Error: Cannot modify dispatch assignment on an ${currentLoad.pipeline_status.toUpperCase()} load. Load must be reopened first.`);
+    }
+
+    const finalTruckId = truckId !== undefined ? truckId : currentLoad.truck_id;
+    const finalDriverId = driverId !== undefined ? driverId : currentLoad.driver_id;
+
+    if (finalTruckId) {
+      const trk = trucks.find((t) => t.id === finalTruckId);
+      if (!trk) {
+        throw new Error('Specified Truck does not exist in this organization.');
+      }
+      if (trk.client_id !== currentLoad.client_id) {
+        throw new Error('The selected Truck does not belong to the load’s assigned Client.');
+      }
+      if (['booked', 'in_transit'].includes(currentLoad.pipeline_status) && ['maintenance', 'inactive'].includes(trk.status)) {
+        throw new Error(`Integrity Error: Truck "${trk.truck_number}" cannot be assigned to an active load because its status is "${trk.status}".`);
+      }
+    }
+
+    if (finalDriverId) {
+      const drv = drivers.find((d) => d.id === finalDriverId);
+      if (!drv) {
+        throw new Error('Specified Driver does not exist in this organization.');
+      }
+      if (drv.client_id !== currentLoad.client_id) {
+        throw new Error('The selected Driver does not belong to the load’s assigned Client.');
+      }
+      if (['booked', 'in_transit'].includes(currentLoad.pipeline_status) && drv.status === 'off_duty') {
+        throw new Error(`Integrity Error: Driver "${drv.full_name}" cannot be assigned to an active load because status is "off_duty".`);
+      }
+    }
+
+    // Check temporal overlaps in demo mode
+    if (['booked', 'in_transit'].includes(currentLoad.pipeline_status) && currentLoad.pickup_datetime && currentLoad.delivery_datetime) {
+      const pTime = new Date(currentLoad.pickup_datetime).getTime();
+      const dTime = new Date(currentLoad.delivery_datetime).getTime();
+      const { loads } = this.ensureInitialized(organizationId);
+
+      for (const other of loads) {
+        if (other.id !== loadId && ['booked', 'in_transit'].includes(other.pipeline_status) && other.pickup_datetime && other.delivery_datetime) {
+          const otherP = new Date(other.pickup_datetime).getTime();
+          const otherD = new Date(other.delivery_datetime).getTime();
+          const overlaps = (pTime < otherD && dTime > otherP);
+
+          if (overlaps) {
+            if (finalTruckId && other.truck_id === finalTruckId) {
+              throw new Error(`Conflict Error: Truck is already assigned to active Load ${other.load_number} which overlaps with this schedule.`);
+            }
+            if (finalDriverId && other.driver_id === finalDriverId) {
+              throw new Error(`Conflict Error: Driver is already assigned to active Load ${other.load_number} which overlaps with this schedule.`);
+            }
+          }
+        }
+      }
+    }
+
+    return this.updateLoad(organizationId, loadId, {
+      truck_id: finalTruckId,
+      driver_id: finalDriverId,
+    });
+  }
+
+  async deleteLoad(organizationId: string, id: string): Promise<void> {
+    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(id)) {
+      const { error } = await supabase
+        .from('loads')
+        .delete()
+        .eq('id', id)
+        .eq('organization_id', organizationId);
+
+      if (error) {
+        console.error('[LoadService] Supabase deleteLoad error:', error);
+        throw new Error(error.message || 'Failed to delete load from database.');
+      }
+      return;
     }
 
     const { loads } = this.ensureInitialized(organizationId);
@@ -1166,27 +1286,27 @@ class LocalLoadService implements ILoadService {
     const prefix = `LD-${year}-`;
     let maxSeq = 8840;
 
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error } = await supabase
-          .from('loads')
-          .select('load_number')
-          .eq('organization_id', organizationId);
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      const { data, error } = await supabase
+        .from('loads')
+        .select('load_number')
+        .eq('organization_id', organizationId);
 
-        if (!error && data) {
-          data.forEach((l) => {
-            if (l.load_number.startsWith(prefix)) {
-              const numPart = parseInt(l.load_number.replace(prefix, ''), 10);
-              if (!isNaN(numPart) && numPart > maxSeq) {
-                maxSeq = numPart;
-              }
-            }
-          });
-          return `${prefix}${maxSeq + 1}`;
-        }
-      } catch (err) {
-        console.warn('Supabase generateNextLoadNumber failed, falling back:', err);
+      if (error) {
+        console.error('[LoadService] Supabase generateNextLoadNumber error:', error);
+        throw new Error(error.message || 'Failed to generate load number from database.');
       }
+      if (data) {
+        data.forEach((l) => {
+          if (l.load_number.startsWith(prefix)) {
+            const numPart = parseInt(l.load_number.replace(prefix, ''), 10);
+            if (!isNaN(numPart) && numPart > maxSeq) {
+              maxSeq = numPart;
+            }
+          }
+        });
+      }
+      return `${prefix}${maxSeq + 1}`;
     }
 
     const { loads } = this.ensureInitialized(organizationId);

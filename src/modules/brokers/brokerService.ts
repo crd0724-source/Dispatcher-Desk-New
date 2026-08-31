@@ -1,5 +1,10 @@
 import { Broker, Load } from '../../types/domain.types.ts';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase.ts';
+
+function isUUID(str?: string | null): boolean {
+  if (!str) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
 import {
   BrokerWithPerformance,
   BrokerPerformanceMetrics,
@@ -238,7 +243,18 @@ class BrokerService {
   async listBrokers(orgId: string, filters?: BrokerFilterCriteria): Promise<BrokerWithPerformance[]> {
     let brokers: Broker[] = [];
 
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && isUUID(orgId)) {
+      const { data, error } = await supabase
+        .from('brokers')
+        .select('*')
+        .eq('organization_id', orgId)
+        .order('company_name', { ascending: true });
+      if (error) {
+        console.error('[BrokerService] Supabase listBrokers error:', error);
+        throw new Error(error.message || 'Failed to fetch brokers from database.');
+      }
+      brokers = (data || []) as Broker[];
+    } else if (isSupabaseConfigured) {
       try {
         const { data, error } = await supabase
           .from('brokers')
@@ -253,7 +269,7 @@ class BrokerService {
       }
     }
 
-    if (brokers.length === 0) {
+    if (brokers.length === 0 && !isUUID(orgId)) {
       // Artificial small delay for UI smoothness when fallback
       await new Promise((resolve) => setTimeout(resolve, 50));
       brokers = this.getRawBrokers(orgId);
@@ -329,6 +345,27 @@ class BrokerService {
    * Get single broker with performance metrics
    */
   async getBroker(orgId: string, brokerId: string): Promise<BrokerWithPerformance | null> {
+    if (isSupabaseConfigured && isUUID(orgId) && isUUID(brokerId)) {
+      const { data, error } = await supabase
+        .from('brokers')
+        .select('*')
+        .eq('id', brokerId)
+        .eq('organization_id', orgId)
+        .maybeSingle();
+      if (error) {
+        console.error('[BrokerService] Supabase getBroker error:', error);
+        throw new Error(error.message || 'Failed to fetch broker from database.');
+      }
+      if (data) {
+        const broker = data as Broker;
+        return {
+          ...broker,
+          performance: this.calculatePerformance(orgId, broker.id, broker.payment_terms_days),
+        };
+      }
+      return null;
+    }
+
     if (isSupabaseConfigured) {
       try {
         const { data, error } = await supabase
@@ -366,6 +403,40 @@ class BrokerService {
     const paymentTerms = Math.max(0, Math.min(120, Math.round(Number(input.payment_terms_days) || 30)));
     const cleanMc = input.mc_number ? cleanIdentifier(input.mc_number) || null : null;
     const cleanDot = input.dot_number ? cleanIdentifier(input.dot_number) || null : null;
+
+    if (isSupabaseConfigured && isUUID(orgId)) {
+      const { data, error } = await supabase
+        .from('brokers')
+        .insert({
+          organization_id: orgId,
+          company_name: input.company_name.trim(),
+          mc_number: cleanMc,
+          dot_number: cleanDot,
+          contact_name: input.contact_name?.trim() || null,
+          contact_email: input.contact_email?.trim() || null,
+          contact_phone: input.contact_phone?.trim() || null,
+          payment_terms_days: paymentTerms,
+          credit_status: input.credit_status || 'approved',
+          notes: input.notes?.trim() || null,
+          status: input.status || 'active',
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[BrokerService] Supabase createBroker error:', error);
+        throw new Error(error.message || 'Failed to create broker in database.');
+      }
+
+      if (data) {
+        const created = data as Broker;
+        return {
+          ...created,
+          performance: this.calculatePerformance(orgId, created.id, created.payment_terms_days),
+        };
+      }
+      throw new Error('Unexpected empty response while creating broker.');
+    }
 
     if (isSupabaseConfigured) {
       try {
@@ -431,6 +502,44 @@ class BrokerService {
    * Update existing broker
    */
   async updateBroker(orgId: string, brokerId: string, input: UpdateBrokerInput): Promise<BrokerWithPerformance> {
+    if (isSupabaseConfigured && isUUID(orgId) && isUUID(brokerId)) {
+      const { data, error } = await supabase
+        .from('brokers')
+        .update({
+          ...(input.company_name !== undefined ? { company_name: input.company_name.trim() } : {}),
+          ...(input.mc_number !== undefined ? { mc_number: input.mc_number ? cleanIdentifier(input.mc_number) || null : null } : {}),
+          ...(input.dot_number !== undefined ? { dot_number: input.dot_number ? cleanIdentifier(input.dot_number) || null : null } : {}),
+          ...(input.contact_name !== undefined ? { contact_name: input.contact_name?.trim() || null } : {}),
+          ...(input.contact_email !== undefined ? { contact_email: input.contact_email?.trim() || null } : {}),
+          ...(input.contact_phone !== undefined ? { contact_phone: input.contact_phone?.trim() || null } : {}),
+          ...(input.payment_terms_days !== undefined
+            ? { payment_terms_days: Math.max(0, Math.min(120, Math.round(Number(input.payment_terms_days) || 30))) }
+            : {}),
+          ...(input.credit_status !== undefined ? { credit_status: input.credit_status } : {}),
+          ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', brokerId)
+        .eq('organization_id', orgId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[BrokerService] Supabase updateBroker error:', error);
+        throw new Error(error.message || 'Failed to update broker in database.');
+      }
+
+      if (data) {
+        const updated = data as Broker;
+        return {
+          ...updated,
+          performance: this.calculatePerformance(orgId, updated.id, updated.payment_terms_days),
+        };
+      }
+      throw new Error('Broker not found or update failed.');
+    }
+
     if (isSupabaseConfigured) {
       try {
         const { data, error } = await supabase
@@ -518,6 +627,19 @@ class BrokerService {
    * Delete broker record (Owner Admin only)
    */
   async deleteBroker(orgId: string, brokerId: string): Promise<boolean> {
+    if (isSupabaseConfigured && isUUID(orgId) && isUUID(brokerId)) {
+      const { error } = await supabase
+        .from('brokers')
+        .delete()
+        .eq('id', brokerId)
+        .eq('organization_id', orgId);
+      if (error) {
+        console.error('[BrokerService] Supabase deleteBroker error:', error);
+        throw new Error(error.message || 'Failed to delete broker from database.');
+      }
+      return true;
+    }
+
     if (isSupabaseConfigured) {
       try {
         const { error } = await supabase

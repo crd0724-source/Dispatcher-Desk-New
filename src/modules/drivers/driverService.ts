@@ -4,6 +4,11 @@ import { clientService } from '../clients/clientService.ts';
 import { truckService } from '../trucks/truckService.ts';
 import { DriverWithRelations, CreateDriverInput, UpdateDriverInput } from './driverTypes.ts';
 
+function isUUID(str?: string | null): boolean {
+  if (!str) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
+
 // Storage keys
 const DRIVERS_STORAGE_PREFIX = 'dispatchdesk_demo_drivers_';
 const CLIENTS_STORAGE_PREFIX = 'dispatchdesk_demo_clients_';
@@ -357,6 +362,25 @@ class LocalDriverService implements IDriverService {
     truckId: string,
     excludeDriverId?: string
   ): Promise<Driver | null> {
+    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(truckId)) {
+      let query = supabase
+        .from('drivers')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .eq('assigned_truck_id', truckId);
+
+      if (excludeDriverId && isUUID(excludeDriverId)) {
+        query = query.neq('id', excludeDriverId);
+      }
+
+      const { data, error } = await query.maybeSingle();
+      if (error) {
+        console.error('[DriverService] Supabase getAssignedDriverForTruck error:', error);
+        throw new Error(error.message || 'Failed to fetch assigned driver for truck.');
+      }
+      return (data as Driver) || null;
+    }
+
     if (isSupabaseConfigured) {
       try {
         let query = supabase
@@ -386,7 +410,19 @@ class LocalDriverService implements IDriverService {
   async getDrivers(organizationId: string): Promise<DriverWithRelations[]> {
     let rawDrivers: Driver[] = [];
 
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      const { data, error } = await supabase
+        .from('drivers')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('[DriverService] Supabase getDrivers error:', error);
+        throw new Error(error.message || 'Failed to fetch drivers from database.');
+      }
+      rawDrivers = (data || []) as Driver[];
+    } else if (isSupabaseConfigured) {
       try {
         const { data, error } = await supabase
           .from('drivers')
@@ -402,7 +438,7 @@ class LocalDriverService implements IDriverService {
       }
     }
 
-    if (rawDrivers.length === 0) {
+    if (rawDrivers.length === 0 && !isUUID(organizationId)) {
       const { drivers } = this.ensureInitialized(organizationId);
       rawDrivers = drivers;
     }
@@ -420,7 +456,21 @@ class LocalDriverService implements IDriverService {
   async getDriverById(organizationId: string, id: string): Promise<DriverWithRelations | null> {
     let rawDriver: Driver | null = null;
 
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(id)) {
+      const { data, error } = await supabase
+        .from('drivers')
+        .select('*')
+        .eq('id', id)
+        .eq('organization_id', organizationId)
+        .maybeSingle();
+
+      if (error) {
+        console.error('[DriverService] Supabase getDriverById error:', error);
+        throw new Error(error.message || 'Failed to fetch driver from database.');
+      }
+      if (!data) return null;
+      rawDriver = data as Driver;
+    } else if (isSupabaseConfigured) {
       try {
         const { data, error } = await supabase
           .from('drivers')
@@ -437,7 +487,7 @@ class LocalDriverService implements IDriverService {
       }
     }
 
-    if (!rawDriver) {
+    if (!rawDriver && !isUUID(organizationId)) {
       const { drivers } = this.ensureInitialized(organizationId);
       rawDriver = drivers.find((d) => d.id === id) || null;
     }
@@ -471,6 +521,44 @@ class LocalDriverService implements IDriverService {
     }
 
     const payRateNum = Number(input.pay_rate) || 0;
+
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      // If assigned truck is specified, clear it from any driver who currently has it
+      if (input.assigned_truck_id) {
+        await supabase
+          .from('drivers')
+          .update({ assigned_truck_id: null, updated_at: new Date().toISOString() })
+          .eq('organization_id', organizationId)
+          .eq('assigned_truck_id', input.assigned_truck_id);
+      }
+
+      const { data, error } = await supabase
+        .from('drivers')
+        .insert({
+          organization_id: organizationId,
+          client_id: input.client_id || null,
+          assigned_truck_id: input.assigned_truck_id || null,
+          full_name: input.full_name.trim(),
+          phone: input.phone?.trim() || null,
+          email: input.email?.trim() || null,
+          pay_type: input.pay_type,
+          pay_rate: payRateNum,
+          status: input.status || 'available',
+          notes: input.notes?.trim() || null,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[DriverService] Supabase createDriver error:', error);
+        throw new Error(error.message || 'Failed to create driver in database.');
+      }
+
+      if (data) {
+        return this.joinRelations(data as Driver, clients, trucks);
+      }
+      throw new Error('Unexpected empty response while creating driver.');
+    }
 
     if (isSupabaseConfigured) {
       try {
@@ -566,6 +654,47 @@ class LocalDriverService implements IDriverService {
       }
     }
 
+    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(id)) {
+      // If assigning truck, clear any other driver occupying this truck
+      if (targetTruckId) {
+        await supabase
+          .from('drivers')
+          .update({ assigned_truck_id: null, updated_at: new Date().toISOString() })
+          .eq('organization_id', organizationId)
+          .eq('assigned_truck_id', targetTruckId)
+          .neq('id', id);
+      }
+
+      const { data, error } = await supabase
+        .from('drivers')
+        .update({
+          ...(input.client_id !== undefined ? { client_id: input.client_id || null } : {}),
+          ...(input.assigned_truck_id !== undefined ? { assigned_truck_id: input.assigned_truck_id || null } : {}),
+          ...(input.full_name !== undefined ? { full_name: input.full_name.trim() } : {}),
+          ...(input.phone !== undefined ? { phone: input.phone?.trim() || null } : {}),
+          ...(input.email !== undefined ? { email: input.email?.trim() || null } : {}),
+          ...(input.pay_type !== undefined ? { pay_type: input.pay_type } : {}),
+          ...(input.pay_rate !== undefined ? { pay_rate: Number(input.pay_rate) || 0 } : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .eq('organization_id', organizationId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[DriverService] Supabase updateDriver error:', error);
+        throw new Error(error.message || 'Failed to update driver in database.');
+      }
+
+      if (data) {
+        return this.joinRelations(data as Driver, clients, trucks);
+      }
+      throw new Error('Driver not found or update failed.');
+    }
+
     if (isSupabaseConfigured) {
       try {
         // If assigning truck, clear any other driver occupying this truck
@@ -655,6 +784,19 @@ class LocalDriverService implements IDriverService {
   }
 
   async deleteDriver(organizationId: string, id: string): Promise<void> {
+    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(id)) {
+      const { error } = await supabase
+        .from('drivers')
+        .delete()
+        .eq('id', id)
+        .eq('organization_id', organizationId);
+      if (error) {
+        console.error('[DriverService] Supabase deleteDriver error:', error);
+        throw new Error(error.message || 'Failed to delete driver from database.');
+      }
+      return;
+    }
+
     if (isSupabaseConfigured) {
       try {
         const { error } = await supabase

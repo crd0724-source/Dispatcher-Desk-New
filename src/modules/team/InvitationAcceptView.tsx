@@ -71,7 +71,7 @@ export const InvitationAcceptView: React.FC<InvitationAcceptViewProps> = ({
   }, [loadInvitation]);
 
   const handleAccept = async () => {
-    if (!invitation || !user) return;
+    if (!invitation || !user || isAccepting || acceptedSuccess) return;
     setAcceptError(null);
     setIsAccepting(true);
 
@@ -90,7 +90,7 @@ export const InvitationAcceptView: React.FC<InvitationAcceptViewProps> = ({
         setTimeout(() => onAccepted(res.organizationId), 1500);
       }
     } catch (err: any) {
-      console.error('Error accepting invitation:', err);
+      console.error('Error accepting invitation:', err?.message || 'Acceptance error');
       setAcceptError(err.message || 'Failed to accept invitation.');
     } finally {
       setIsAccepting(false);
@@ -99,7 +99,7 @@ export const InvitationAcceptView: React.FC<InvitationAcceptViewProps> = ({
 
   const handleInlineAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!invitation) return;
+    if (!invitation || authLoading || acceptedSuccess) return;
     setAuthError(null);
     setAuthLoading(true);
 
@@ -143,7 +143,7 @@ export const InvitationAcceptView: React.FC<InvitationAcceptViewProps> = ({
             preferred_timezone: 'America/Chicago',
           });
 
-          // Auto-accept invitation with newly created account
+          // Auto-accept invitation with newly created account via secure RPC
           const res = await teamService.acceptInvitation(rawToken, {
             id: data.user.id,
             email: targetEmail,
@@ -167,7 +167,7 @@ export const InvitationAcceptView: React.FC<InvitationAcceptViewProps> = ({
 
         if (data.user) {
           await refreshUserData();
-          // Auto-accept after successful login
+          // Auto-accept after successful login via secure RPC
           const res = await teamService.acceptInvitation(rawToken, {
             id: data.user.id,
             email: data.user.email || targetEmail,
@@ -184,7 +184,7 @@ export const InvitationAcceptView: React.FC<InvitationAcceptViewProps> = ({
         }
       }
     } catch (err: any) {
-      console.error('Auth error during invitation onboarding:', err);
+      console.error('Auth error during invitation onboarding:', err?.message || 'Authentication error');
       setAuthError(err.message || 'Authentication failed. Please try again.');
     } finally {
       setAuthLoading(false);
@@ -211,6 +211,7 @@ export const InvitationAcceptView: React.FC<InvitationAcceptViewProps> = ({
 
   const isExpiredOrInvalid =
     !invitation ||
+    invitation.is_valid === false ||
     invitation.status === 'expired' ||
     invitation.status === 'cancelled' ||
     invitation.status === 'accepted';
@@ -299,12 +300,14 @@ export const InvitationAcceptView: React.FC<InvitationAcceptViewProps> = ({
                 Invitation {invitation.status.toUpperCase()}
               </h2>
               <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
-                {invitation.status === 'cancelled' &&
-                  'This invitation was cancelled by an organization administrator.'}
-                {invitation.status === 'accepted' &&
-                  'This invitation has already been accepted and cannot be reused.'}
-                {invitation.status === 'expired' &&
-                  'This invitation has expired. Invitations are valid for 7 days.'}
+                {invitation.invalid_reason ||
+                  (invitation.status === 'cancelled' &&
+                    'This invitation was cancelled by an organization administrator.') ||
+                  (invitation.status === 'accepted' &&
+                    'This invitation has already been accepted and cannot be reused.') ||
+                  (invitation.status === 'expired' &&
+                    'This invitation has expired. Invitations are valid for 7 days.') ||
+                  'This invitation is no longer valid.'}
               </p>
             </div>
             <button
@@ -364,9 +367,23 @@ export const InvitationAcceptView: React.FC<InvitationAcceptViewProps> = ({
 
             {/* Error banners */}
             {acceptError && (
-              <div className="p-3.5 rounded-lg bg-rose-950/40 border border-rose-800/60 text-xs text-rose-300 flex items-start gap-2.5">
-                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                <span>{acceptError}</span>
+              <div className="p-3.5 rounded-lg bg-rose-950/40 border border-rose-800/60 text-xs text-rose-300 space-y-2">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <span>{acceptError}</span>
+                </div>
+                {acceptError.toLowerCase().includes('already a member') && (
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={onDismiss}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition cursor-pointer shadow-sm"
+                    >
+                      <span>Enter Organization Workspace</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 

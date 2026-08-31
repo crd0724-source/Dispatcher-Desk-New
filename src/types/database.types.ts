@@ -574,6 +574,22 @@ export type Database = {
         };
         Returns: string;
       };
+      create_team_invitation: {
+        Args: {
+          p_organization_id: string;
+          p_email: string;
+          p_role: string;
+          p_token_hash: string;
+          p_expires_at?: string | null;
+        };
+        Returns: Json;
+      };
+      cancel_team_invitation: {
+        Args: {
+          p_invitation_id: string;
+        };
+        Returns: Json;
+      };
       get_invitation_details: {
         Args: {
           p_token_hash: string;
@@ -583,6 +599,40 @@ export type Database = {
       accept_team_invitation: {
         Args: {
           p_token_hash: string;
+        };
+        Returns: Json;
+      };
+      update_team_member_role: {
+        Args: {
+          p_organization_id: string;
+          p_member_id: string;
+          p_new_role: string;
+        };
+        Returns: Json;
+      };
+      remove_team_member: {
+        Args: {
+          p_organization_id: string;
+          p_member_id: string;
+        };
+        Returns: Json;
+      };
+      transition_load_status: {
+        Args: {
+          p_organization_id: string;
+          p_load_id: string;
+          p_target_status: string;
+          p_notes?: string | null;
+        };
+        Returns: Json;
+      };
+      assign_load_dispatch: {
+        Args: {
+          p_organization_id: string;
+          p_load_id: string;
+          p_truck_id?: string | null;
+          p_driver_id?: string | null;
+          p_notes?: string | null;
         };
         Returns: Json;
       };

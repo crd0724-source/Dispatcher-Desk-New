@@ -165,7 +165,6 @@ export interface ITeamService {
 class TeamService implements ITeamService {
   private memoryMembers: Map<string, string> = new Map();
   private memoryInvitations: Map<string, string> = new Map();
-  private rawTokenCache: Map<string, string> = new Map(); // token_hash -> rawToken (for easy demo UI copying)
 
   private getMemberStorageKey(organizationId: string): string {
     return `${TEAM_STORAGE_PREFIX}${organizationId}`;
@@ -296,62 +295,60 @@ class TeamService implements ITeamService {
     if (!organizationId) return [];
 
     if (isSupabaseConfigured && isUUID(organizationId)) {
-      try {
-        const { data: memberRows, error: memberErr } = await supabase
-          .from('organization_members')
-          .select('*')
-          .eq('organization_id', organizationId)
-          .order('created_at', { ascending: true });
+      const { data: memberRows, error: memberErr } = await supabase
+        .from('organization_members')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .order('created_at', { ascending: true });
 
-        if (memberErr) {
-          console.error('[TeamService] Error querying organization_members:', memberErr);
-          throw memberErr;
-        }
-
-        if (memberRows && memberRows.length > 0) {
-          const userIds = memberRows.map((m) => m.user_id).filter(Boolean);
-
-          const { data: profileRows, error: profileErr } = await supabase
-            .from('profiles')
-            .select('id, full_name, phone, preferred_timezone')
-            .in('id', userIds);
-
-          if (profileErr) {
-            console.warn('[TeamService] Profile fetch warning:', profileErr);
-          }
-
-          const profileMap = new Map<
-            string,
-            { full_name: string | null; phone: string | null; preferred_timezone: string | null }
-          >();
-
-          if (profileRows) {
-            for (const p of profileRows) {
-              profileMap.set(p.id, p);
-            }
-          }
-
-          const result: TeamMember[] = memberRows.map((m) => {
-            const profile = profileMap.get(m.user_id);
-            return {
-              id: m.id,
-              user_id: m.user_id,
-              organization_id: m.organization_id,
-              role: m.role as UserRole,
-              created_at: m.created_at,
-              updated_at: m.updated_at,
-              full_name: profile?.full_name || 'Team Member',
-              phone: profile?.phone || null,
-              preferred_timezone: profile?.preferred_timezone || null,
-              email: null,
-            };
-          });
-
-          return this.sortMembers(result);
-        }
-      } catch (err) {
-        console.warn('[TeamService] Supabase getTeamMembers fallback to demo store:', err);
+      if (memberErr) {
+        console.error('[TeamService] Error querying organization_members:', memberErr);
+        throw new Error(memberErr.message || 'Failed to load team members from Supabase.');
       }
+
+      if (memberRows && memberRows.length > 0) {
+        const userIds = memberRows.map((m) => m.user_id).filter(Boolean);
+
+        const { data: profileRows, error: profileErr } = await supabase
+          .from('profiles')
+          .select('id, full_name, phone, preferred_timezone')
+          .in('id', userIds);
+
+        if (profileErr) {
+          console.warn('[TeamService] Profile fetch warning:', profileErr);
+        }
+
+        const profileMap = new Map<
+          string,
+          { full_name: string | null; phone: string | null; preferred_timezone: string | null }
+        >();
+
+        if (profileRows) {
+          for (const p of profileRows) {
+            profileMap.set(p.id, p);
+          }
+        }
+
+        const result: TeamMember[] = memberRows.map((m) => {
+          const profile = profileMap.get(m.user_id);
+          return {
+            id: m.id,
+            user_id: m.user_id,
+            organization_id: m.organization_id,
+            role: m.role as UserRole,
+            created_at: m.created_at,
+            updated_at: m.updated_at,
+            full_name: profile?.full_name || 'Team Member',
+            phone: profile?.phone || null,
+            preferred_timezone: profile?.preferred_timezone || null,
+            email: null,
+          };
+        });
+
+        return this.sortMembers(result);
+      }
+
+      return [];
     }
 
     const members = this.ensureMembersInitialized(organizationId);
@@ -368,6 +365,10 @@ class TeamService implements ITeamService {
     newRole: UserRole,
     actorRole?: UserRole | null
   ): Promise<TeamMember> {
+    if (!organizationId || !memberId) {
+      throw new Error('Organization ID and Member ID are required.');
+    }
+
     if (actorRole && actorRole !== 'owner_admin') {
       throw new Error('Unauthorized: Only Owner/Admins can modify team member roles.');
     }
@@ -377,6 +378,40 @@ class TeamService implements ITeamService {
       throw new Error(`Invalid role "${newRole}". Allowed roles: owner_admin, dispatcher, staff.`);
     }
 
+    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(memberId)) {
+      const { data, error } = await (supabase.rpc as unknown as (fn: string, params: Record<string, unknown>) => Promise<{ data: any; error: any }>)(
+        'update_team_member_role',
+        {
+          p_organization_id: organizationId,
+          p_member_id: memberId,
+          p_new_role: newRole,
+        }
+      );
+
+      if (error) {
+        console.error('[TeamService] Supabase update_team_member_role error:', error);
+        throw new Error(error.message || 'Failed to update member role in Supabase.');
+      }
+
+      if (data) {
+        return {
+          id: data.id,
+          user_id: data.user_id,
+          organization_id: data.organization_id,
+          role: data.role as UserRole,
+          created_at: data.created_at,
+          updated_at: data.updated_at,
+          full_name: data.full_name || 'Team Member',
+          phone: data.phone || null,
+          preferred_timezone: data.preferred_timezone || 'America/Chicago',
+          email: data.email || null,
+        };
+      }
+
+      throw new Error('Unexpected empty response from update_team_member_role RPC.');
+    }
+
+    // Local / Demo Mode execution
     const currentMembers = await this.getTeamMembers(organizationId);
     const targetMember = currentMembers.find((m) => m.id === memberId);
     if (!targetMember) {
@@ -390,45 +425,6 @@ class TeamService implements ITeamService {
       }
     }
 
-    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(memberId)) {
-      try {
-        const { data, error } = await supabase
-          .from('organization_members')
-          .update({
-            role: newRole,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', memberId)
-          .eq('organization_id', organizationId)
-          .select()
-          .single();
-
-        if (error) {
-          throw new Error(error.message || 'Failed to update member role in Supabase.');
-        }
-
-        if (data) {
-          const localMembers = this.loadMembersFromStorage(organizationId);
-          const idx = localMembers.findIndex((m) => m.id === memberId);
-          if (idx !== -1) {
-            localMembers[idx].role = newRole;
-            localMembers[idx].updated_at = new Date().toISOString();
-            this.saveMembersToStorage(organizationId, localMembers);
-          }
-
-          return {
-            ...targetMember,
-            role: newRole,
-            updated_at: data.updated_at,
-          };
-        }
-      } catch (err: any) {
-        console.warn('[TeamService] Supabase updateMemberRole error:', err);
-        throw err;
-      }
-    }
-
-    // Local / Demo Mode execution
     const localMembers = this.ensureMembersInitialized(organizationId);
     const idx = localMembers.findIndex((m) => m.id === memberId);
     if (idx === -1) {
@@ -455,10 +451,35 @@ class TeamService implements ITeamService {
     memberId: string,
     actorRole?: UserRole | null
   ): Promise<void> {
+    if (!organizationId || !memberId) {
+      throw new Error('Organization ID and Member ID are required.');
+    }
+
     if (actorRole && actorRole !== 'owner_admin') {
       throw new Error('Unauthorized: Only Owner/Admins can remove team members.');
     }
 
+    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(memberId)) {
+      const { data, error } = await (supabase.rpc as unknown as (fn: string, params: Record<string, unknown>) => Promise<{ data: any; error: any }>)(
+        'remove_team_member',
+        {
+          p_organization_id: organizationId,
+          p_member_id: memberId,
+        }
+      );
+
+      if (error) {
+        console.error('[TeamService] Supabase remove_team_member error:', error);
+        throw new Error(error.message || 'Failed to remove team member in Supabase.');
+      }
+
+      if (data && data.success) {
+        return;
+      }
+      throw new Error('Unexpected response during member removal.');
+    }
+
+    // Local / Demo Mode removal
     const currentMembers = await this.getTeamMembers(organizationId);
     const targetMember = currentMembers.find((m) => m.id === memberId);
     if (!targetMember) {
@@ -472,24 +493,6 @@ class TeamService implements ITeamService {
       }
     }
 
-    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(memberId)) {
-      try {
-        const { error } = await supabase
-          .from('organization_members')
-          .delete()
-          .eq('id', memberId)
-          .eq('organization_id', organizationId);
-
-        if (error) {
-          throw new Error(error.message || 'Failed to remove member in Supabase.');
-        }
-      } catch (err: any) {
-        console.warn('[TeamService] Supabase removeMember error:', err);
-        throw err;
-      }
-    }
-
-    // Local / Demo Mode removal
     const localMembers = this.ensureMembersInitialized(organizationId);
     const filtered = localMembers.filter((m) => m.id !== memberId);
     this.saveMembersToStorage(organizationId, filtered);
@@ -497,8 +500,8 @@ class TeamService implements ITeamService {
 
   /**
    * S5.2: Create and dispatch a new team invitation.
-   * Generates a cryptographic token, computes SHA-256 hash, enforces uniqueness,
-   * and returns the invitation record with the shareable invitation URL.
+   * Generates a cryptographic token, computes SHA-256 hash, and calls the secure
+   * create_team_invitation RPC which performs authoritative member & duplicate checks.
    */
   async createInvitation(
     organizationId: string,
@@ -522,7 +525,57 @@ class TeamService implements ITeamService {
       throw new Error(`Invalid role "${role}". Allowed roles: owner_admin, dispatcher, staff.`);
     }
 
-    // 1. Check existing members
+    // Generate cryptographic token & SHA-256 hash
+    const rawToken = generateSecureToken();
+    const tokenHash = await hashToken(rawToken);
+    const expiresAt = new Date(Date.now() + 7 * 86400000).toISOString(); // 7 days expiry
+
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://dispatchdesk.app';
+    const inviteUrl = `${origin}/?invitation_token=${encodeURIComponent(rawToken)}`;
+
+    // Production path: Authoritative RPC
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      const { data, error } = await (supabase.rpc as unknown as (fn: string, params: Record<string, unknown>) => Promise<{ data: any; error: any }>)(
+        'create_team_invitation',
+        {
+          p_organization_id: organizationId,
+          p_email: normalizedEmail,
+          p_role: role,
+          p_token_hash: tokenHash,
+          p_expires_at: expiresAt,
+        }
+      );
+
+      if (error) {
+        throw new Error(error.message || 'Failed to create team invitation in Supabase.');
+      }
+
+      if (data) {
+        const inv: TeamInvitation = {
+          id: data.id,
+          organization_id: data.organization_id,
+          organization_name: data.organization_name,
+          email: data.email,
+          role: data.role as UserRole,
+          invited_by_user_id: data.invited_by_user_id,
+          invited_by_name: data.invited_by_name,
+          expires_at: data.expires_at,
+          accepted_at: data.accepted_at,
+          cancelled_at: data.cancelled_at,
+          created_at: data.created_at,
+          updated_at: data.updated_at,
+          status: 'pending',
+          is_valid: true,
+          invalid_reason: null,
+        };
+
+        return { invitation: inv, rawToken, inviteUrl };
+      }
+
+      throw new Error('Unexpected empty response from create_team_invitation RPC.');
+    }
+
+    // Local / Demo Mode execution
     const existingMembers = await this.getTeamMembers(organizationId);
     const alreadyMember = existingMembers.some(
       (m) => m.email && normalizeEmail(m.email) === normalizedEmail
@@ -531,74 +584,16 @@ class TeamService implements ITeamService {
       throw new Error(`User with email "${normalizedEmail}" is already an active member of this organization.`);
     }
 
-    // 2. Check existing pending invitations
-    const existingInvitations = await this.listInvitations(organizationId, actorRole);
-    const activeInv = existingInvitations.find(
+    const localInvitations = this.ensureInvitationsInitialized(organizationId);
+    const activeInv = localInvitations.find(
       (inv) =>
         normalizeEmail(inv.email) === normalizedEmail &&
-        inv.status === 'pending'
+        this.computeInvitationStatus(inv) === 'pending'
     );
     if (activeInv) {
-      throw new Error(`An active pending invitation already exists for "${normalizedEmail}". You can copy or cancel the existing invitation.`);
+      throw new Error(`An active pending invitation already exists for "${normalizedEmail}".`);
     }
 
-    // 3. Generate token & hash
-    const rawToken = generateSecureToken();
-    const tokenHash = await hashToken(rawToken);
-    const expiresAt = new Date(Date.now() + 7 * 86400000).toISOString(); // 7 days expiry
-
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://dispatchdesk.app';
-    const inviteUrl = `${origin}/?invitation_token=${encodeURIComponent(rawToken)}`;
-
-    if (isSupabaseConfigured && isUUID(organizationId)) {
-      try {
-        const { data, error } = await supabase
-          .from('organization_invitations')
-          .insert({
-            organization_id: organizationId,
-            email: normalizedEmail,
-            role,
-            invited_by_user_id: invitedByUserId || null,
-            token_hash: tokenHash,
-            expires_at: expiresAt,
-          })
-          .select()
-          .single();
-
-        if (error) {
-          if (error.code === '23505') {
-            throw new Error(`An active invitation already exists for "${normalizedEmail}".`);
-          }
-          throw new Error(error.message || 'Failed to create team invitation in Supabase.');
-        }
-
-        if (data) {
-          const inv: TeamInvitation = {
-            id: data.id,
-            organization_id: data.organization_id,
-            email: data.email,
-            role: data.role as UserRole,
-            invited_by_user_id: data.invited_by_user_id,
-            token_hash: data.token_hash,
-            expires_at: data.expires_at,
-            accepted_at: data.accepted_at,
-            cancelled_at: data.cancelled_at,
-            created_at: data.created_at,
-            updated_at: data.updated_at,
-            status: 'pending',
-          };
-
-          this.rawTokenCache.set(tokenHash, rawToken);
-          return { invitation: inv, rawToken, inviteUrl };
-        }
-      } catch (err: any) {
-        console.warn('[TeamService] Supabase createInvitation error:', err);
-        throw err;
-      }
-    }
-
-    // Local / Demo Mode execution
-    const localInvitations = this.ensureInvitationsInitialized(organizationId);
     const newInvitation: TeamInvitation = {
       id: `inv-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       organization_id: organizationId,
@@ -614,11 +609,12 @@ class TeamService implements ITeamService {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       status: 'pending',
+      is_valid: true,
+      invalid_reason: null,
     };
 
     localInvitations.unshift(newInvitation);
     this.saveInvitationsToStorage(organizationId, localInvitations);
-    this.rawTokenCache.set(tokenHash, rawToken);
 
     return {
       invitation: newInvitation,
@@ -637,63 +633,61 @@ class TeamService implements ITeamService {
     if (!organizationId) return [];
 
     if (isSupabaseConfigured && isUUID(organizationId)) {
-      try {
-        const { data, error } = await supabase
-          .from('organization_invitations')
-          .select('*')
-          .eq('organization_id', organizationId)
-          .order('created_at', { ascending: false });
+      const { data, error } = await supabase
+        .from('organization_invitations')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .order('created_at', { ascending: false });
 
-        if (error) {
-          console.warn('[TeamService] Error fetching organization_invitations:', error);
-          throw error;
-        }
+      if (error) {
+        console.error('[TeamService] Error fetching organization_invitations:', error);
+        throw new Error(error.message || 'Failed to list team invitations.');
+      }
 
-        if (data) {
-          // Fetch inviter profiles
-          const inviterIds = data.map((d) => d.invited_by_user_id).filter(Boolean) as string[];
-          let inviterMap = new Map<string, string>();
+      if (data) {
+        // Fetch inviter profiles
+        const inviterIds = data.map((d) => d.invited_by_user_id).filter(Boolean) as string[];
+        const inviterMap = new Map<string, string>();
 
-          if (inviterIds.length > 0) {
-            const { data: profs } = await supabase
-              .from('profiles')
-              .select('id, full_name')
-              .in('id', inviterIds);
+        if (inviterIds.length > 0) {
+          const { data: profs } = await supabase
+            .from('profiles')
+            .select('id, full_name')
+            .in('id', inviterIds);
 
-            if (profs) {
-              for (const p of profs) {
-                if (p.full_name) inviterMap.set(p.id, p.full_name);
-              }
+          if (profs) {
+            for (const p of profs) {
+              if (p.full_name) inviterMap.set(p.id, p.full_name);
             }
           }
-
-          return data.map((row) => ({
-            id: row.id,
-            organization_id: row.organization_id,
-            email: row.email,
-            role: row.role as UserRole,
-            invited_by_user_id: row.invited_by_user_id,
-            invited_by_name: row.invited_by_user_id ? inviterMap.get(row.invited_by_user_id) || 'Administrator' : null,
-            token_hash: row.token_hash,
-            expires_at: row.expires_at,
-            accepted_at: row.accepted_at,
-            cancelled_at: row.cancelled_at,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            status: this.computeInvitationStatus(row),
-          }));
         }
-      } catch (err) {
-        console.warn('[TeamService] Supabase listInvitations fallback to demo store:', err);
+
+        return data.map((row) => ({
+          id: row.id,
+          organization_id: row.organization_id,
+          email: row.email,
+          role: row.role as UserRole,
+          invited_by_user_id: row.invited_by_user_id,
+          invited_by_name: row.invited_by_user_id ? inviterMap.get(row.invited_by_user_id) || 'Administrator' : null,
+          expires_at: row.expires_at,
+          accepted_at: row.accepted_at,
+          cancelled_at: row.cancelled_at,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          status: this.computeInvitationStatus(row),
+        }));
       }
+      return [];
     }
 
     // Local / Demo Mode
     const local = this.ensureInvitationsInitialized(organizationId);
-    return local.map((inv) => ({
-      ...inv,
-      status: this.computeInvitationStatus(inv),
-    })).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return local
+      .map((inv) => ({
+        ...inv,
+        status: this.computeInvitationStatus(inv),
+      }))
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }
 
   /**
@@ -709,35 +703,38 @@ class TeamService implements ITeamService {
     }
 
     if (isSupabaseConfigured && isUUID(organizationId) && isUUID(invitationId)) {
-      try {
-        const { error } = await supabase
-          .from('organization_invitations')
-          .update({
-            cancelled_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', invitationId)
-          .eq('organization_id', organizationId);
+      const { error } = await (supabase.rpc as unknown as (fn: string, params: Record<string, unknown>) => Promise<{ data: any; error: any }>)(
+        'cancel_team_invitation',
+        { p_invitation_id: invitationId }
+      );
 
-        if (error) {
-          throw new Error(error.message || 'Failed to cancel invitation in Supabase.');
-        }
-        return;
-      } catch (err: any) {
-        console.warn('[TeamService] Supabase cancelInvitation error:', err);
-        throw err;
+      if (error) {
+        throw new Error(error.message || 'Failed to cancel invitation in Supabase.');
       }
+      return;
     }
 
     // Local / Demo Mode
     const local = this.ensureInvitationsInitialized(organizationId);
     const idx = local.findIndex((i) => i.id === invitationId);
-    if (idx !== -1) {
-      local[idx].cancelled_at = new Date().toISOString();
-      local[idx].status = 'cancelled';
-      local[idx].updated_at = new Date().toISOString();
-      this.saveInvitationsToStorage(organizationId, local);
+    if (idx === -1) {
+      throw new Error(`Invitation with ID "${invitationId}" not found.`);
     }
+
+    if (local[idx].accepted_at) {
+      throw new Error('Cannot cancel an invitation that has already been accepted.');
+    }
+    if (local[idx].cancelled_at) {
+      throw new Error('Invitation is already cancelled.');
+    }
+    if (new Date(local[idx].expires_at).getTime() <= Date.now()) {
+      throw new Error('Invitation has already expired.');
+    }
+
+    local[idx].cancelled_at = new Date().toISOString();
+    local[idx].status = 'cancelled';
+    local[idx].updated_at = new Date().toISOString();
+    this.saveInvitationsToStorage(organizationId, local);
   }
 
   /**
@@ -750,36 +747,41 @@ class TeamService implements ITeamService {
     const tokenHash = await hashToken(rawToken.trim());
 
     if (isSupabaseConfigured) {
-      try {
-        const { data, error } = await (supabase.rpc as unknown as (fn: string, params: Record<string, unknown>) => Promise<{ data: any; error: unknown }>)(
-          'get_invitation_details',
-          { p_token_hash: tokenHash }
-        );
+      const { data, error } = await (supabase.rpc as unknown as (fn: string, params: Record<string, unknown>) => Promise<{ data: any; error: unknown }>)(
+        'get_invitation_details',
+        { p_token_hash: tokenHash }
+      );
 
-        if (error) {
-          console.warn('[TeamService] Supabase get_invitation_details RPC error:', error);
-        } else if (data && data.id) {
-          return {
-            id: data.id,
-            organization_id: data.organization_id,
-            organization_name: data.organization_name || 'DispatchDesk Organization',
-            email: data.email,
-            role: data.role as UserRole,
-            invited_by_user_id: data.invited_by_user_id,
-            invited_by_name: data.invited_by_name,
-            expires_at: data.expires_at,
-            accepted_at: data.accepted_at,
-            cancelled_at: data.cancelled_at,
-            created_at: data.created_at,
-            status: data.status as InvitationStatus,
-          };
-        }
-      } catch (err) {
-        console.warn('[TeamService] RPC get_invitation_details failed:', err);
+      if (error) {
+        console.error('[TeamService] Supabase get_invitation_details RPC error:', (error as any).message);
+        throw new Error((error as any).message || 'Failed to retrieve invitation details.');
+      }
+
+      if (data && data.id) {
+        return {
+          id: data.id,
+          organization_id: data.organization_id,
+          organization_name: data.organization_name || 'DispatchDesk Organization',
+          email: data.email,
+          role: data.role as UserRole,
+          invited_by_user_id: data.invited_by_user_id,
+          invited_by_name: data.invited_by_name,
+          expires_at: data.expires_at,
+          accepted_at: data.accepted_at,
+          cancelled_at: data.cancelled_at,
+          created_at: data.created_at,
+          status: data.status as InvitationStatus,
+          is_valid: data.is_valid,
+          invalid_reason: data.invalid_reason,
+        };
+      }
+
+      if (data && !data.id && data.invalid_reason) {
+        return null;
       }
     }
 
-    // Local / Demo Mode search
+    // Local / Demo Mode search (strictly compares SHA-256 token_hash)
     if (typeof localStorage !== 'undefined') {
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
@@ -788,13 +790,20 @@ class TeamService implements ITeamService {
           if (raw) {
             try {
               const list: TeamInvitation[] = JSON.parse(raw);
-              const matched = list.find(
-                (inv) => inv.token_hash === tokenHash || inv.token_hash === rawToken
-              );
+              const matched = list.find((inv) => inv.token_hash === tokenHash);
               if (matched) {
+                const status = this.computeInvitationStatus(matched);
+                const isValid = status === 'pending';
+                let invalidReason: string | null = null;
+                if (status === 'cancelled') invalidReason = 'This invitation was cancelled by an organization administrator.';
+                else if (status === 'accepted') invalidReason = 'This invitation has already been accepted.';
+                else if (status === 'expired') invalidReason = 'This invitation has expired.';
+
                 return {
                   ...matched,
-                  status: this.computeInvitationStatus(matched),
+                  status,
+                  is_valid: isValid,
+                  invalid_reason: invalidReason,
                 };
               }
             } catch (e) {
@@ -805,16 +814,17 @@ class TeamService implements ITeamService {
       }
     }
 
-    // Check seed invitations fallback
-    const seedMatch = SEED_DEMO_INVITATIONS.find(
-      (inv) => inv.token_hash === tokenHash || inv.token_hash === rawToken || rawToken === 'demo-test-token'
-    );
+    // Check seed invitations fallback (strictly compares SHA-256 token_hash)
+    const seedMatch = SEED_DEMO_INVITATIONS.find((inv) => inv.token_hash === tokenHash);
     if (seedMatch) {
+      const status = this.computeInvitationStatus(seedMatch);
       return {
         ...seedMatch,
         organization_id: 'demo-org-1',
         organization_name: 'DispatchDesk Logistics (Demo Fleet)',
-        status: this.computeInvitationStatus(seedMatch),
+        status,
+        is_valid: status === 'pending',
+        invalid_reason: status !== 'pending' ? `Invitation is ${status}.` : null,
       };
     }
 
@@ -838,27 +848,23 @@ class TeamService implements ITeamService {
     const tokenHash = await hashToken(rawToken.trim());
 
     if (isSupabaseConfigured) {
-      try {
-        const { data, error } = await (supabase.rpc as unknown as (fn: string, params: Record<string, unknown>) => Promise<{ data: any; error: any }>)(
-          'accept_team_invitation',
-          { p_token_hash: tokenHash }
-        );
+      const { data, error } = await (supabase.rpc as unknown as (fn: string, params: Record<string, unknown>) => Promise<{ data: any; error: any }>)(
+        'accept_team_invitation',
+        { p_token_hash: tokenHash }
+      );
 
-        if (error) {
-          throw new Error(error.message || 'Failed to accept invitation.');
-        }
-
-        if (data && data.success) {
-          return {
-            organizationId: data.organization_id,
-            organizationName: data.organization_name || 'Organization',
-            role: data.role as UserRole,
-          };
-        }
-      } catch (err: any) {
-        console.error('[TeamService] Supabase accept_team_invitation error:', err);
-        throw err;
+      if (error) {
+        throw new Error(error.message || 'Failed to accept invitation.');
       }
+
+      if (data && data.success) {
+        return {
+          organizationId: data.organization_id,
+          organizationName: data.organization_name || 'Organization',
+          role: data.role as UserRole,
+        };
+      }
+      throw new Error('Unexpected response during invitation acceptance.');
     }
 
     // Local / Demo Mode acceptance
@@ -884,13 +890,16 @@ class TeamService implements ITeamService {
       );
     }
 
-    // Add user as member to the organization
+    // Privilege escalation guard: Verify not already a member
     const orgId = invitation.organization_id || 'demo-org-1';
     const currentMembers = this.ensureMembersInitialized(orgId);
-    const existingIdx = currentMembers.findIndex((m) => m.user_id === user.id);
+    const existingMember = currentMembers.find((m) => m.user_id === user.id);
+    if (existingMember) {
+      throw new Error('You are already a member of this organization.');
+    }
 
-    const updatedMember: TeamMember = {
-      id: existingIdx !== -1 ? currentMembers[existingIdx].id : `mem-${Date.now()}`,
+    const newMember: TeamMember = {
+      id: `mem-${Date.now()}`,
       user_id: user.id,
       organization_id: orgId,
       role: invitation.role,
@@ -902,11 +911,7 @@ class TeamService implements ITeamService {
       updated_at: new Date().toISOString(),
     };
 
-    if (existingIdx !== -1) {
-      currentMembers[existingIdx] = updatedMember;
-    } else {
-      currentMembers.push(updatedMember);
-    }
+    currentMembers.push(newMember);
     this.saveMembersToStorage(orgId, currentMembers);
 
     // Mark invitation as accepted

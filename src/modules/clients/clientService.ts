@@ -1,6 +1,11 @@
 import { Client, ClientType } from '../../types/domain.types.ts';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase.ts';
 
+function isUUID(str?: string | null): boolean {
+  if (!str) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
+
 // Storage keys
 const CLIENTS_STORAGE_PREFIX = 'dispatchdesk_demo_clients_';
 
@@ -127,6 +132,19 @@ class ClientService implements IClientService {
   }
 
   async getClients(organizationId: string): Promise<Client[]> {
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      const { data, error } = await supabase
+        .from('clients')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .order('company_name', { ascending: true });
+      if (error) {
+        console.error('[ClientService] Supabase getClients error:', error);
+        throw new Error(error.message || 'Failed to fetch clients from database.');
+      }
+      return (data || []) as Client[];
+    }
+
     if (isSupabaseConfigured) {
       try {
         const { data, error } = await supabase
@@ -145,6 +163,20 @@ class ClientService implements IClientService {
   }
 
   async getClientById(organizationId: string, id: string): Promise<Client | null> {
+    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(id)) {
+      const { data, error } = await supabase
+        .from('clients')
+        .select('*')
+        .eq('id', id)
+        .eq('organization_id', organizationId)
+        .maybeSingle();
+      if (error) {
+        console.error('[ClientService] Supabase getClientById error:', error);
+        throw new Error(error.message || 'Failed to fetch client from database.');
+      }
+      return (data as Client) || null;
+    }
+
     if (isSupabaseConfigured) {
       try {
         const { data, error } = await supabase
@@ -166,6 +198,33 @@ class ClientService implements IClientService {
   async createClient(organizationId: string, input: CreateClientInput): Promise<Client> {
     if (!input.company_name?.trim()) {
       throw new Error('Company name is required.');
+    }
+
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      const { data, error } = await supabase
+        .from('clients')
+        .insert({
+          organization_id: organizationId,
+          company_name: input.company_name.trim(),
+          client_type: input.client_type || 'owner_operator',
+          contact_name: input.contact_name?.trim() || null,
+          contact_phone: input.contact_phone?.trim() || null,
+          contact_email: input.contact_email?.trim() || null,
+          billing_email: input.billing_email?.trim() || null,
+          preferred_equipment: input.preferred_equipment?.trim() || null,
+          preferred_lanes: input.preferred_lanes?.trim() || null,
+          minimum_rate_per_mile: input.minimum_rate_per_mile ?? null,
+          status: input.status || 'active',
+          notes: input.notes?.trim() || null,
+        })
+        .select()
+        .single();
+      if (error) {
+        console.error('[ClientService] Supabase createClient error:', error);
+        throw new Error(error.message || 'Failed to create client in database.');
+      }
+      if (data) return data as Client;
+      throw new Error('Unexpected empty response while creating client.');
     }
 
     if (isSupabaseConfigured) {
@@ -219,6 +278,35 @@ class ClientService implements IClientService {
   }
 
   async updateClient(organizationId: string, id: string, input: UpdateClientInput): Promise<Client> {
+    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(id)) {
+      const { data, error } = await supabase
+        .from('clients')
+        .update({
+          ...(input.company_name !== undefined ? { company_name: input.company_name.trim() } : {}),
+          ...(input.client_type !== undefined ? { client_type: input.client_type } : {}),
+          ...(input.contact_name !== undefined ? { contact_name: input.contact_name?.trim() || null } : {}),
+          ...(input.contact_phone !== undefined ? { contact_phone: input.contact_phone?.trim() || null } : {}),
+          ...(input.contact_email !== undefined ? { contact_email: input.contact_email?.trim() || null } : {}),
+          ...(input.billing_email !== undefined ? { billing_email: input.billing_email?.trim() || null } : {}),
+          ...(input.preferred_equipment !== undefined ? { preferred_equipment: input.preferred_equipment?.trim() || null } : {}),
+          ...(input.preferred_lanes !== undefined ? { preferred_lanes: input.preferred_lanes?.trim() || null } : {}),
+          ...(input.minimum_rate_per_mile !== undefined ? { minimum_rate_per_mile: input.minimum_rate_per_mile } : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .eq('organization_id', organizationId)
+        .select()
+        .single();
+      if (error) {
+        console.error('[ClientService] Supabase updateClient error:', error);
+        throw new Error(error.message || 'Failed to update client in database.');
+      }
+      if (data) return data as Client;
+      throw new Error('Client not found or update failed.');
+    }
+
     if (isSupabaseConfigured) {
       try {
         const { data, error } = await supabase
@@ -280,6 +368,19 @@ class ClientService implements IClientService {
   }
 
   async deleteClient(organizationId: string, id: string): Promise<void> {
+    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(id)) {
+      const { error } = await supabase
+        .from('clients')
+        .delete()
+        .eq('id', id)
+        .eq('organization_id', organizationId);
+      if (error) {
+        console.error('[ClientService] Supabase deleteClient error:', error);
+        throw new Error(error.message || 'Failed to delete client from database.');
+      }
+      return;
+    }
+
     if (isSupabaseConfigured) {
       try {
         const { error } = await supabase

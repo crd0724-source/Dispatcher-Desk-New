@@ -24,7 +24,7 @@ import { Modal } from '../../components/common/Modal.tsx';
 import { InviteMemberModal } from '../team/InviteMemberModal.tsx';
 
 export const TeamMembersSection: React.FC = () => {
-  const { activeOrganization, userRole } = useAuth();
+  const { activeOrganization, user, userRole, refreshUserData } = useAuth();
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [invitations, setInvitations] = useState<TeamInvitation[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -38,7 +38,12 @@ export const TeamMembersSection: React.FC = () => {
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [invitationToCancel, setInvitationToCancel] = useState<TeamInvitation | null>(null);
   const [isCancellingInvite, setIsCancellingInvite] = useState(false);
-  const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
+  const [resendingInviteId, setResendingInviteId] = useState<string | null>(null);
+  const [freshInviteLink, setFreshInviteLink] = useState<{
+    invitation: TeamInvitation;
+    inviteUrl: string;
+  } | null>(null);
+  const [copiedFreshLink, setCopiedFreshLink] = useState(false);
 
   const isOwnerAdmin = userRole === 'owner_admin';
   const orgId = activeOrganization?.id;
@@ -85,6 +90,9 @@ export const TeamMembersSection: React.FC = () => {
       const updated = await teamService.updateMemberRole(orgId, member.id, newRole, userRole);
       setMembers((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
       setActionSuccess(`Updated role for ${member.full_name || 'member'} to ${formatRoleName(newRole)}.`);
+      if (member.user_id === user?.id) {
+        await refreshUserData();
+      }
       setTimeout(() => setActionSuccess(null), 4000);
     } catch (err: any) {
       console.error('Role update failed:', err);
@@ -102,10 +110,14 @@ export const TeamMembersSection: React.FC = () => {
     setIsRemoving(true);
 
     try {
+      const isSelf = memberToRemove.user_id === user?.id;
       await teamService.removeMember(orgId, memberToRemove.id, userRole);
       setMembers((prev) => prev.filter((m) => m.id !== memberToRemove.id));
       setActionSuccess(`Removed ${memberToRemove.full_name || 'member'} from organization.`);
       setMemberToRemove(null);
+      if (isSelf) {
+        await refreshUserData();
+      }
       setTimeout(() => setActionSuccess(null), 4000);
     } catch (err: any) {
       console.error('Remove member failed:', err);
@@ -140,15 +152,56 @@ export const TeamMembersSection: React.FC = () => {
     }
   };
 
-  const handleCopyInviteLink = async (inv: TeamInvitation) => {
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://dispatchdesk.app';
-    const inviteUrl = `${origin}/?invitation_token=${encodeURIComponent(inv.token_hash || inv.id)}`;
+  const handleResendInvite = async (inv: TeamInvitation) => {
+    if (!orgId || !isOwnerAdmin || resendingInviteId) return;
+
+    setActionError(null);
+    setActionSuccess(null);
+    setResendingInviteId(inv.id);
+
     try {
-      await navigator.clipboard.writeText(inviteUrl);
-      setCopiedInviteId(inv.id);
-      setTimeout(() => setCopiedInviteId(null), 3000);
+      // If invitation is active pending, cancel old invitation first to clear active unique slot
+      if (inv.status === 'pending') {
+        await teamService.cancelInvitation(orgId, inv.id, userRole);
+      }
+
+      // Generate a fresh cryptographically secure invitation
+      const result = await teamService.createInvitation(
+        orgId,
+        inv.email,
+        inv.role,
+        user?.id,
+        userRole
+      );
+
+      // Update state: replace previous invitation record with fresh one
+      setInvitations((prev) => [
+        result.invitation,
+        ...prev.filter((i) => i.id !== inv.id && i.id !== result.invitation.id),
+      ]);
+
+      setFreshInviteLink({
+        invitation: result.invitation,
+        inviteUrl: result.inviteUrl,
+      });
+      setActionSuccess(`Generated fresh secure invitation link for ${inv.email}.`);
+      setTimeout(() => setActionSuccess(null), 4000);
+    } catch (err: any) {
+      console.error('Failed to resend invitation:', err);
+      setActionError(err.message || 'Failed to generate fresh invitation.');
+    } finally {
+      setResendingInviteId(null);
+    }
+  };
+
+  const handleCopyFreshLink = async () => {
+    if (!freshInviteLink?.inviteUrl) return;
+    try {
+      await navigator.clipboard.writeText(freshInviteLink.inviteUrl);
+      setCopiedFreshLink(true);
+      setTimeout(() => setCopiedFreshLink(false), 3000);
     } catch (err) {
-      console.error('Failed to copy link:', err);
+      console.error('Failed to copy fresh link:', err);
     }
   };
 
@@ -477,7 +530,6 @@ export const TeamMembersSection: React.FC = () => {
               ) : (
                 invitations.map((inv) => {
                   const isPending = inv.status === 'pending';
-                  const isCopied = copiedInviteId === inv.id;
 
                   return (
                     <tr key={inv.id} className="hover:bg-slate-850/40 transition">
@@ -543,37 +595,69 @@ export const TeamMembersSection: React.FC = () => {
                       {/* Actions */}
                       <td className="px-4 py-3.5 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-2">
-                          {isPending && (
+                          {isOwnerAdmin && isPending && (
+                            <>
+                              <button
+                                id={`btn-resend-invite-${inv.id}`}
+                                type="button"
+                                onClick={() => handleResendInvite(inv)}
+                                disabled={resendingInviteId === inv.id}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium text-indigo-300 hover:text-white bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-800/40 transition cursor-pointer disabled:opacity-50"
+                                title="Generate a fresh cryptographic invitation link"
+                              >
+                                {resendingInviteId === inv.id ? (
+                                  <>
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                    <span>Generating...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <RefreshCw className="w-3.5 h-3.5" />
+                                    <span>Resend</span>
+                                  </>
+                                )}
+                              </button>
+
+                              <button
+                                id={`btn-cancel-invite-${inv.id}`}
+                                type="button"
+                                onClick={() => setInvitationToCancel(inv)}
+                                disabled={resendingInviteId === inv.id}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-rose-300 hover:text-rose-100 bg-rose-950/30 hover:bg-rose-900/50 border border-rose-800/40 transition cursor-pointer disabled:opacity-50"
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                                <span>Cancel</span>
+                              </button>
+                            </>
+                          )}
+
+                          {isOwnerAdmin && (inv.status === 'expired' || inv.status === 'cancelled') && (
                             <button
-                              id={`btn-copy-invite-${inv.id}`}
+                              id={`btn-reinvite-${inv.id}`}
                               type="button"
-                              onClick={() => handleCopyInviteLink(inv)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium text-indigo-300 hover:text-white bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-800/40 transition cursor-pointer"
+                              onClick={() => handleResendInvite(inv)}
+                              disabled={resendingInviteId === inv.id}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition cursor-pointer disabled:opacity-50"
+                              title="Send a fresh invitation to this email"
                             >
-                              {isCopied ? (
+                              {resendingInviteId === inv.id ? (
                                 <>
-                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                                  <span>Copied</span>
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                  <span>Generating...</span>
                                 </>
                               ) : (
                                 <>
-                                  <Copy className="w-3.5 h-3.5" />
-                                  <span>Copy Link</span>
+                                  <RefreshCw className="w-3.5 h-3.5" />
+                                  <span>Re-invite</span>
                                 </>
                               )}
                             </button>
                           )}
 
-                          {isOwnerAdmin && isPending && (
-                            <button
-                              id={`btn-cancel-invite-${inv.id}`}
-                              type="button"
-                              onClick={() => setInvitationToCancel(inv)}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-rose-300 hover:text-rose-100 bg-rose-950/30 hover:bg-rose-900/50 border border-rose-800/40 transition cursor-pointer"
-                            >
-                              <XCircle className="w-3.5 h-3.5" />
-                              <span>Cancel</span>
-                            </button>
+                          {inv.status === 'accepted' && (
+                            <span className="text-[11px] text-emerald-400 font-medium px-2 py-0.5">
+                              Active Member
+                            </span>
                           )}
                         </div>
                       </td>
@@ -585,6 +669,84 @@ export const TeamMembersSection: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* Fresh Resend Invitation Modal */}
+      {freshInviteLink && (
+        <Modal
+          id="modal-fresh-invitation-link"
+          isOpen={true}
+          onClose={() => setFreshInviteLink(null)}
+          title="Fresh Invitation Link Generated"
+          subtitle={`Single-use link for ${freshInviteLink.invitation.email}`}
+          maxWidth="md"
+        >
+          <div className="space-y-4 text-xs">
+            <div className="p-3.5 rounded-lg bg-emerald-950/40 border border-emerald-800/60 text-emerald-200 flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-emerald-100 text-sm">
+                  New Secure Link Ready
+                </p>
+                <p className="text-emerald-300/90 mt-0.5 leading-relaxed">
+                  A fresh cryptographically secure link has been generated for <strong className="text-white">{freshInviteLink.invitation.email}</strong> with role <strong className="text-white">{formatRoleName(freshInviteLink.invitation.role)}</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-3">
+              <div className="flex items-center justify-between text-slate-400">
+                <span className="font-medium">Single-Use Link</span>
+                <span className="text-[11px] text-amber-400 bg-amber-950/60 border border-amber-800/40 px-2 py-0.5 rounded">
+                  Expires in 7 days
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  id="input-fresh-invitation-url"
+                  type="text"
+                  readOnly
+                  value={freshInviteLink.inviteUrl}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 font-mono text-[11px] select-all focus:outline-none"
+                />
+                <button
+                  id="btn-copy-fresh-invitation-link"
+                  type="button"
+                  onClick={handleCopyFreshLink}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition shrink-0 cursor-pointer"
+                >
+                  {copiedFreshLink ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      Copy Link
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Previous invitation tokens for this email have been invalidated. The user will be invited to authenticate with <span className="font-mono text-slate-300">{freshInviteLink.invitation.email}</span> upon opening this link.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end pt-2 border-t border-slate-800">
+              <button
+                id="btn-close-fresh-invite-modal"
+                type="button"
+                onClick={() => setFreshInviteLink(null)}
+                className="px-4 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition cursor-pointer"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Invite Member Modal */}
       <InviteMemberModal

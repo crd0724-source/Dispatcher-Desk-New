@@ -111,6 +111,8 @@ export interface TeamInvitation {
   created_at: string;
   updated_at?: string;
   status: InvitationStatus;
+  is_valid?: boolean;
+  invalid_reason?: string | null;
 }
 
 // Supported IANA Timezone definitions

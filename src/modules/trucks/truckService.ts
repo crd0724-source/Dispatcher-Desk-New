@@ -3,6 +3,11 @@ import { TruckWithClient } from './TruckDetailModal.tsx';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase.ts';
 import { clientService } from '../clients/clientService.ts';
 
+function isUUID(str?: string | null): boolean {
+  if (!str) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
+
 // Storage keys
 const TRUCKS_STORAGE_PREFIX = 'dispatchdesk_demo_trucks_';
 const CLIENTS_STORAGE_PREFIX = 'dispatchdesk_demo_clients_';
@@ -154,7 +159,18 @@ class TruckService implements ITruckService {
   async getTrucks(organizationId: string): Promise<TruckWithClient[]> {
     let rawTrucks: Truck[] = [];
 
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      const { data, error } = await supabase
+        .from('trucks')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .order('created_at', { ascending: false });
+      if (error) {
+        console.error('[TruckService] Supabase getTrucks error:', error);
+        throw new Error(error.message || 'Failed to fetch trucks from database.');
+      }
+      rawTrucks = (data || []) as Truck[];
+    } else if (isSupabaseConfigured) {
       try {
         const { data, error } = await supabase
           .from('trucks')
@@ -169,7 +185,7 @@ class TruckService implements ITruckService {
       }
     }
 
-    if (rawTrucks.length === 0) {
+    if (rawTrucks.length === 0 && !isUUID(organizationId)) {
       rawTrucks = this.ensureInitialized(organizationId);
     }
 
@@ -196,6 +212,36 @@ class TruckService implements ITruckService {
   }
 
   async getTruckById(organizationId: string, id: string): Promise<TruckWithClient | null> {
+    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(id)) {
+      const { data, error } = await supabase
+        .from('trucks')
+        .select('*')
+        .eq('id', id)
+        .eq('organization_id', organizationId)
+        .maybeSingle();
+      if (error) {
+        console.error('[TruckService] Supabase getTruckById error:', error);
+        throw new Error(error.message || 'Failed to fetch truck from database.');
+      }
+      if (!data) return null;
+      const t = data as Truck;
+      const clients = await this.getClients(organizationId);
+      const matchingClient = t.client_id ? clients.find((c) => c.id === t.client_id) : null;
+      return {
+        ...t,
+        client: matchingClient
+          ? {
+              id: matchingClient.id,
+              company_name: matchingClient.company_name,
+              client_type: matchingClient.client_type,
+              contact_name: matchingClient.contact_name,
+              contact_phone: matchingClient.contact_phone,
+              contact_email: matchingClient.contact_email,
+            }
+          : null,
+      } as TruckWithClient;
+    }
+
     const trucks = await this.getTrucks(organizationId);
     return trucks.find((t) => t.id === id) || null;
   }
@@ -206,6 +252,31 @@ class TruckService implements ITruckService {
     }
     if (!input.client_id) {
       throw new Error('Carrier client selection is required.');
+    }
+
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      const { data, error } = await supabase
+        .from('trucks')
+        .insert({
+          organization_id: organizationId,
+          client_id: input.client_id,
+          truck_number: input.truck_number.trim(),
+          equipment_type: input.equipment_type || 'dry_van',
+          vin: input.vin?.trim() || null,
+          max_weight_lbs: input.max_weight_lbs ?? null,
+          current_location_city: input.current_location_city?.trim() || null,
+          current_location_state: input.current_location_state?.trim().toUpperCase() || null,
+          status: input.status || 'active',
+          notes: input.notes?.trim() || null,
+        })
+        .select()
+        .single();
+      if (error) {
+        console.error('[TruckService] Supabase createTruck error:', error);
+        throw new Error(error.message || 'Failed to create truck in database.');
+      }
+      if (data) return data as Truck;
+      throw new Error('Unexpected empty response while creating truck.');
     }
 
     if (isSupabaseConfigured) {
@@ -255,6 +326,33 @@ class TruckService implements ITruckService {
   }
 
   async updateTruck(organizationId: string, id: string, input: UpdateTruckInput): Promise<Truck> {
+    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(id)) {
+      const { data, error } = await supabase
+        .from('trucks')
+        .update({
+          ...(input.client_id !== undefined ? { client_id: input.client_id } : {}),
+          ...(input.truck_number !== undefined ? { truck_number: input.truck_number.trim() } : {}),
+          ...(input.equipment_type !== undefined ? { equipment_type: input.equipment_type } : {}),
+          ...(input.vin !== undefined ? { vin: input.vin?.trim() || null } : {}),
+          ...(input.max_weight_lbs !== undefined ? { max_weight_lbs: input.max_weight_lbs } : {}),
+          ...(input.current_location_city !== undefined ? { current_location_city: input.current_location_city?.trim() || null } : {}),
+          ...(input.current_location_state !== undefined ? { current_location_state: input.current_location_state?.trim().toUpperCase() || null } : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .eq('organization_id', organizationId)
+        .select()
+        .single();
+      if (error) {
+        console.error('[TruckService] Supabase updateTruck error:', error);
+        throw new Error(error.message || 'Failed to update truck in database.');
+      }
+      if (data) return data as Truck;
+      throw new Error('Truck not found or update failed.');
+    }
+
     if (isSupabaseConfigured) {
       try {
         const { data, error } = await supabase
@@ -312,6 +410,19 @@ class TruckService implements ITruckService {
   }
 
   async deleteTruck(organizationId: string, id: string): Promise<void> {
+    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(id)) {
+      const { error } = await supabase
+        .from('trucks')
+        .delete()
+        .eq('id', id)
+        .eq('organization_id', organizationId);
+      if (error) {
+        console.error('[TruckService] Supabase deleteTruck error:', error);
+        throw new Error(error.message || 'Failed to delete truck from database.');
+      }
+      return;
+    }
+
     if (isSupabaseConfigured) {
       try {
         const { error } = await supabase
