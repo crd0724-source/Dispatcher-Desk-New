@@ -61,12 +61,12 @@ export const TIME_OPTIONS: { value: string; label: string }[] = (() => {
   return options;
 })();
 
-const toLocalDateString = (d: Date): string => {
+export const toLocalDateString = (d: Date): string => {
   const pad = (n: number) => n.toString().padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 
-const parseDateAndTimeToInputs = (isoString?: string | null): { date: string; time: string } => {
+export const parseDateAndTimeToInputs = (isoString?: string | null): { date: string; time: string } => {
   if (!isoString) return { date: '', time: '' };
   try {
     const d = new Date(isoString);
@@ -79,15 +79,63 @@ const parseDateAndTimeToInputs = (isoString?: string | null): { date: string; ti
   }
 };
 
-const constructIsoDatetime = (dateStr: string, timeStr: string): string | null => {
-  if (!dateStr) return null;
-  const time = timeStr || '00:00';
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const [hour, minute] = time.split(':').map(Number);
-  if (!year || !month || !day) return null;
-  const dateObj = new Date(year, month - 1, day, isNaN(hour) ? 0 : hour, isNaN(minute) ? 0 : minute, 0);
+export const constructIsoDatetime = (dateStr: string, timeStr: string): string | null => {
+  if (!dateStr || !dateStr.trim()) return null;
+  const time = (timeStr && timeStr.trim()) ? timeStr.trim() : '00:00';
+  const [yearStr, monthStr, dayStr] = dateStr.trim().split('-');
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthStr, 10);
+  const day = parseInt(dayStr, 10);
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
+
+  const [hourStr, minuteStr] = time.split(':');
+  const hour = parseInt(hourStr || '0', 10);
+  const minute = parseInt(minuteStr || '0', 10);
+
+  const dateObj = new Date(year, month - 1, day, isNaN(hour) ? 0 : hour, isNaN(minute) ? 0 : minute, 0, 0);
   if (isNaN(dateObj.getTime())) return null;
   return dateObj.toISOString();
+};
+
+export interface LoadScheduleInput {
+  pickupDate: string;
+  pickupTime: string;
+  deliveryDate: string;
+  deliveryTime: string;
+}
+
+export interface DerivedLoadSchedule {
+  pickup_datetime: string | null;
+  delivery_datetime: string | null;
+  isValid: boolean;
+  validationError?: string;
+}
+
+/**
+ * Single source of truth for deriving ISO timestamps directly from current UI selector values.
+ */
+export const deriveLoadScheduleFromInputs = (
+  schedule: LoadScheduleInput
+): DerivedLoadSchedule => {
+  const pickup_datetime = constructIsoDatetime(schedule.pickupDate, schedule.pickupTime);
+  const delivery_datetime = constructIsoDatetime(schedule.deliveryDate, schedule.deliveryTime);
+
+  if (pickup_datetime && delivery_datetime) {
+    if (new Date(delivery_datetime).getTime() < new Date(pickup_datetime).getTime()) {
+      return {
+        pickup_datetime,
+        delivery_datetime,
+        isValid: false,
+        validationError: 'Delivery datetime cannot be earlier than pickup datetime.',
+      };
+    }
+  }
+
+  return {
+    pickup_datetime,
+    delivery_datetime,
+    isValid: true,
+  };
 };
 
 interface LoadModalProps {
@@ -362,10 +410,14 @@ export const LoadModal: React.FC<LoadModalProps> = ({
     }
 
     if (pickupDate && deliveryDate) {
-      const pIso = constructIsoDatetime(pickupDate, pickupTime);
-      const dIso = constructIsoDatetime(deliveryDate, deliveryTime);
-      if (pIso && dIso && new Date(dIso).getTime() < new Date(pIso).getTime()) {
-        errors.deliveryDate = 'Delivery datetime cannot be earlier than pickup datetime.';
+      const schedule = deriveLoadScheduleFromInputs({
+        pickupDate,
+        pickupTime,
+        deliveryDate,
+        deliveryTime,
+      });
+      if (!schedule.isValid && schedule.validationError) {
+        errors.deliveryDate = schedule.validationError;
       }
     }
 
@@ -382,8 +434,13 @@ export const LoadModal: React.FC<LoadModalProps> = ({
     setSubmitError(null);
     if (!validateForm()) return;
 
-    const pickupDatetime = constructIsoDatetime(pickupDate, pickupTime);
-    const deliveryDatetime = constructIsoDatetime(deliveryDate, deliveryTime);
+    // Directly derive pickup and delivery ISO timestamps from the active UI selector state
+    const schedule = deriveLoadScheduleFromInputs({
+      pickupDate,
+      pickupTime,
+      deliveryDate,
+      deliveryTime,
+    });
 
     const payload: CreateLoadInput = {
       load_number: loadNumber.trim().toUpperCase(),
@@ -398,11 +455,11 @@ export const LoadModal: React.FC<LoadModalProps> = ({
       origin_city: originCity.trim(),
       origin_state: originState.trim().toUpperCase(),
       origin_zip: originZip.trim() || null,
-      pickup_datetime: pickupDatetime,
+      pickup_datetime: schedule.pickup_datetime,
       dest_city: destCity.trim(),
       dest_state: destState.trim().toUpperCase(),
       dest_zip: destZip.trim() || null,
-      delivery_datetime: deliveryDatetime,
+      delivery_datetime: schedule.delivery_datetime,
       rate: numericRate,
       loaded_miles: numericLoadedMiles,
       deadhead_miles: numericDeadheadMiles,

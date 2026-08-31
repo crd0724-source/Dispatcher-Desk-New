@@ -28,6 +28,7 @@ import { clientService } from '../clients/clientService.ts';
 import { truckService } from '../trucks/truckService.ts';
 import { driverService } from '../drivers/driverService.ts';
 import { activityService } from '../activity/activityService.ts';
+import { deriveLoadScheduleFromInputs, parseDateAndTimeToInputs, constructIsoDatetime } from './LoadModal.tsx';
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
@@ -270,6 +271,104 @@ async function runTests() {
     assert(e.message.includes('INVOICED') || e.message.includes('invoiced') || e.message.includes('Integrity Error'), `Assignment modification on INVOICED load rejected with: "${e.message}"`);
   }
   assert(invoicedErrCaught, 'Assignment on invoiced load correctly rejected');
+
+  // -------------------------------------------------------------
+  // TEST 7: UI DateTime state synchronization & schedule conflict resolution
+  // Verifies that when a load with an overlapping schedule (e.g. Sep 1 08:00 -> Sep 4 18:00)
+  // is updated in the UI selectors to Sep 10 02:30 -> Sep 11 13:00:
+  // 1. The submitted payload is derived directly from the current selectors (Sep 10 02:30 / Sep 11 13:00)
+  // 2. No stale datetime (Sep 1 - Sep 4) is submitted
+  // 3. The update and truck assignment succeeds without conflict error
+  // -------------------------------------------------------------
+  console.log('\n--- TEST 7: UI DateTime state synchronization & schedule conflict resolution ---');
+
+  // Create an active load on targetTruck1 spanning Sep 1 to Sep 4
+  const conflictingLoad1 = await loadService.createLoad(testOrgId, {
+    load_number: `LD-CONF1-${Math.floor(1000 + Math.random() * 9000)}`,
+    client_id: targetClient.id,
+    truck_id: targetTruck1.id,
+    origin_city: 'Dallas',
+    origin_state: 'TX',
+    dest_city: 'Atlanta',
+    dest_state: 'GA',
+    rate: 3000,
+    loaded_miles: 800,
+    equipment_type: 'dry_van',
+    pipeline_status: 'booked',
+    pickup_datetime: new Date(2026, 8, 1, 8, 0, 0).toISOString(), // Sep 1, 2026 08:00
+    delivery_datetime: new Date(2026, 8, 4, 18, 0, 0).toISOString(), // Sep 4, 2026 18:00
+  });
+
+  // Create a second load initially configured with the exact same Sep 1 -> Sep 4 schedule in 'booked' status (unassigned)
+  const loadToReschedule = await loadService.createLoad(testOrgId, {
+    load_number: `LD-RESCHED-${Math.floor(1000 + Math.random() * 9000)}`,
+    client_id: targetClient.id,
+    origin_city: 'Fort Worth',
+    origin_state: 'TX',
+    dest_city: 'Savannah',
+    dest_state: 'GA',
+    rate: 3200,
+    loaded_miles: 850,
+    equipment_type: 'dry_van',
+    pipeline_status: 'booked',
+    pickup_datetime: conflictingLoad1.pickup_datetime,
+    delivery_datetime: conflictingLoad1.delivery_datetime,
+  });
+
+  // 7a: Parsing existing load schedule into UI selector state
+  const initialPickupParsed = parseDateAndTimeToInputs(loadToReschedule.pickup_datetime);
+  const initialDeliveryParsed = parseDateAndTimeToInputs(loadToReschedule.delivery_datetime);
+  assert(initialPickupParsed.date.includes('2026-09-01') || initialPickupParsed.date === '2026-09-01', 'Initial pickup date correctly parsed into UI state');
+
+  // Attempting to assign targetTruck1 with conflicting schedule fails as expected
+  let scheduleConflictCaught = false;
+  try {
+    await loadService.updateLoad(testOrgId, loadToReschedule.id, {
+      truck_id: targetTruck1.id,
+      pipeline_status: 'booked',
+      pickup_datetime: loadToReschedule.pickup_datetime,
+      delivery_datetime: loadToReschedule.delivery_datetime,
+    });
+  } catch (e: any) {
+    scheduleConflictCaught = true;
+    assert(e.message.includes('overlaps') || e.message.includes('Conflict Error'), `Conflicting schedule correctly rejected: "${e.message}"`);
+  }
+  assert(scheduleConflictCaught, 'Attempting to assign truck with conflicting schedule was correctly caught');
+
+  // 7b: Dispatcher adjusts the UI selectors to non-conflicting schedule (Sep 10 02:30 -> Sep 11 13:00)
+  const activeUiSelectors = {
+    pickupDate: '2026-09-10',
+    pickupTime: '02:30',
+    deliveryDate: '2026-09-11',
+    deliveryTime: '13:00',
+  };
+
+  // Derive schedule payload directly from the active UI selector state
+  const derivedSchedule = deriveLoadScheduleFromInputs(activeUiSelectors);
+  assert(derivedSchedule.isValid, 'Derived schedule is marked valid');
+  assert(derivedSchedule.pickup_datetime !== null, 'Derived pickup datetime is not null');
+  assert(derivedSchedule.delivery_datetime !== null, 'Derived delivery datetime is not null');
+
+  // Verify that the derived payload contains the exact expected dates/times and NO stale Sep 1 - Sep 4 datetime
+  const expectedPickupIso = new Date(2026, 8, 10, 2, 30, 0, 0).toISOString();
+  const expectedDeliveryIso = new Date(2026, 8, 11, 13, 0, 0, 0).toISOString();
+  assert(derivedSchedule.pickup_datetime === expectedPickupIso, `Pickup datetime payload (${derivedSchedule.pickup_datetime}) matches active UI selector (Sep 10 02:30)`);
+  assert(derivedSchedule.delivery_datetime === expectedDeliveryIso, `Delivery datetime payload (${derivedSchedule.delivery_datetime}) matches active UI selector (Sep 11 13:00)`);
+  assert(derivedSchedule.pickup_datetime !== loadToReschedule.pickup_datetime, 'Submitted pickup datetime is NOT stale Sep 1');
+  assert(derivedSchedule.delivery_datetime !== loadToReschedule.delivery_datetime, 'Submitted delivery datetime is NOT stale Sep 4');
+
+  // 7c: Submitting the updated payload successfully updates the load and assigns targetTruck1 without overlap conflict
+  const successfullyUpdatedLoad = await loadService.updateLoad(testOrgId, loadToReschedule.id, {
+    truck_id: targetTruck1.id,
+    pipeline_status: 'booked',
+    pickup_datetime: derivedSchedule.pickup_datetime,
+    delivery_datetime: derivedSchedule.delivery_datetime,
+  });
+
+  assert(successfullyUpdatedLoad.truck_id === targetTruck1.id, 'Truck successfully assigned after schedule update');
+  assert(successfullyUpdatedLoad.pickup_datetime === expectedPickupIso, 'Load pickup_datetime persisted as Sep 10 02:30');
+  assert(successfullyUpdatedLoad.delivery_datetime === expectedDeliveryIso, 'Load delivery_datetime persisted as Sep 11 13:00');
+  assert(successfullyUpdatedLoad.pipeline_status === 'booked', 'Load status updated to booked');
 
   console.log('\n===============================================================');
   console.log('✅ ALL S6.4 DISPATCH ASSIGNMENT INTEGRATION TESTS PASSED');
