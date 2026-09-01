@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { MapLoadRoute, MapStopPoint } from '../mapTypes.ts';
-import { LoadWithRelations } from '../loads/loadTypes.ts';
+import { LoadWithRelations } from '../../loads/loadTypes.ts';
 import { createStopMarkerIconHtml, createStopPopupHtml } from './MapStopMarker.tsx';
 import {
   Maximize2,
