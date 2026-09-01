@@ -277,7 +277,7 @@ ${documentText ? `Document Text:\n"""\n${documentText}\n"""` : 'Document is atta
       };
 
       // Candidate models in order of preference (using supported official Google GenAI model IDs)
-      const candidateModels = ['gemini-2.5-flash', 'gemini-2.5-pro'];
+      const candidateModels = ['gemini-3.6-flash', 'gemini-3.5-flash'];
       let lastError: any = null;
 
       for (const modelName of candidateModels) {
