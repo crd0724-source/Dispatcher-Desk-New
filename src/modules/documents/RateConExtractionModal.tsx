@@ -12,6 +12,7 @@ import {
   RateConfirmationExtraction,
   ExtractedBrokerInfo,
 } from './extractionTypes.ts';
+import { normalizeEquipmentType } from './rateConParser.ts';
 import { extractionService } from './extractionService.ts';
 import { SAMPLE_RATE_CONFIRMATIONS, SampleRateConDoc } from './sampleRateConfirmations.ts';
 import { calculateProfitability, formatCurrency, formatRPM, formatMiles } from '../../lib/calculations.ts';
@@ -177,25 +178,77 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
         setSelectedBrokerId(brokers[0].id);
       }
 
-      // Initialize form fields with extracted data
-      const extractedMiles = result.load_info.mileage || 0;
+      // Initialize form fields with fully normalized extracted data
+      const extractedLoadNum =
+        result.load_info?.load_number ||
+        (result as any).load_number ||
+        (result as any).order_number ||
+        '';
+
+      const extractedTotalPay =
+        result.load_info?.total_carrier_compensation ||
+        result.financial_breakdown?.total_carrier_compensation ||
+        result.load_info?.rate ||
+        (result as any).rate ||
+        (result as any).total_carrier_compensation ||
+        ((result.financial_breakdown?.linehaul_rate || (result.financial_breakdown as any)?.linehaul_amount || 0) +
+          (result.financial_breakdown?.fuel_surcharge_amount || result.load_info?.fuel_surcharge || 0)) ||
+        0;
+
+      const extractedMiles =
+        result.load_info?.mileage ||
+        (result as any).mileage ||
+        (result as any).loaded_miles ||
+        (result.financial_breakdown as any)?.mileage ||
+        0;
+
+      const originFacility = result.origin?.facility_name || result.stops?.[0]?.facility_name || '';
+      const originAddress = result.origin?.address || result.stops?.[0]?.address || '';
+      const originCity = result.origin?.city || result.stops?.[0]?.city || '';
+      const originState = (result.origin?.state || result.stops?.[0]?.state || '').toUpperCase();
+      const originZip = result.origin?.zip || result.stops?.[0]?.zip || '';
+      const pickupDateTime =
+        result.origin?.pickup_datetime ||
+        result.origin?.date_string ||
+        result.stops?.[0]?.datetime_iso ||
+        result.stops?.[0]?.date_string ||
+        '';
+
+      const destFacility = result.destination?.facility_name || result.stops?.[1]?.facility_name || '';
+      const destAddress = result.destination?.address || result.stops?.[1]?.address || '';
+      const destCity = result.destination?.city || result.stops?.[1]?.city || '';
+      const destState = (result.destination?.state || result.stops?.[1]?.state || '').toUpperCase();
+      const destZip = result.destination?.zip || result.stops?.[1]?.zip || '';
+      const deliveryDateTime =
+        result.destination?.delivery_datetime ||
+        result.destination?.date_string ||
+        result.stops?.[1]?.datetime_iso ||
+        result.stops?.[1]?.date_string ||
+        '';
+
+      const eqType = normalizeEquipmentType(result.load_info?.equipment_type || (result as any).equipment_type);
+      const commodity = result.load_info?.commodity || (result as any).commodity || '';
+      const weight = result.load_info?.weight_lbs || (result as any).weight_lbs || (result as any).weight || 0;
+      const specialInstructions =
+        result.load_info?.special_instructions || (result as any).special_instructions || '';
+
       setFormFields({
-        load_number: result.load_info.load_number || '',
-        rate: result.load_info.rate || 0,
+        load_number: extractedLoadNum,
+        rate: extractedTotalPay,
         loaded_miles: extractedMiles,
         deadhead_miles: 0,
-        origin_city: result.origin.city || '',
-        origin_state: result.origin.state || '',
-        origin_zip: result.origin.zip || '',
-        pickup_datetime: result.origin.pickup_datetime || result.origin.date_string || '',
-        dest_city: result.destination.city || '',
-        dest_state: result.destination.state || '',
-        dest_zip: result.destination.zip || '',
-        delivery_datetime: result.destination.delivery_datetime || result.destination.date_string || '',
-        equipment_type: (result.load_info.equipment_type as EquipmentType) || 'dry_van',
-        commodity: result.load_info.commodity || '',
-        weight_lbs: result.load_info.weight_lbs || 0,
-        special_instructions: result.load_info.special_instructions || '',
+        origin_city: originCity,
+        origin_state: originState,
+        origin_zip: originZip,
+        pickup_datetime: pickupDateTime,
+        dest_city: destCity,
+        dest_state: destState,
+        dest_zip: destZip,
+        delivery_datetime: deliveryDateTime,
+        equipment_type: eqType,
+        commodity: commodity,
+        weight_lbs: weight,
+        special_instructions: specialInstructions,
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to extract rate confirmation.';
@@ -680,12 +733,12 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
 
                     <div className="p-2.5 rounded-lg bg-slate-900/60 border border-slate-800 space-y-1">
                       <p className="text-[10px] uppercase font-semibold text-slate-400">Assigned Carrier</p>
-                      <p className="font-bold text-slate-100">{extraction.carrier?.company_name || 'BlueLine Transport LLC'}</p>
+                      <p className="font-bold text-slate-100">{extraction.carrier?.company_name || extraction.carrier?.carrier_name || 'N/A'}</p>
                       <p className="text-[11px] text-slate-400 font-mono">
-                        MC: {extraction.carrier?.mc_number || 'MC-654321'} • DOT: {extraction.carrier?.dot_number || '3210984'}
+                        MC: {extraction.carrier?.mc_number || 'N/A'} • DOT: {extraction.carrier?.dot_number || 'N/A'}
                       </p>
                       <p className="text-[11px] text-indigo-300 font-mono">
-                        Ref / PO: {extraction.load_info.reference_number || 'PO-458921'}
+                        Ref / PO: {extraction.load_info.reference_number || 'N/A'}
                       </p>
                     </div>
                   </div>
@@ -707,19 +760,29 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                       <div>
                         <p className="text-[10px] text-slate-400 uppercase font-sans">Linehaul</p>
                         <p className="font-bold text-slate-200">
-                          {extraction.financial_breakdown.linehaul_rate ? formatCurrency(extraction.financial_breakdown.linehaul_rate) : '$2,800.00'}
+                          {extraction.financial_breakdown.linehaul_rate
+                            ? formatCurrency(extraction.financial_breakdown.linehaul_rate)
+                            : (extraction.financial_breakdown as any).linehaul_amount
+                            ? formatCurrency((extraction.financial_breakdown as any).linehaul_amount)
+                            : extraction.load_info.linehaul_rate
+                            ? formatCurrency(extraction.load_info.linehaul_rate)
+                            : 'N/A'}
                         </p>
                       </div>
                       <div>
                         <p className="text-[10px] text-amber-400 uppercase font-sans">Fuel Surcharge</p>
                         <p className="font-bold text-amber-300">
-                          {extraction.financial_breakdown.fuel_surcharge_amount ? formatCurrency(extraction.financial_breakdown.fuel_surcharge_amount) : '$350.00'}
+                          {extraction.financial_breakdown.fuel_surcharge_amount !== null && extraction.financial_breakdown.fuel_surcharge_amount !== undefined
+                            ? formatCurrency(extraction.financial_breakdown.fuel_surcharge_amount)
+                            : extraction.load_info.fuel_surcharge !== null && extraction.load_info.fuel_surcharge !== undefined
+                            ? formatCurrency(extraction.load_info.fuel_surcharge)
+                            : 'N/A'}
                         </p>
                       </div>
                       <div>
                         <p className="text-[10px] text-emerald-400 uppercase font-sans">Total Agreed Pay</p>
                         <p className="font-bold text-emerald-300">
-                          {formatCurrency(extraction.load_info.rate || extraction.financial_breakdown.total_carrier_compensation || 3150)}
+                          {formatCurrency(extraction.load_info.total_carrier_compensation || extraction.load_info.rate || extraction.financial_breakdown.total_carrier_compensation || formFields.rate || 0)}
                         </p>
                       </div>
                     </div>
@@ -771,7 +834,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] uppercase font-semibold text-sky-400">
-                        Stop 1 — Pickup: {extraction.origin.facility_name || 'Midwest Distribution Center'}
+                        Stop 1 — Pickup: {extraction.origin.facility_name || 'Pickup Location'}
                       </span>
                       {extraction.origin.date_string && (
                         <span className="text-[11px] font-mono text-sky-300 font-semibold">
@@ -784,7 +847,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                         {extraction.origin.address}, {extraction.origin.city}, {extraction.origin.state} {extraction.origin.zip}
                       </p>
                     )}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                       <input
                         type="text"
                         placeholder="Origin City"
@@ -807,6 +870,13 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                         onChange={(e) => setFormFields({ ...formFields, origin_zip: e.target.value })}
                         className="h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
                       />
+                      <input
+                        type="text"
+                        placeholder="Pickup Appt Date/Time"
+                        value={formFields.pickup_datetime}
+                        onChange={(e) => setFormFields({ ...formFields, pickup_datetime: e.target.value })}
+                        className="h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
+                      />
                     </div>
                   </div>
 
@@ -814,7 +884,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                   <div className="space-y-2 pt-2 border-t border-slate-900">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] uppercase font-semibold text-emerald-400">
-                        Stop 2 — Delivery: {extraction.destination.facility_name || 'Texas Distribution Hub'}
+                        Stop 2 — Delivery: {extraction.destination.facility_name || 'Delivery Location'}
                       </span>
                       {extraction.destination.date_string && (
                         <span className="text-[11px] font-mono text-emerald-300 font-semibold">
@@ -827,7 +897,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                         {extraction.destination.address}, {extraction.destination.city}, {extraction.destination.state} {extraction.destination.zip}
                       </p>
                     )}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                       <input
                         type="text"
                         placeholder="Dest City"
@@ -849,6 +919,13 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                         value={formFields.dest_zip}
                         onChange={(e) => setFormFields({ ...formFields, dest_zip: e.target.value })}
                         className="h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Delivery Appt Date/Time"
+                        value={formFields.delivery_datetime}
+                        onChange={(e) => setFormFields({ ...formFields, delivery_datetime: e.target.value })}
+                        className="h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
                       />
                     </div>
                   </div>
@@ -883,12 +960,22 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                       </select>
                     </div>
 
-                    <div className="space-y-1.5 sm:col-span-2">
+                    <div className="space-y-1.5">
                       <label className="text-[11px] text-slate-400 font-semibold">Commodity</label>
                       <input
                         type="text"
                         value={formFields.commodity}
                         onChange={(e) => setFormFields({ ...formFields, commodity: e.target.value })}
+                        className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] text-slate-400 font-semibold">Weight (lbs)</label>
+                      <input
+                        type="number"
+                        value={formFields.weight_lbs || ''}
+                        onChange={(e) => setFormFields({ ...formFields, weight_lbs: parseInt(e.target.value, 10) || 0 })}
                         className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
                       />
                     </div>

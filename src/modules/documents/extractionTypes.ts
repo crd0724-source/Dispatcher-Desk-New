@@ -13,11 +13,16 @@ export interface ExtractedBrokerInfo {
 
 export interface ExtractedCarrierInfo {
   company_name?: string | null;
+  carrier_name?: string | null;
   mc_number?: string | null;
   dot_number?: string | null;
   contact_name?: string | null;
   contact_phone?: string | null;
   contact_email?: string | null;
+  driver_name?: string | null;
+  driver_phone?: string | null;
+  truck_number?: string | null;
+  trailer_number?: string | null;
   raw_text?: string | null;
 }
 

@@ -185,8 +185,16 @@ class ExtractionService {
         delivery_datetime:
           overriddenFields.delivery_datetime || extractedData.destination.delivery_datetime || null,
         rate:
-          overriddenFields.rate !== undefined ? overriddenFields.rate : extractedData.load_info.rate,
-        loaded_miles: overriddenFields.loaded_miles || 0,
+          overriddenFields.rate !== undefined
+            ? overriddenFields.rate
+            : extractedData.load_info.total_carrier_compensation ||
+              extractedData.load_info.rate ||
+              extractedData.financial_breakdown?.total_carrier_compensation ||
+              0,
+        loaded_miles:
+          overriddenFields.loaded_miles !== undefined
+            ? overriddenFields.loaded_miles
+            : extractedData.load_info.mileage || 0,
         deadhead_miles: overriddenFields.deadhead_miles || 0,
         special_instructions:
           overriddenFields.special_instructions ||
@@ -224,9 +232,16 @@ class ExtractionService {
         delivery_datetime:
           overriddenFields.delivery_datetime || extractedData.destination.delivery_datetime || undefined,
         rate:
-          overriddenFields.rate !== undefined ? overriddenFields.rate : extractedData.load_info.rate,
+          overriddenFields.rate !== undefined
+            ? overriddenFields.rate
+            : extractedData.load_info.total_carrier_compensation ||
+              extractedData.load_info.rate ||
+              extractedData.financial_breakdown?.total_carrier_compensation ||
+              undefined,
         loaded_miles:
-          overriddenFields.loaded_miles !== undefined ? overriddenFields.loaded_miles : undefined,
+          overriddenFields.loaded_miles !== undefined
+            ? overriddenFields.loaded_miles
+            : extractedData.load_info.mileage || undefined,
         deadhead_miles:
           overriddenFields.deadhead_miles !== undefined ? overriddenFields.deadhead_miles : undefined,
         special_instructions:
