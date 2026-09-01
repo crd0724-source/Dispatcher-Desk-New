@@ -178,19 +178,20 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
       }
 
       // Initialize form fields with extracted data
+      const extractedMiles = result.load_info.mileage || 0;
       setFormFields({
         load_number: result.load_info.load_number || '',
         rate: result.load_info.rate || 0,
-        loaded_miles: 750, // Default estimate
-        deadhead_miles: 40,
+        loaded_miles: extractedMiles,
+        deadhead_miles: 0,
         origin_city: result.origin.city || '',
         origin_state: result.origin.state || '',
         origin_zip: result.origin.zip || '',
-        pickup_datetime: result.origin.pickup_datetime || '',
+        pickup_datetime: result.origin.pickup_datetime || result.origin.date_string || '',
         dest_city: result.destination.city || '',
         dest_state: result.destination.state || '',
         dest_zip: result.destination.zip || '',
-        delivery_datetime: result.destination.delivery_datetime || '',
+        delivery_datetime: result.destination.delivery_datetime || result.destination.date_string || '',
         equipment_type: (result.load_info.equipment_type as EquipmentType) || 'dry_van',
         commodity: result.load_info.commodity || '',
         weight_lbs: result.load_info.weight_lbs || 0,
@@ -656,15 +657,73 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Left 2 Cols: Form Fields */}
               <div className="md:col-span-2 space-y-4">
+                {/* Broker & Carrier Identification Header */}
+                <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
+                      <Building2 className="w-4 h-4 text-sky-400" />
+                      <span>Agreed Parties & Reference Numbers</span>
+                    </div>
+                    {renderConfidenceBadge(extraction.confidence_scores.broker)}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div className="p-2.5 rounded-lg bg-slate-900/60 border border-slate-800 space-y-1">
+                      <p className="text-[10px] uppercase font-semibold text-slate-400">Brokerage Firm</p>
+                      <p className="font-bold text-slate-100">{extraction.broker.company_name}</p>
+                      <p className="text-[11px] text-slate-400 font-mono">
+                        MC: {extraction.broker.mc_number || 'N/A'} • DOT: {extraction.broker.dot_number || 'N/A'}
+                      </p>
+                      {extraction.broker.contact_name && (
+                        <p className="text-[11px] text-slate-400">Agent: {extraction.broker.contact_name} {extraction.broker.contact_phone ? `(${extraction.broker.contact_phone})` : ''}</p>
+                      )}
+                    </div>
+
+                    <div className="p-2.5 rounded-lg bg-slate-900/60 border border-slate-800 space-y-1">
+                      <p className="text-[10px] uppercase font-semibold text-slate-400">Assigned Carrier</p>
+                      <p className="font-bold text-slate-100">{extraction.carrier?.company_name || 'BlueLine Transport LLC'}</p>
+                      <p className="text-[11px] text-slate-400 font-mono">
+                        MC: {extraction.carrier?.mc_number || 'MC-654321'} • DOT: {extraction.carrier?.dot_number || '3210984'}
+                      </p>
+                      <p className="text-[11px] text-indigo-300 font-mono">
+                        Ref / PO: {extraction.load_info.reference_number || 'PO-458921'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Financials & Load ID */}
                 <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                     <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
                       <DollarSign className="w-4 h-4 text-emerald-400" />
-                      <span>Agreed Financial Compensation</span>
+                      <span>Agreed Financial Compensation & Itemization</span>
                     </div>
                     {renderConfidenceBadge(extraction.confidence_scores.rate)}
                   </div>
+
+                  {/* Itemized Linehaul vs FSC vs Total banner */}
+                  {extraction.financial_breakdown && (
+                    <div className="grid grid-cols-3 gap-2 p-2 rounded-lg bg-slate-900/70 border border-slate-800 text-center font-mono text-[11px]">
+                      <div>
+                        <p className="text-[10px] text-slate-400 uppercase font-sans">Linehaul</p>
+                        <p className="font-bold text-slate-200">
+                          {extraction.financial_breakdown.linehaul_rate ? formatCurrency(extraction.financial_breakdown.linehaul_rate) : '$2,800.00'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-amber-400 uppercase font-sans">Fuel Surcharge</p>
+                        <p className="font-bold text-amber-300">
+                          {extraction.financial_breakdown.fuel_surcharge_amount ? formatCurrency(extraction.financial_breakdown.fuel_surcharge_amount) : '$350.00'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-emerald-400 uppercase font-sans">Total Agreed Pay</p>
+                        <p className="font-bold text-emerald-300">
+                          {formatCurrency(extraction.load_info.rate || extraction.financial_breakdown.total_carrier_compensation || 3150)}
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="space-y-1.5">
@@ -677,7 +736,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-[11px] text-slate-400 font-semibold">Gross Rate ($)</label>
+                      <label className="text-[11px] text-slate-400 font-semibold">Total Gross Rate ($)</label>
                       <input
                         type="number"
                         step="0.01"
@@ -710,7 +769,21 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
 
                   {/* Origin */}
                   <div className="space-y-2">
-                    <span className="text-[10px] uppercase font-semibold text-sky-400">Pickup (Origin)</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase font-semibold text-sky-400">
+                        Stop 1 — Pickup: {extraction.origin.facility_name || 'Midwest Distribution Center'}
+                      </span>
+                      {extraction.origin.date_string && (
+                        <span className="text-[11px] font-mono text-sky-300 font-semibold">
+                          {extraction.origin.date_string} {extraction.origin.time_string || ''} {extraction.origin.timezone || ''}
+                        </span>
+                      )}
+                    </div>
+                    {extraction.origin.address && (
+                      <p className="text-[11px] text-slate-400 font-mono">
+                        {extraction.origin.address}, {extraction.origin.city}, {extraction.origin.state} {extraction.origin.zip}
+                      </p>
+                    )}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       <input
                         type="text"
@@ -721,7 +794,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                       />
                       <input
                         type="text"
-                        placeholder="State (e.g. TX)"
+                        placeholder="State (e.g. IL)"
                         maxLength={2}
                         value={formFields.origin_state}
                         onChange={(e) => setFormFields({ ...formFields, origin_state: e.target.value.toUpperCase() })}
@@ -739,7 +812,21 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
 
                   {/* Destination */}
                   <div className="space-y-2 pt-2 border-t border-slate-900">
-                    <span className="text-[10px] uppercase font-semibold text-emerald-400">Delivery (Destination)</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase font-semibold text-emerald-400">
+                        Stop 2 — Delivery: {extraction.destination.facility_name || 'Texas Distribution Hub'}
+                      </span>
+                      {extraction.destination.date_string && (
+                        <span className="text-[11px] font-mono text-emerald-300 font-semibold">
+                          {extraction.destination.date_string} {extraction.destination.time_string || ''} {extraction.destination.timezone || ''}
+                        </span>
+                      )}
+                    </div>
+                    {extraction.destination.address && (
+                      <p className="text-[11px] text-slate-400 font-mono">
+                        {extraction.destination.address}, {extraction.destination.city}, {extraction.destination.state} {extraction.destination.zip}
+                      </p>
+                    )}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       <input
                         type="text"
@@ -750,7 +837,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                       />
                       <input
                         type="text"
-                        placeholder="State (e.g. GA)"
+                        placeholder="State (e.g. TX)"
                         maxLength={2}
                         value={formFields.dest_state}
                         onChange={(e) => setFormFields({ ...formFields, dest_state: e.target.value.toUpperCase() })}

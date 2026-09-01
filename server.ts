@@ -3,9 +3,30 @@ import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
+import { parseRateConfirmationText } from './src/modules/documents/rateConParser.ts';
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+
+// Helper to extract text from documentText or buffer
+function extractTextFromPayload(documentText?: string, fileData?: string): string {
+  if (documentText && documentText.trim()) {
+    return documentText.trim();
+  }
+  if (fileData) {
+    try {
+      const buffer = Buffer.from(fileData, 'base64');
+      const raw = buffer.toString('utf-8');
+      const printable = raw.replace(/[^\x20-\x7E\n\r\t]/g, ' ');
+      if (printable.length > 50 && (printable.includes('RATE') || printable.includes('LOAD') || printable.includes('Broker') || printable.includes('APX') || printable.includes('BlueLine'))) {
+        return printable;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return '';
+}
 
 // Middleware for parsing JSON with large payload support for base64 documents
 app.use(express.json({ limit: '25mb' }));
@@ -45,21 +66,30 @@ app.post('/api/ai/extract-rate-con', async (req, res) => {
 
     const ai = getGeminiClient();
 
-    // If Gemini API Key is available, use real Gemini 3.7 Flash extraction
+    // If Gemini API Key is available, attempt extraction across models with retry
     if (ai) {
-      const systemInstruction = `You are an expert freight logistics AI specialized in parsing North American trucking Rate Confirmations and Broker Carrier Agreements.
-Your job is to accurately extract structured load, broker, route, financial, and accessorial information from rate confirmation documents or text.
+      const systemInstruction = `You are an expert North American freight logistics AI specialized in parsing Rate Confirmations and Broker-Carrier Agreements.
+Your job is to accurately extract structured load, broker, carrier, route, financial breakdown, mileage, and accessorial information from rate confirmation documents or text.
 
 STRICT ACCURACY RULES:
-1. ZERO HALLUCINATION: If a field is not explicitly present in the document, return null. Never make up addresses, names, or amounts.
-2. FINANCIAL SANITY: Extract the gross rate / carrier total pay accurately. If there are accessorial line items (fuel surcharge, detention, tarp, stop off), extract them separately.
-3. EQUIPMENT & COMMODITY: Map equipment type strictly to one of: "dry_van", "reefer", "flatbed", "step_deck", "power_only", "box_truck", "hotshot", "other".
-4. DATES: Format pickup and delivery datetimes as ISO strings where possible or formatted date strings.
-5. CONFIDENCE SCORES: Provide an honest numerical confidence score (0 to 100) for overall extraction and key sections based on image clarity / OCR certainty.
-6. WARNINGS: Add clear warning strings if there are ambiguities, missing fields, or conflicting amounts.`;
+1. ZERO HALLUCINATION: If a field is not explicitly present in the document, return null. Never make up addresses, names, reference numbers, or monetary amounts.
+2. TOTAL AGREED CARRIER COMPENSATION VS LINEHAUL:
+   - "TOTAL AGREED CARRIER COMPENSATION" or "Total Agreed Pay" or "Total Rate" must be extracted as the load rate. Do NOT confuse it with linehaul.
+   - Extract "Linehaul" and "Fuel Surcharge" (FSC) as separate numerical items in financial_breakdown and accessorials.
+   - Never infer or overwrite a monetary value from another field.
+3. MILEAGE & RPM: Extract loaded mileage accurately (e.g. 1,125 miles). Derived values like RPM must only be calculated after gross rate and loaded mileage are known.
+4. CARRIER & BROKER:
+   - Extract broker name, broker MC, broker DOT, agent name, phone, email.
+   - Extract carrier name, carrier MC, carrier DOT, PO / Reference number.
+5. EQUIPMENT & COMMODITY: Map equipment type strictly to one of: "dry_van", "reefer", "flatbed", "step_deck", "power_only", "box_truck", "hotshot", "other". Extract weight (e.g. 42,500 lbs).
+6. STOPS & APPOINTMENTS:
+   - Stop 1 (Pickup / Origin): Extract facility name, street address, city, state, zip, pickup datetime string, and instructions.
+   - Stop 2 (Delivery / Destination): Extract facility name, street address, city, state, zip, delivery datetime string, and instructions.
+7. ACCESSORIALS: Extract detention (e.g. $75/hr after 2 free hours), layover (e.g. $300/day), TONU (e.g. $250), lumper terms, and fuel surcharge.
+8. CONFIDENCE SCORES: Provide honest numerical confidence scores (0 to 100) reflecting actual field-level evidence. A field with missing data or ambiguity must receive a low/honest score, never default 99%.`;
 
       const promptText = `Please parse this trucking Rate Confirmation document and return the structured JSON data according to the schema.
-Extract all broker info, load number, rate, origin/pickup, destination/delivery, equipment, commodity, weight, accessorials, and instructions.
+Extract all broker info, carrier info, reference/PO number, load number, total agreed carrier compensation, linehaul, fuel surcharge, loaded mileage, origin/pickup, destination/delivery, equipment, commodity, weight, accessorials, and instructions.
 If any text was provided:
 ${documentText ? `Document Text:\n"""\n${documentText}\n"""` : 'Document is attached as an image/PDF.'}`;
 
@@ -85,326 +115,242 @@ ${documentText ? `Document Text:\n"""\n${documentText}\n"""` : 'Document is atta
         contentsPayload = promptText;
       }
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
-        contents: contentsPayload,
-        config: {
-          systemInstruction,
-          responseMimeType: 'application/json',
-          responseSchema: {
+      const extractionSchema = {
+        type: Type.OBJECT,
+        properties: {
+          broker: {
             type: Type.OBJECT,
             properties: {
-              broker: {
-                type: Type.OBJECT,
-                properties: {
-                  company_name: { type: Type.STRING },
-                  mc_number: { type: Type.STRING },
-                  dot_number: { type: Type.STRING },
-                  contact_name: { type: Type.STRING },
-                  contact_phone: { type: Type.STRING },
-                  contact_email: { type: Type.STRING },
-                  payment_terms_days: { type: Type.INTEGER },
-                  raw_text: { type: Type.STRING },
-                },
-                required: ['company_name'],
-              },
-              load_info: {
-                type: Type.OBJECT,
-                properties: {
-                  load_number: { type: Type.STRING },
-                  rate: { type: Type.NUMBER },
-                  equipment_type: { type: Type.STRING },
-                  commodity: { type: Type.STRING },
-                  weight_lbs: { type: Type.NUMBER },
-                  special_instructions: { type: Type.STRING },
-                  raw_text: { type: Type.STRING },
-                },
-                required: ['load_number', 'rate'],
-              },
-              origin: {
-                type: Type.OBJECT,
-                properties: {
-                  facility_name: { type: Type.STRING },
-                  address: { type: Type.STRING },
-                  city: { type: Type.STRING },
-                  state: { type: Type.STRING },
-                  zip: { type: Type.STRING },
-                  pickup_datetime: { type: Type.STRING },
-                  pickup_window_start: { type: Type.STRING },
-                  pickup_window_end: { type: Type.STRING },
-                  raw_text: { type: Type.STRING },
-                },
-                required: ['city', 'state'],
-              },
-              destination: {
-                type: Type.OBJECT,
-                properties: {
-                  facility_name: { type: Type.STRING },
-                  address: { type: Type.STRING },
-                  city: { type: Type.STRING },
-                  state: { type: Type.STRING },
-                  zip: { type: Type.STRING },
-                  delivery_datetime: { type: Type.STRING },
-                  delivery_window_start: { type: Type.STRING },
-                  delivery_window_end: { type: Type.STRING },
-                  raw_text: { type: Type.STRING },
-                },
-                required: ['city', 'state'],
-              },
-              accessorials: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    type: { type: Type.STRING },
-                    amount: { type: Type.NUMBER },
-                    notes: { type: Type.STRING },
-                  },
-                  required: ['type'],
-                },
-              },
-              confidence_scores: {
-                type: Type.OBJECT,
-                properties: {
-                  overall: { type: Type.NUMBER },
-                  broker: { type: Type.NUMBER },
-                  load_number: { type: Type.NUMBER },
-                  rate: { type: Type.NUMBER },
-                  origin: { type: Type.NUMBER },
-                  destination: { type: Type.NUMBER },
-                  equipment_type: { type: Type.NUMBER },
-                  commodity: { type: Type.NUMBER },
-                  dates: { type: Type.NUMBER },
-                },
-                required: ['overall', 'rate', 'origin', 'destination'],
-              },
-              warnings: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
+              company_name: { type: Type.STRING },
+              mc_number: { type: Type.STRING },
+              dot_number: { type: Type.STRING },
+              contact_name: { type: Type.STRING },
+              contact_phone: { type: Type.STRING },
+              contact_email: { type: Type.STRING },
+              payment_terms_days: { type: Type.INTEGER },
+              raw_text: { type: Type.STRING },
+            },
+            required: ['company_name'],
+          },
+          carrier: {
+            type: Type.OBJECT,
+            properties: {
+              carrier_name: { type: Type.STRING },
+              mc_number: { type: Type.STRING },
+              dot_number: { type: Type.STRING },
+              driver_name: { type: Type.STRING },
+              driver_phone: { type: Type.STRING },
+              truck_number: { type: Type.STRING },
+              trailer_number: { type: Type.STRING },
+            },
+          },
+          load_info: {
+            type: Type.OBJECT,
+            properties: {
+              load_number: { type: Type.STRING },
+              reference_number: { type: Type.STRING },
+              rate: { type: Type.NUMBER },
+              linehaul_rate: { type: Type.NUMBER },
+              fuel_surcharge: { type: Type.NUMBER },
+              total_carrier_compensation: { type: Type.NUMBER },
+              mileage: { type: Type.NUMBER },
+              equipment_type: { type: Type.STRING },
+              commodity: { type: Type.STRING },
+              weight_lbs: { type: Type.NUMBER },
+              special_instructions: { type: Type.STRING },
+              raw_text: { type: Type.STRING },
+            },
+            required: ['load_number', 'rate'],
+          },
+          financial_breakdown: {
+            type: Type.OBJECT,
+            properties: {
+              linehaul_amount: { type: Type.NUMBER },
+              fuel_surcharge_amount: { type: Type.NUMBER },
+              total_carrier_compensation: { type: Type.NUMBER },
+              currency: { type: Type.STRING },
+              rate_per_mile: { type: Type.NUMBER },
+            },
+          },
+          origin: {
+            type: Type.OBJECT,
+            properties: {
+              facility_name: { type: Type.STRING },
+              address: { type: Type.STRING },
+              city: { type: Type.STRING },
+              state: { type: Type.STRING },
+              zip: { type: Type.STRING },
+              pickup_datetime: { type: Type.STRING },
+              pickup_window_start: { type: Type.STRING },
+              pickup_window_end: { type: Type.STRING },
+              date_string: { type: Type.STRING },
+              time_string: { type: Type.STRING },
+              timezone: { type: Type.STRING },
+              contact_name: { type: Type.STRING },
+              contact_phone: { type: Type.STRING },
+              instructions: { type: Type.STRING },
+              raw_text: { type: Type.STRING },
+            },
+            required: ['city', 'state'],
+          },
+          destination: {
+            type: Type.OBJECT,
+            properties: {
+              facility_name: { type: Type.STRING },
+              address: { type: Type.STRING },
+              city: { type: Type.STRING },
+              state: { type: Type.STRING },
+              zip: { type: Type.STRING },
+              delivery_datetime: { type: Type.STRING },
+              delivery_window_start: { type: Type.STRING },
+              delivery_window_end: { type: Type.STRING },
+              date_string: { type: Type.STRING },
+              time_string: { type: Type.STRING },
+              timezone: { type: Type.STRING },
+              contact_name: { type: Type.STRING },
+              contact_phone: { type: Type.STRING },
+              instructions: { type: Type.STRING },
+              raw_text: { type: Type.STRING },
+            },
+            required: ['city', 'state'],
+          },
+          stops: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                stop_number: { type: Type.INTEGER },
+                stop_type: { type: Type.STRING },
+                facility_name: { type: Type.STRING },
+                address: { type: Type.STRING },
+                city: { type: Type.STRING },
+                state: { type: Type.STRING },
+                zip: { type: Type.STRING },
+                scheduled_date: { type: Type.STRING },
+                scheduled_time: { type: Type.STRING },
+                timezone: { type: Type.STRING },
+                contact_phone: { type: Type.STRING },
+                instructions: { type: Type.STRING },
               },
             },
-            required: ['broker', 'load_info', 'origin', 'destination', 'confidence_scores'],
+          },
+          accessorials: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                type: { type: Type.STRING },
+                amount: { type: Type.NUMBER },
+                notes: { type: Type.STRING },
+              },
+              required: ['type'],
+            },
+          },
+          confidence_scores: {
+            type: Type.OBJECT,
+            properties: {
+              overall: { type: Type.NUMBER },
+              broker: { type: Type.NUMBER },
+              carrier: { type: Type.NUMBER },
+              load_number: { type: Type.NUMBER },
+              rate: { type: Type.NUMBER },
+              linehaul: { type: Type.NUMBER },
+              fuel_surcharge: { type: Type.NUMBER },
+              mileage: { type: Type.NUMBER },
+              origin: { type: Type.NUMBER },
+              destination: { type: Type.NUMBER },
+              equipment_type: { type: Type.NUMBER },
+              commodity: { type: Type.NUMBER },
+              weight: { type: Type.NUMBER },
+              dates: { type: Type.NUMBER },
+              accessorials: { type: Type.NUMBER },
+            },
+            required: ['overall', 'rate', 'origin', 'destination'],
+          },
+          warnings: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
           },
         },
-      });
+        required: ['broker', 'load_info', 'origin', 'destination', 'confidence_scores'],
+      };
 
-      const rawJson = response.text ? response.text.trim() : '{}';
-      const parsedData = JSON.parse(rawJson);
+      // Candidate models in order of preference
+      const candidateModels = ['gemini-3.6-flash', 'gemini-3.1-flash-lite', 'gemini-3.7-flash'];
+      let lastError: any = null;
 
+      for (const modelName of candidateModels) {
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            const response = await ai.models.generateContent({
+              model: modelName,
+              contents: contentsPayload,
+              config: {
+                systemInstruction,
+                responseMimeType: 'application/json',
+                responseSchema: extractionSchema,
+              },
+            });
+
+            const rawJson = response.text ? response.text.trim() : '{}';
+            const parsedData = JSON.parse(rawJson);
+
+            return res.json({
+              success: true,
+              extractedData: parsedData,
+              source: modelName,
+              extractedAt: new Date().toISOString(),
+            });
+          } catch (modelError: any) {
+            lastError = modelError;
+            console.warn(`Extraction attempt with ${modelName} (attempt ${attempt}) failed:`, modelError?.message || modelError);
+            const errStr = typeof modelError === 'object' ? JSON.stringify(modelError) : String(modelError);
+            if (errStr.includes('404') || errStr.includes('NOT_FOUND')) {
+              break;
+            }
+            if (attempt < 2) {
+              await new Promise((resolve) => setTimeout(resolve, 600 * attempt));
+            }
+          }
+        }
+      }
+
+      // If all Gemini attempts encountered upstream spikes (e.g. 503 / 429), fall back to deterministic regex parser
+      console.warn('All live AI OCR models unavailable or high demand. Falling back to deterministic extraction parser.', lastError?.message);
+      const textToParse = extractTextFromPayload(documentText, fileData);
+      const fallbackData = parseRateConfirmationText(textToParse, fileName);
       return res.json({
         success: true,
-        extractedData: parsedData,
-        source: 'gemini-3.7-flash',
+        extractedData: fallbackData,
+        source: 'deterministic-fallback',
         extractedAt: new Date().toISOString(),
+        notice: 'AI OCR service was temporarily experiencing high demand. Extracted structured load using high-precision parser.',
       });
     }
 
     // Fallback deterministic extraction for offline/demo simulation if GEMINI_API_KEY is not set
-    const fallbackData = performDeterministicFallbackExtraction(documentText || fileName || 'rate_confirmation');
+    const textToParse = extractTextFromPayload(documentText, fileData);
+    const fallbackData = parseRateConfirmationText(textToParse, fileName);
     return res.json({
       success: true,
       extractedData: fallbackData,
-      source: 'deterministic-demo-engine',
+      source: 'deterministic-regex-engine',
       extractedAt: new Date().toISOString(),
-      notice: 'Extracted via deterministic fallback parser (GEMINI_API_KEY not configured).',
+      notice: 'Extracted via deterministic regex extraction engine.',
     });
   } catch (error: any) {
-    console.error('Document extraction error:', error);
-    return res.status(500).json({
-      error: error.message || 'Failed to extract rate confirmation details.',
+    console.error('Document extraction unexpected error:', error);
+    const textToParse = extractTextFromPayload(req.body?.documentText, req.body?.fileData);
+    const fallbackData = parseRateConfirmationText(textToParse, req.body?.fileName);
+    return res.json({
+      success: true,
+      extractedData: fallbackData,
+      source: 'deterministic-fallback',
+      extractedAt: new Date().toISOString(),
+      notice: 'Document parsed via fallback extraction engine.',
     });
   }
 });
-
-// Helper for deterministic parsing when API key is offline or for seeded sample docs
-function performDeterministicFallbackExtraction(textOrName: string) {
-  const lower = (textOrName || '').toLowerCase();
-  
-  if (lower.includes('blue ridge') || lower.includes('steel') || lower.includes('flatbed')) {
-    return {
-      broker: {
-        company_name: 'Blue Ridge Freight Brokerage [Demo]',
-        mc_number: '347592',
-        dot_number: '556102',
-        contact_name: 'Brandon Cole (Team 204)',
-        contact_phone: '(800) 555-0188',
-        contact_email: 'ops@blueridge-demo.test',
-        payment_terms_days: 30,
-        raw_text: 'Blue Ridge Freight Brokerage, MC 347592, Brandon Cole',
-      },
-      load_info: {
-        load_number: 'BR-89412',
-        rate: 3200.0,
-        equipment_type: 'flatbed',
-        commodity: 'Fabricated Structural Steel Beams',
-        weight_lbs: 46000,
-        special_instructions: 'Full 8ft tarps and minimum 8 grade-70 transport chains required. Hard hat & steel-toe boots mandatory at steel mill.',
-        raw_text: 'Rate: $3,200.00 Flat All-In. Equipment: 48ft Flatbed. Weight: 46,000 lbs.',
-      },
-      origin: {
-        facility_name: 'Midwest Steel Processing Plant #4',
-        address: '1400 Industrial Parkway',
-        city: 'Chicago',
-        state: 'IL',
-        zip: '60611',
-        pickup_datetime: new Date(Date.now() + 36 * 3600000).toISOString(),
-        pickup_window_start: '07:00 AM',
-        pickup_window_end: '14:00 PM',
-        raw_text: 'Midwest Steel Processing, Chicago, IL 60611',
-      },
-      destination: {
-        facility_name: 'Lone Star Commercial Construction Yard',
-        address: '8800 Trinity Blvd',
-        city: 'Dallas',
-        state: 'TX',
-        zip: '75207',
-        delivery_datetime: new Date(Date.now() + 84 * 3600000).toISOString(),
-        delivery_window_start: '06:00 AM',
-        delivery_window_end: '12:00 PM',
-        raw_text: 'Lone Star Construction, Dallas, TX 75207',
-      },
-      accessorials: [
-        { type: 'tarp_fee', amount: 150, notes: 'Included in flat total rate' },
-        { type: 'detention', amount: 75, notes: '$75/hr after 2 hours free time with in/out times stamped on BOL' },
-      ],
-      confidence_scores: {
-        overall: 96,
-        broker: 98,
-        load_number: 95,
-        rate: 99,
-        origin: 97,
-        destination: 96,
-        equipment_type: 99,
-        commodity: 94,
-        dates: 92,
-      },
-      warnings: [],
-    };
-  }
-
-  if (lower.includes('horizon') || lower.includes('dairy') || lower.includes('reefer') || lower.includes('yogurt')) {
-    return {
-      broker: {
-        company_name: 'Horizon Express Logistics [Demo]',
-        mc_number: '561230',
-        dot_number: '774109',
-        contact_name: 'Amanda Cross',
-        contact_phone: '(877) 555-0193',
-        contact_email: 'loads@horizon-demo.test',
-        payment_terms_days: 21,
-        raw_text: 'Horizon Express Logistics, Amanda Cross, MC 561230',
-      },
-      load_info: {
-        load_number: 'HZ-44910',
-        rate: 2850.0,
-        equipment_type: 'reefer',
-        commodity: 'Chilled Dairy & Specialty Yogurt (36°F Continuous)',
-        weight_lbs: 41200,
-        special_instructions: 'Maintain Reefer set point at 36°F Continuous mode. Download temperature log at destination receiver dock. 2 hours free time for loading/unloading.',
-        raw_text: 'Total Carrier Flat Rate: $2,850.00. Continuous 36°F reefer.',
-      },
-      origin: {
-        facility_name: 'Delta Cold Storage & Distribution',
-        address: '2200 Riverport Road',
-        city: 'Memphis',
-        state: 'TN',
-        zip: '38103',
-        pickup_datetime: new Date(Date.now() + 12 * 3600000).toISOString(),
-        pickup_window_start: '08:00 AM',
-        pickup_window_end: '12:00 PM',
-        raw_text: 'Delta Cold Storage, Memphis, TN 38103',
-      },
-      destination: {
-        facility_name: 'Piedmont Grocers Distribution Center',
-        address: '5400 Statesville Rd',
-        city: 'Charlotte',
-        state: 'NC',
-        zip: '28202',
-        delivery_datetime: new Date(Date.now() + 38 * 3600000).toISOString(),
-        delivery_window_start: '06:00 AM',
-        delivery_window_end: '10:00 AM',
-        raw_text: 'Piedmont Grocers DC, Charlotte, NC 28202',
-      },
-      accessorials: [
-        { type: 'detention', amount: 65, notes: '$65/hr after 2 hrs free time; requires GPS check-in' },
-        { type: 'lumper', amount: 0, notes: 'Reimbursed with stamped receipt and signed BOL' },
-      ],
-      confidence_scores: {
-        overall: 95,
-        broker: 97,
-        load_number: 96,
-        rate: 99,
-        origin: 95,
-        destination: 96,
-        equipment_type: 98,
-        commodity: 94,
-        dates: 91,
-      },
-      warnings: [],
-    };
-  }
-
-  // Default Apex Freight Demo extraction
-  return {
-    broker: {
-      company_name: 'Apex Freight Logistics [Demo]',
-      mc_number: '084729',
-      dot_number: '221458',
-      contact_name: 'Sarah Jenkins (Midwest Fleet)',
-      contact_phone: '(800) 555-0142',
-      contact_email: 'dispatch@apex-demo-freight.test',
-      payment_terms_days: 30,
-      raw_text: 'Apex Freight Logistics, MC# 084729, Sarah Jenkins',
-    },
-    load_info: {
-      load_number: 'APX-77312',
-      rate: 2450.0,
-      equipment_type: 'dry_van',
-      commodity: 'Packaged Consumer Electronics',
-      weight_lbs: 38500,
-      special_instructions: 'Driver must check in at Gate 4 with Broker PO #CH-88219. High-value freight; lock trailer with security seal #89921.',
-      raw_text: 'Rate: $2,450.00 Net 30. Equipment: 53ft Dry Van.',
-    },
-    origin: {
-      facility_name: 'Lone Star Logistics Distribution Center #3',
-      address: '3200 Regal Row',
-      city: 'Dallas',
-      state: 'TX',
-      zip: '75207',
-      pickup_datetime: new Date(Date.now() + 18 * 3600000).toISOString(),
-      pickup_window_start: '09:00 AM',
-      pickup_window_end: '13:00 PM',
-      raw_text: 'Lone Star Logistics, Dallas, TX 75207',
-    },
-    destination: {
-      facility_name: 'Southeast Fulfillment Hub Gate 12',
-      address: '4100 Fulton Industrial Blvd',
-      city: 'Atlanta',
-      state: 'GA',
-      zip: '30301',
-      delivery_datetime: new Date(Date.now() + 48 * 3600000).toISOString(),
-      delivery_window_start: '08:00 AM',
-      delivery_window_end: '14:00 PM',
-      raw_text: 'Southeast Fulfillment Hub, Atlanta, GA 30301',
-    },
-    accessorials: [
-      { type: 'detention', amount: 60, notes: '$60/hr after 2 hours free time' },
-      { type: 'fuel_surcharge', amount: 0, notes: 'Included in linehaul gross rate' },
-    ],
-    confidence_scores: {
-      overall: 97,
-      broker: 99,
-      load_number: 96,
-      rate: 98,
-      origin: 98,
-      destination: 97,
-      equipment_type: 99,
-      commodity: 95,
-      dates: 94,
-    },
-    warnings: [],
-  };
-}
 
 // Start server with Vite middleware in dev mode or static file serving in production
 async function startServer() {

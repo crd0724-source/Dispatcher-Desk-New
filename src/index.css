@@ -85,3 +85,27 @@
   text-decoration: underline !important;
 }
 
+/* Date and Time input styling in dark mode */
+input[type="date"],
+input[type="time"] {
+  color-scheme: dark;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  filter: invert(1) brightness(1.2);
+  opacity: 0.95;
+  padding: 4px;
+  margin-right: -2px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="time"]::-webkit-calendar-picker-indicator:hover {
+  filter: invert(1) brightness(1.5);
+  opacity: 1;
+  background-color: rgba(99, 102, 241, 0.25);
+}
+

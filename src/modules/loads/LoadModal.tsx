@@ -511,8 +511,8 @@ export const LoadModal: React.FC<LoadModalProps> = ({
         )}
 
         {/* Top Header Bar: Load # & Pipeline Status */}
-        <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/90 grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
+        <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/90 grid grid-cols-1 sm:grid-cols-12 gap-3.5 items-start">
+          <div className="sm:col-span-4">
             <label className="block text-slate-400 font-semibold mb-1">
               Load Number <span className="text-rose-400">*</span>
             </label>
@@ -530,7 +530,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
             )}
           </div>
 
-          <div>
+          <div className="sm:col-span-8">
             <label className="block text-slate-400 font-semibold mb-1">
               Pipeline Status
             </label>
@@ -691,8 +691,9 @@ export const LoadModal: React.FC<LoadModalProps> = ({
               <span>3. Shipper / Origin (Pickup)</span>
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
-              <div className="col-span-2">
+            {/* Row 1: City | State | ZIP */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+              <div className="sm:col-span-6">
                 <label className="block text-slate-400 text-[11px] mb-1 font-medium">
                   City <span className="text-rose-400">*</span>
                 </label>
@@ -710,7 +711,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                 )}
               </div>
 
-              <div>
+              <div className="sm:col-span-3">
                 <label className="block text-slate-400 text-[11px] mb-1 font-medium">
                   State <span className="text-rose-400">*</span>
                 </label>
@@ -718,7 +719,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                   id="origin-state-select"
                   value={originState}
                   onChange={(e) => setOriginState(e.target.value)}
-                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-indigo-500 cursor-pointer"
                 >
                   {US_STATES.map((st) => (
                     <option key={st} value={st}>
@@ -727,10 +728,8 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                   ))}
                 </select>
               </div>
-            </div>
 
-            <div className="grid grid-cols-3 gap-2">
-              <div>
+              <div className="sm:col-span-3">
                 <label className="block text-slate-400 text-[11px] mb-1 font-medium">ZIP Code</label>
                 <input
                   id="origin-zip-input"
@@ -741,9 +740,14 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                   className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
                 />
               </div>
+            </div>
 
+            {/* Row 2: Date | Time */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
-                <label className="block text-slate-400 text-[11px] mb-1 font-medium">Pickup Date</label>
+                <label htmlFor="pickup-date-input" className="block text-slate-400 text-[11px] mb-1 font-medium">
+                  Pickup Date
+                </label>
                 <input
                   id="pickup-date-input"
                   type="date"
@@ -759,7 +763,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                       });
                     }
                   }}
-                  className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  className="w-full px-2.5 py-1.5 bg-slate-900 hover:bg-slate-850 focus:bg-slate-900 border border-slate-700 hover:border-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/40 rounded-lg text-slate-100 font-mono text-xs focus:outline-none [color-scheme:dark] cursor-pointer transition-all shadow-xs"
                 />
               </div>
 
@@ -779,7 +783,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                       });
                     }
                   }}
-                  className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  className="w-full px-2.5 py-1.5 bg-slate-900 hover:bg-slate-850 border border-slate-700 hover:border-slate-600 rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-indigo-500 cursor-pointer transition-colors"
                 >
                   {!TIME_OPTIONS.some((opt) => opt.value === pickupTime) && pickupTime && (
                     <option value={pickupTime}>{formatTimeOptionLabel(pickupTime)}</option>
@@ -801,8 +805,9 @@ export const LoadModal: React.FC<LoadModalProps> = ({
               <span>4. Receiver / Destination (Delivery)</span>
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
-              <div className="col-span-2">
+            {/* Row 1: City | State | ZIP */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+              <div className="sm:col-span-6">
                 <label className="block text-slate-400 text-[11px] mb-1 font-medium">
                   City <span className="text-rose-400">*</span>
                 </label>
@@ -820,7 +825,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                 )}
               </div>
 
-              <div>
+              <div className="sm:col-span-3">
                 <label className="block text-slate-400 text-[11px] mb-1 font-medium">
                   State <span className="text-rose-400">*</span>
                 </label>
@@ -828,7 +833,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                   id="dest-state-select"
                   value={destState}
                   onChange={(e) => setDestState(e.target.value)}
-                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-indigo-500 cursor-pointer"
                 >
                   {US_STATES.map((st) => (
                     <option key={st} value={st}>
@@ -837,10 +842,8 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                   ))}
                 </select>
               </div>
-            </div>
 
-            <div className="grid grid-cols-3 gap-2">
-              <div>
+              <div className="sm:col-span-3">
                 <label className="block text-slate-400 text-[11px] mb-1 font-medium">ZIP Code</label>
                 <input
                   id="dest-zip-input"
@@ -851,9 +854,14 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                   className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
                 />
               </div>
+            </div>
 
+            {/* Row 2: Date | Time */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
-                <label className="block text-slate-400 text-[11px] mb-1 font-medium">Delivery Date</label>
+                <label htmlFor="delivery-date-input" className="block text-slate-400 text-[11px] mb-1 font-medium">
+                  Delivery Date
+                </label>
                 <input
                   id="delivery-date-input"
                   type="date"
@@ -870,8 +878,10 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                       });
                     }
                   }}
-                  className={`w-full px-2 py-1.5 bg-slate-900 border rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-indigo-500 cursor-pointer ${
-                    formErrors.deliveryDate ? 'border-rose-500 ring-1 ring-rose-500/50' : 'border-slate-700'
+                  className={`w-full px-2.5 py-1.5 bg-slate-900 hover:bg-slate-850 focus:bg-slate-900 border rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:ring-1 [color-scheme:dark] cursor-pointer transition-all shadow-xs ${
+                    formErrors.deliveryDate
+                      ? 'border-rose-500 ring-1 ring-rose-500/50 focus:border-rose-500 focus:ring-rose-500/50'
+                      : 'border-slate-700 hover:border-slate-500 focus:border-indigo-500 focus:ring-indigo-500/40'
                   }`}
                 />
               </div>
@@ -892,8 +902,10 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                       });
                     }
                   }}
-                  className={`w-full px-2 py-1.5 bg-slate-900 border rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-indigo-500 cursor-pointer ${
-                    formErrors.deliveryDate ? 'border-rose-500 ring-1 ring-rose-500/50' : 'border-slate-700'
+                  className={`w-full px-2.5 py-1.5 bg-slate-900 hover:bg-slate-850 border rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-indigo-500 cursor-pointer transition-colors ${
+                    formErrors.deliveryDate
+                      ? 'border-rose-500 ring-1 ring-rose-500/50'
+                      : 'border-slate-700 hover:border-slate-600'
                   }`}
                 >
                   {!TIME_OPTIONS.some((opt) => opt.value === deliveryTime) && deliveryTime && (
