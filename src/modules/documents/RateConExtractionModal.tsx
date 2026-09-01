@@ -93,10 +93,14 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
     rate: number;
     loaded_miles: number;
     deadhead_miles: number;
+    origin_facility_name: string;
+    origin_address: string;
     origin_city: string;
     origin_state: string;
     origin_zip: string;
     pickup_datetime: string;
+    dest_facility_name: string;
+    dest_address: string;
     dest_city: string;
     dest_state: string;
     dest_zip: string;
@@ -110,10 +114,14 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
     rate: 0,
     loaded_miles: 0,
     deadhead_miles: 0,
+    origin_facility_name: '',
+    origin_address: '',
     origin_city: '',
     origin_state: '',
     origin_zip: '',
     pickup_datetime: '',
+    dest_facility_name: '',
+    dest_address: '',
     dest_city: '',
     dest_state: '',
     dest_zip: '',
@@ -237,10 +245,14 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
         rate: extractedTotalPay,
         loaded_miles: extractedMiles,
         deadhead_miles: 0,
+        origin_facility_name: originFacility,
+        origin_address: originAddress,
         origin_city: originCity,
         origin_state: originState,
         origin_zip: originZip,
         pickup_datetime: pickupDateTime,
+        dest_facility_name: destFacility,
+        dest_address: destAddress,
         dest_city: destCity,
         dest_state: destState,
         dest_zip: destZip,
@@ -303,10 +315,14 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
         overriddenFields: {
           load_number: formFields.load_number,
           rate: formFields.rate,
+          origin_facility_name: formFields.origin_facility_name,
+          origin_address: formFields.origin_address,
           origin_city: formFields.origin_city,
           origin_state: formFields.origin_state,
           origin_zip: formFields.origin_zip,
           pickup_datetime: formFields.pickup_datetime,
+          dest_facility_name: formFields.dest_facility_name,
+          dest_address: formFields.dest_address,
           dest_city: formFields.dest_city,
           dest_state: formFields.dest_state,
           dest_zip: formFields.dest_zip,

@@ -177,7 +177,20 @@ export function normalizeDateTime(rawDateTime?: string | null): {
 
   let iso: string | null = null;
   if (year !== null && monthIndex !== null && day !== null) {
-    const d = new Date(Date.UTC(year, monthIndex, day, hour, minute, 0, 0));
+    // Map extracted timezone acronyms or defaults to UTC offset in hours
+    // Central Time is UTC-5 in daylight saving (CDT, default for Sept), or UTC-6 in standard (CST)
+    let offsetHours = -5; // Default US Central (CDT)
+    if (timezone) {
+      const tzUpper = timezone.toUpperCase();
+      if (tzUpper === 'EST' || tzUpper === 'EDT' || tzUpper === 'ET') offsetHours = tzUpper === 'EST' ? -5 : -4;
+      else if (tzUpper === 'CST' || tzUpper === 'CDT' || tzUpper === 'CT') offsetHours = tzUpper === 'CST' ? -6 : -5;
+      else if (tzUpper === 'MST' || tzUpper === 'MDT' || tzUpper === 'MT') offsetHours = tzUpper === 'MST' ? -7 : -6;
+      else if (tzUpper === 'PST' || tzUpper === 'PDT' || tzUpper === 'PT') offsetHours = tzUpper === 'PST' ? -8 : -7;
+      else if (tzUpper === 'UTC') offsetHours = 0;
+    }
+    // Calculate UTC timestamp by subtracting local offset (e.g. 08:00 CDT (UTC-5) -> 08:00 - (-5) = 13:00 UTC)
+    const utcHour = hour - offsetHours;
+    const d = new Date(Date.UTC(year, monthIndex, day, utcHour, minute, 0, 0));
     iso = d.toISOString();
   }
 

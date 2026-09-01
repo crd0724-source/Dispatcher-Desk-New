@@ -159,10 +159,14 @@ export interface ApplyExtractionToLoadInput {
   overriddenFields: {
     load_number?: string;
     rate?: number;
+    origin_facility_name?: string;
+    origin_address?: string;
     origin_city?: string;
     origin_state?: string;
     origin_zip?: string;
     pickup_datetime?: string;
+    dest_facility_name?: string;
+    dest_address?: string;
     dest_city?: string;
     dest_state?: string;
     dest_zip?: string;

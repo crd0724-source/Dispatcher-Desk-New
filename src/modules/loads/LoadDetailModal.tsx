@@ -530,8 +530,20 @@ export const LoadDetailModal: React.FC<LoadDetailModalProps> = ({
               <MapPin className="w-3.5 h-3.5" />
               <span>Shipper / Pickup Origin</span>
             </div>
-            <div className="text-sm font-bold text-slate-100">
-              {load.origin_city}, {load.origin_state} {load.origin_zip || ''}
+            <div className="space-y-0.5">
+              {load.origin_facility_name && (
+                <div className="text-sm font-bold text-slate-100">
+                  {load.origin_facility_name}
+                </div>
+              )}
+              {load.origin_address && (
+                <div className="text-xs text-slate-300 font-medium">
+                  {load.origin_address}
+                </div>
+              )}
+              <div className={load.origin_facility_name || load.origin_address ? 'text-xs text-slate-400 font-medium' : 'text-sm font-bold text-slate-100'}>
+                {load.origin_city}, {load.origin_state} {load.origin_zip || ''}
+              </div>
             </div>
             <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-800/80 space-y-1 font-mono text-[11px]">
               <div className="flex items-center justify-between text-slate-400">
@@ -553,8 +565,20 @@ export const LoadDetailModal: React.FC<LoadDetailModalProps> = ({
               <MapPin className="w-3.5 h-3.5" />
               <span>Receiver / Destination</span>
             </div>
-            <div className="text-sm font-bold text-slate-100">
-              {load.dest_city}, {load.dest_state} {load.dest_zip || ''}
+            <div className="space-y-0.5">
+              {load.dest_facility_name && (
+                <div className="text-sm font-bold text-slate-100">
+                  {load.dest_facility_name}
+                </div>
+              )}
+              {load.dest_address && (
+                <div className="text-xs text-slate-300 font-medium">
+                  {load.dest_address}
+                </div>
+              )}
+              <div className={load.dest_facility_name || load.dest_address ? 'text-xs text-slate-400 font-medium' : 'text-sm font-bold text-slate-100'}>
+                {load.dest_city}, {load.dest_state} {load.dest_zip || ''}
+              </div>
             </div>
             <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-800/80 space-y-1 font-mono text-[11px]">
               <div className="flex items-center justify-between text-slate-400">

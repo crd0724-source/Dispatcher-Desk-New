@@ -177,6 +177,8 @@ export const LoadModal: React.FC<LoadModalProps> = ({
   const [weightLbs, setWeightLbs] = useState('');
 
   // Origin / Pickup
+  const [originFacilityName, setOriginFacilityName] = useState('');
+  const [originAddress, setOriginAddress] = useState('');
   const [originCity, setOriginCity] = useState('');
   const [originState, setOriginState] = useState('TX');
   const [originZip, setOriginZip] = useState('');
@@ -184,6 +186,8 @@ export const LoadModal: React.FC<LoadModalProps> = ({
   const [pickupTime, setPickupTime] = useState('08:00');
 
   // Destination / Delivery
+  const [destFacilityName, setDestFacilityName] = useState('');
+  const [destAddress, setDestAddress] = useState('');
   const [destCity, setDestCity] = useState('');
   const [destState, setDestState] = useState('GA');
   const [destZip, setDestZip] = useState('');
@@ -222,6 +226,8 @@ export const LoadModal: React.FC<LoadModalProps> = ({
       setCommodity(initialLoad.commodity || '');
       setWeightLbs(initialLoad.weight_lbs ? String(initialLoad.weight_lbs) : '');
 
+      setOriginFacilityName(initialLoad.origin_facility_name || '');
+      setOriginAddress(initialLoad.origin_address || '');
       setOriginCity(initialLoad.origin_city || '');
       setOriginState(initialLoad.origin_state || 'TX');
       setOriginZip(initialLoad.origin_zip || '');
@@ -235,6 +241,8 @@ export const LoadModal: React.FC<LoadModalProps> = ({
         setPickupTime('08:00');
       }
 
+      setDestFacilityName(initialLoad.dest_facility_name || '');
+      setDestAddress(initialLoad.dest_address || '');
       setDestCity(initialLoad.dest_city || '');
       setDestState(initialLoad.dest_state || 'GA');
       setDestZip(initialLoad.dest_zip || '');
@@ -452,10 +460,14 @@ export const LoadModal: React.FC<LoadModalProps> = ({
       equipment_type: equipmentType,
       commodity: commodity.trim() || null,
       weight_lbs: weightLbs ? parseFloat(weightLbs) : null,
+      origin_facility_name: originFacilityName.trim() || null,
+      origin_address: originAddress.trim() || null,
       origin_city: originCity.trim(),
       origin_state: originState.trim().toUpperCase(),
       origin_zip: originZip.trim() || null,
       pickup_datetime: schedule.pickup_datetime,
+      dest_facility_name: destFacilityName.trim() || null,
+      dest_address: destAddress.trim() || null,
       dest_city: destCity.trim(),
       dest_state: destState.trim().toUpperCase(),
       dest_zip: destZip.trim() || null,
@@ -691,6 +703,32 @@ export const LoadModal: React.FC<LoadModalProps> = ({
               <span>3. Shipper / Origin (Pickup)</span>
             </div>
 
+            {/* Row 0: Facility Name | Street Address */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div>
+                <label className="block text-slate-400 text-[11px] mb-1 font-medium">Facility / Shipper Name</label>
+                <input
+                  id="origin-facility-input"
+                  type="text"
+                  placeholder="e.g. Midwest Distribution Center"
+                  value={originFacilityName}
+                  onChange={(e) => setOriginFacilityName(e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-400 text-[11px] mb-1 font-medium">Street Address</label>
+                <input
+                  id="origin-address-input"
+                  type="text"
+                  placeholder="e.g. 4800 S Central Ave"
+                  value={originAddress}
+                  onChange={(e) => setOriginAddress(e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+
             {/* Row 1: City | State | ZIP */}
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
               <div className="sm:col-span-6">
@@ -803,6 +841,32 @@ export const LoadModal: React.FC<LoadModalProps> = ({
             <div className="flex items-center gap-2 pb-1 border-b border-slate-800/80 text-teal-400 font-bold uppercase tracking-wider text-[11px]">
               <MapPin className="w-3.5 h-3.5" />
               <span>4. Receiver / Destination (Delivery)</span>
+            </div>
+
+            {/* Row 0: Facility Name | Street Address */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div>
+                <label className="block text-slate-400 text-[11px] mb-1 font-medium">Facility / Receiver Name</label>
+                <input
+                  id="dest-facility-input"
+                  type="text"
+                  placeholder="e.g. Texas Distribution Hub"
+                  value={destFacilityName}
+                  onChange={(e) => setDestFacilityName(e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-400 text-[11px] mb-1 font-medium">Street Address</label>
+                <input
+                  id="dest-address-input"
+                  type="text"
+                  placeholder="e.g. 5200 Mountain Creek Pkwy"
+                  value={destAddress}
+                  onChange={(e) => setDestAddress(e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
             </div>
 
             {/* Row 1: City | State | ZIP */}

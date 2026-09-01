@@ -175,10 +175,26 @@ class ExtractionService {
           overriddenFields.weight_lbs !== undefined
             ? overriddenFields.weight_lbs
             : extractedData.load_info.weight_lbs || null,
+        origin_facility_name:
+          overriddenFields.origin_facility_name !== undefined
+            ? (overriddenFields.origin_facility_name || null)
+            : (extractedData.origin.facility_name || null),
+        origin_address:
+          overriddenFields.origin_address !== undefined
+            ? (overriddenFields.origin_address || null)
+            : (extractedData.origin.address || null),
         origin_city: overriddenFields.origin_city || extractedData.origin.city,
         origin_state: (overriddenFields.origin_state || extractedData.origin.state).toUpperCase(),
         origin_zip: overriddenFields.origin_zip || extractedData.origin.zip || null,
         pickup_datetime: overriddenFields.pickup_datetime || extractedData.origin.pickup_datetime || null,
+        dest_facility_name:
+          overriddenFields.dest_facility_name !== undefined
+            ? (overriddenFields.dest_facility_name || null)
+            : (extractedData.destination.facility_name || null),
+        dest_address:
+          overriddenFields.dest_address !== undefined
+            ? (overriddenFields.dest_address || null)
+            : (extractedData.destination.address || null),
         dest_city: overriddenFields.dest_city || extractedData.destination.city,
         dest_state: (overriddenFields.dest_state || extractedData.destination.state).toUpperCase(),
         dest_zip: overriddenFields.dest_zip || extractedData.destination.zip || null,
@@ -222,10 +238,26 @@ class ExtractionService {
           overriddenFields.weight_lbs !== undefined
             ? overriddenFields.weight_lbs
             : extractedData.load_info.weight_lbs || undefined,
+        origin_facility_name:
+          overriddenFields.origin_facility_name !== undefined
+            ? (overriddenFields.origin_facility_name || null)
+            : extractedData.origin.facility_name || undefined,
+        origin_address:
+          overriddenFields.origin_address !== undefined
+            ? (overriddenFields.origin_address || null)
+            : extractedData.origin.address || undefined,
         origin_city: overriddenFields.origin_city || extractedData.origin.city,
         origin_state: (overriddenFields.origin_state || extractedData.origin.state).toUpperCase(),
         origin_zip: overriddenFields.origin_zip || extractedData.origin.zip || undefined,
         pickup_datetime: overriddenFields.pickup_datetime || extractedData.origin.pickup_datetime || undefined,
+        dest_facility_name:
+          overriddenFields.dest_facility_name !== undefined
+            ? (overriddenFields.dest_facility_name || null)
+            : extractedData.destination.facility_name || undefined,
+        dest_address:
+          overriddenFields.dest_address !== undefined
+            ? (overriddenFields.dest_address || null)
+            : extractedData.destination.address || undefined,
         dest_city: overriddenFields.dest_city || extractedData.destination.city,
         dest_state: (overriddenFields.dest_state || extractedData.destination.state).toUpperCase(),
         dest_zip: overriddenFields.dest_zip || extractedData.destination.zip || undefined,
