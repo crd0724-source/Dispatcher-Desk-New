@@ -65,3 +65,23 @@
   border: none !important;
 }
 
+.leaflet-control-attribution {
+  background-color: rgba(9, 13, 22, 0.85) !important;
+  backdrop-filter: blur(4px) !important;
+  color: #94a3b8 !important;
+  font-size: 10px !important;
+  padding: 2px 8px !important;
+  border-top-left-radius: 6px !important;
+  border-left: 1px solid rgba(30, 41, 59, 0.7) !important;
+  border-top: 1px solid rgba(30, 41, 59, 0.7) !important;
+}
+
+.leaflet-control-attribution a {
+  color: #818cf8 !important;
+  text-decoration: none !important;
+}
+
+.leaflet-control-attribution a:hover {
+  text-decoration: underline !important;
+}
+

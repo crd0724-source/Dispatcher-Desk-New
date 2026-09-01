@@ -24,6 +24,15 @@ interface MapCanvasProps {
   onOpenLoadDetail: (load: LoadWithRelations) => void;
 }
 
+const CARTO_API_KEY = (import.meta.env.VITE_CARTO_API_KEY || '').trim();
+const KEY_PARAM = CARTO_API_KEY ? `?key=${CARTO_API_KEY}` : '';
+
+const CARTO_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener noreferrer">CARTO</a>';
+
+const VOYAGER_TILE_URL = `https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png${KEY_PARAM}`;
+const DARK_TILE_URL = `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png${KEY_PARAM}`;
+
 export const MapCanvas: React.FC<MapCanvasProps> = ({
   routes,
   selectedLoadId,
@@ -51,14 +60,14 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
       center: defaultCenter,
       zoom: defaultZoom,
       zoomControl: false, // We render custom themed controls
-      attributionControl: false,
+      attributionControl: true,
     });
 
-    // Dark Matter tile layer for dark theme UI
-    const darkTileUrl = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-    const tileLayer = L.tileLayer(darkTileUrl, {
+    const initialTileUrl = activeTileTheme === 'dark' ? DARK_TILE_URL : VOYAGER_TILE_URL;
+    const tileLayer = L.tileLayer(initialTileUrl, {
       maxZoom: 19,
       subdomains: 'abcd',
+      attribution: CARTO_ATTRIBUTION,
     }).addTo(map);
 
     tileLayerRef.current = tileLayer;
@@ -107,14 +116,12 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
     const map = mapInstanceRef.current;
     tileLayerRef.current.remove();
 
-    const tileUrl =
-      activeTileTheme === 'dark'
-        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-        : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+    const tileUrl = activeTileTheme === 'dark' ? DARK_TILE_URL : VOYAGER_TILE_URL;
 
     const newTileLayer = L.tileLayer(tileUrl, {
       maxZoom: 19,
       subdomains: 'abcd',
+      attribution: CARTO_ATTRIBUTION,
     }).addTo(map);
 
     // Keep tiles beneath markers
