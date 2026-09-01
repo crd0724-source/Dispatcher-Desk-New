@@ -275,8 +275,8 @@ ${documentText ? `Document Text:\n"""\n${documentText}\n"""` : 'Document is atta
         required: ['broker', 'load_info', 'origin', 'destination', 'confidence_scores'],
       };
 
-      // Candidate models in order of preference
-      const candidateModels = ['gemini-3.6-flash', 'gemini-3.1-flash-lite', 'gemini-3.7-flash'];
+      // Candidate models in order of preference (using supported official Google GenAI model IDs)
+      const candidateModels = ['gemini-2.5-flash', 'gemini-2.5-pro'];
       let lastError: any = null;
 
       for (const modelName of candidateModels) {
@@ -304,7 +304,8 @@ ${documentText ? `Document Text:\n"""\n${documentText}\n"""` : 'Document is atta
           } catch (modelError: any) {
             lastError = modelError;
             console.warn(`Extraction attempt with ${modelName} (attempt ${attempt}) failed:`, modelError?.message || modelError);
-            const errStr = typeof modelError === 'object' ? JSON.stringify(modelError) : String(modelError);
+            const errStr = typeof modelError === 'object' ? (modelError?.message || JSON.stringify(modelError)) : String(modelError);
+            // If 404/NOT_FOUND for this specific model, don't retry the same model; advance to next candidate model
             if (errStr.includes('404') || errStr.includes('NOT_FOUND')) {
               break;
             }
