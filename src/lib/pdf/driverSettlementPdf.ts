@@ -8,8 +8,10 @@ import {
   drawDocumentHeader,
   addDocumentFooters,
   drawCardBox,
+  truncateText,
   PDF_COLORS,
   PDF_PAGE,
+  PDF_CARD,
   formatCurrency,
   formatMiles,
   formatInTimezone,
@@ -47,8 +49,8 @@ export function generateDriverSettlementPdf(options: DriverSettlementPdfOptions)
     organization?.dot_number ? `DOT-${organization.dot_number}` : null,
   ].filter(Boolean).join(' | ');
 
-  // 1. Render Header
-  let startY = drawDocumentHeader(doc, {
+  // 1. Render Header (Cursor system initialization)
+  let cursorY = drawDocumentHeader(doc, {
     docTypeTitle: 'Driver Settlement',
     docSubtitle: 'Driver Compensation & Trip Earnings Statement',
     docNumber: settlementNumber,
@@ -59,26 +61,30 @@ export function generateDriverSettlementPdf(options: DriverSettlementPdfOptions)
   });
 
   // 2. Driver & Employer Information (Two side-by-side cards)
-  const cardWidth = (PDF_PAGE.contentWidth - 14) / 2;
-  const cardHeight = 92;
+  const cardWidth = (PDF_PAGE.contentWidth - 14) / 2; // 263pt
+  const cardHeight = 96;
+  const innerTextWidth = cardWidth - 16; // 247pt
 
   // Left Card: Driver Profile
-  drawCardBox(doc, PDF_PAGE.marginLeft, startY, cardWidth, cardHeight, 'Driver Profile & Pay Agreement', PDF_COLORS.indigo);
-  let cy = startY + 22;
+  let leftCy = drawCardBox(doc, PDF_PAGE.marginLeft, cursorY, cardWidth, cardHeight, 'Driver Profile & Pay Agreement', PDF_COLORS.indigo);
+  
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(...PDF_COLORS.primaryDark);
-  doc.text(driver?.full_name || 'Assigned Driver', PDF_PAGE.marginLeft + 8, cy);
+  const driverName = truncateText(doc, driver?.full_name || 'Assigned Driver', innerTextWidth);
+  doc.text(driverName, PDF_PAGE.marginLeft + PDF_CARD.contentPaddingX, leftCy);
 
-  cy += 12;
+  leftCy += PDF_CARD.lineSpacingComfortable;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(...PDF_COLORS.slate600);
-  doc.text(`Phone: ${driver?.phone || '—'} | Email: ${driver?.email || '—'}`, PDF_PAGE.marginLeft + 8, cy);
-  cy += 10;
-  doc.text(`Driver Status: ${(driver?.status || 'available').toUpperCase()}`, PDF_PAGE.marginLeft + 8, cy);
-  cy += 10;
+  const contactText = `Phone: ${driver?.phone || '—'}  |  Email: ${driver?.email || '—'}`;
+  doc.text(truncateText(doc, contactText, innerTextWidth), PDF_PAGE.marginLeft + PDF_CARD.contentPaddingX, leftCy);
 
+  leftCy += PDF_CARD.lineSpacingStandard;
+  doc.text(`Driver Status: ${(driver?.status || 'available').toUpperCase()}`, PDF_PAGE.marginLeft + PDF_CARD.contentPaddingX, leftCy);
+
+  leftCy += PDF_CARD.lineSpacingStandard;
   // Pay Structure formatting
   const payType = driver?.pay_type || 'percentage_gross';
   const payRate = driver?.pay_rate || 25;
@@ -86,32 +92,43 @@ export function generateDriverSettlementPdf(options: DriverSettlementPdfOptions)
   if (payType === 'per_mile') payRateLabel = `$${payRate.toFixed(2)} per Mile (Loaded + DH)`;
   if (payType === 'flat_rate') payRateLabel = `${formatCurrency(payRate)} Flat per Load`;
 
-  doc.text(`Compensation Agreement: ${payRateLabel}`, PDF_PAGE.marginLeft + 8, cy);
-  cy += 10;
-  doc.text(`Assigned Unit: Trk #${load.truck?.truck_number || 'Unit'} (${load.equipment_type.replace('_', ' ').toUpperCase()})`, PDF_PAGE.marginLeft + 8, cy);
+  const compText = `Compensation: ${payRateLabel}`;
+  doc.text(truncateText(doc, compText, innerTextWidth), PDF_PAGE.marginLeft + PDF_CARD.contentPaddingX, leftCy);
+
+  leftCy += PDF_CARD.lineSpacingStandard;
+  const unitText = `Assigned Unit: Trk #${load.truck?.truck_number || 'Unit'} (${load.equipment_type.replace('_', ' ').toUpperCase()})`;
+  doc.text(truncateText(doc, unitText, innerTextWidth), PDF_PAGE.marginLeft + PDF_CARD.contentPaddingX, leftCy);
 
   // Right Card: Employer / Carrier Fleet
-  drawCardBox(doc, PDF_PAGE.marginLeft + cardWidth + 14, startY, cardWidth, cardHeight, 'Carrier Fleet / Employer', PDF_COLORS.slate800);
-  cy = startY + 22;
-  const rx = PDF_PAGE.marginLeft + cardWidth + 22;
+  const rightX = PDF_PAGE.marginLeft + cardWidth + 14;
+  let rightCy = drawCardBox(doc, rightX, cursorY, cardWidth, cardHeight, 'Carrier Fleet / Employer', PDF_COLORS.slate800);
+
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(...PDF_COLORS.primaryDark);
-  doc.text(load.client?.company_name || orgName, rx, cy);
+  const employerName = truncateText(doc, load.client?.company_name || orgName, innerTextWidth);
+  doc.text(employerName, rightX + PDF_CARD.contentPaddingX, rightCy);
 
-  cy += 12;
+  rightCy += PDF_CARD.lineSpacingComfortable;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(...PDF_COLORS.slate600);
-  doc.text(`Dispatch Contact: ${load.client?.contact_name || 'Fleet Manager'}`, rx, cy);
-  cy += 10;
-  doc.text(`Phone: ${load.client?.contact_phone || '—'} | Email: ${load.client?.contact_email || '—'}`, rx, cy);
-  cy += 10;
-  doc.text(`Settlement Date: ${formatInTimezone(new Date().toISOString(), operationalTimezone, { includeTime: false })}`, rx, cy);
-  cy += 10;
-  doc.text(`Settlement Ref: ${settlementNumber}`, rx, cy);
+  const dispatchContact = `Dispatch Contact: ${load.client?.contact_name || 'Fleet Manager'}`;
+  doc.text(truncateText(doc, dispatchContact, innerTextWidth), rightX + PDF_CARD.contentPaddingX, rightCy);
 
-  startY += cardHeight + 10;
+  rightCy += PDF_CARD.lineSpacingStandard;
+  const employerContact = `Phone: ${load.client?.contact_phone || '—'}  |  Email: ${load.client?.contact_email || '—'}`;
+  doc.text(truncateText(doc, employerContact, innerTextWidth), rightX + PDF_CARD.contentPaddingX, rightCy);
+
+  rightCy += PDF_CARD.lineSpacingStandard;
+  doc.text(`Settlement Date: ${formatInTimezone(new Date().toISOString(), operationalTimezone, { includeTime: false })}`, rightX + PDF_CARD.contentPaddingX, rightCy);
+
+  rightCy += PDF_CARD.lineSpacingStandard;
+  const refText = `Settlement Ref: ${settlementNumber}`;
+  doc.text(truncateText(doc, refText, innerTextWidth), rightX + PDF_CARD.contentPaddingX, rightCy);
+
+  // Advance cursor past cards with clean margin
+  cursorY += cardHeight + 12;
 
   // 3. Dispatched Trip Summary Table
   const loadedMiles = load.loaded_miles || 0;
@@ -122,7 +139,7 @@ export function generateDriverSettlementPdf(options: DriverSettlementPdfOptions)
   const tripData = [
     [
       load.load_number,
-      `${load.origin_city}, ${load.origin_state} to ${load.dest_city}, ${load.dest_state}`,
+      `${load.origin_city}, ${load.origin_state} -> ${load.dest_city}, ${load.dest_state}`,
       `${formatMiles(loadedMiles)} loaded + ${formatMiles(deadheadMiles)} DH (${formatMiles(totalMiles)} total)`,
       formatInTimezone(load.delivery_datetime, operationalTimezone, { includeTime: false }),
       formatCurrency(grossRate),
@@ -130,28 +147,38 @@ export function generateDriverSettlementPdf(options: DriverSettlementPdfOptions)
   ];
 
   autoTable(doc, {
-    startY,
-    head: [['Load #', 'Trip Lane (Origin ➔ Destination)', 'Mileage Breakdown', 'Delivery Date', 'Gross Freight']],
+    startY: cursorY,
+    head: [['Load #', 'Trip Lane (Origin -> Destination)', 'Mileage Breakdown', 'Delivery Date', 'Gross Freight']],
     body: tripData,
     theme: 'grid',
+    styles: {
+      overflow: 'linebreak',
+      font: 'helvetica',
+      lineColor: PDF_COLORS.slate200,
+      lineWidth: 0.5,
+      cellPadding: { top: 5, right: 4, bottom: 5, left: 4 },
+      valign: 'middle',
+    },
     headStyles: {
       fillColor: PDF_COLORS.slate800,
       textColor: 255,
       fontStyle: 'bold',
-      fontSize: 8,
-      cellPadding: 5,
+      fontSize: 7.5,
+      cellPadding: { top: 5, right: 4, bottom: 5, left: 4 },
+      valign: 'middle',
     },
     bodyStyles: {
-      fontSize: 8,
+      fontSize: 7.5,
       textColor: PDF_COLORS.primaryDark,
-      cellPadding: 5,
+      cellPadding: { top: 5, right: 4, bottom: 5, left: 4 },
+      valign: 'middle',
     },
     columnStyles: {
       0: { cellWidth: 70, fontStyle: 'bold' },
-      1: { cellWidth: 160 },
-      2: { cellWidth: 140 },
+      1: { cellWidth: 170 },
+      2: { cellWidth: 135 },
       3: { cellWidth: 80 },
-      4: { cellWidth: 90, halign: 'right', fontStyle: 'bold' },
+      4: { cellWidth: 85, halign: 'right', fontStyle: 'bold' },
     },
     alternateRowStyles: {
       fillColor: PDF_COLORS.slate50,
@@ -159,7 +186,7 @@ export function generateDriverSettlementPdf(options: DriverSettlementPdfOptions)
     margin: { left: PDF_PAGE.marginLeft, right: PDF_PAGE.marginLeft },
   });
 
-  startY = (doc as any).lastAutoTable.finalY + 12;
+  cursorY = (doc as any).lastAutoTable.finalY + 12;
 
   // 4. Detailed Driver Earnings Breakdown
   // Calculate base compensation: use load.driver_pay if set, otherwise estimateDriverPay
@@ -168,18 +195,18 @@ export function generateDriverSettlementPdf(options: DriverSettlementPdfOptions)
     calculatedBaseDriverPay = estimateDriverPay(payType, payRate, grossRate, loadedMiles, deadheadMiles);
   }
 
-  // Calculate driver accessorial reimbursements (e.g. lumper paid by driver, detention share)
+  // Calculate driver accessorial reimbursements (e.g. lumper paid by driver, scale tickets)
   const driverReimbursements = accessorials.filter(
     (a) => a.load_id === load.id && (a.payment_method === 'driver_cash' || a.type === 'lumper' || a.type === 'scale_tickets')
   );
   const totalReimbursements = driverReimbursements.reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
 
-  // Other driver deductions if recorded on the load
-  const fuelExpenseDeduction = 0; // Fuel is generally company expense unless agreed
+  // Deductions (if any)
+  const fuelExpenseDeduction = 0;
   const otherDeductions = Number(load.other_expenses || 0) > 0 && load.other_expenses !== undefined ? 0 : 0;
+  const totalDeductions = fuelExpenseDeduction + otherDeductions;
 
   const totalGrossEarnings = calculatedBaseDriverPay + totalReimbursements;
-  const totalDeductions = fuelExpenseDeduction + otherDeductions;
   const netSettlementPayout = totalGrossEarnings - totalDeductions;
 
   const earningsRows: (string | number)[][] = [
@@ -213,74 +240,99 @@ export function generateDriverSettlementPdf(options: DriverSettlementPdfOptions)
   ]);
 
   autoTable(doc, {
-    startY,
+    startY: cursorY,
     head: [['Earnings Item', 'Calculation Basis / Notes', 'Net Amount (USD)']],
     body: earningsRows,
     theme: 'grid',
+    styles: {
+      overflow: 'linebreak',
+      font: 'helvetica',
+      lineColor: PDF_COLORS.slate200,
+      lineWidth: 0.5,
+      cellPadding: { top: 5, right: 5, bottom: 5, left: 5 },
+      valign: 'middle',
+    },
     headStyles: {
       fillColor: PDF_COLORS.indigo,
       textColor: 255,
       fontStyle: 'bold',
-      fontSize: 8,
-      cellPadding: 5,
+      fontSize: 7.5,
+      cellPadding: { top: 5, right: 5, bottom: 5, left: 5 },
+      valign: 'middle',
     },
     bodyStyles: {
-      fontSize: 8,
+      fontSize: 7.5,
       textColor: PDF_COLORS.primaryDark,
-      cellPadding: 5.5,
+      cellPadding: { top: 5, right: 5, bottom: 5, left: 5 },
+      valign: 'middle',
     },
     columnStyles: {
-      0: { cellWidth: 160, fontStyle: 'bold' },
-      1: { cellWidth: 270 },
+      0: { cellWidth: 150, fontStyle: 'bold' },
+      1: { cellWidth: 280 },
       2: { cellWidth: 110, halign: 'right', fontStyle: 'bold' },
     },
     alternateRowStyles: {
       fillColor: PDF_COLORS.slate50,
     },
+    didParseCell: (data) => {
+      // Highlight the total row
+      if (data.row.index === earningsRows.length - 1) {
+        data.cell.styles.fontStyle = 'bold';
+        data.cell.styles.fillColor = PDF_COLORS.indigoLight;
+        data.cell.styles.textColor = PDF_COLORS.indigo;
+      }
+    },
     margin: { left: PDF_PAGE.marginLeft, right: PDF_PAGE.marginLeft },
   });
 
-  startY = (doc as any).lastAutoTable.finalY + 12;
+  cursorY = (doc as any).lastAutoTable.finalY + 12;
 
-  // 5. Net Payout Summary Highlight Card
-  drawCardBox(doc, PDF_PAGE.marginLeft, startY, PDF_PAGE.contentWidth, 48, 'Net Settlement Summary', PDF_COLORS.slate800);
-  let hy = startY + 22;
+  // 5. Net Payout Summary Highlight Card & Multi-Page Safety Check
+  // Check if Net Summary Card (46pt) + Signatures (52pt) fit on current page
+  if (cursorY + 114 > PDF_PAGE.marginBottom) {
+    doc.addPage();
+    cursorY = PDF_PAGE.marginTop + 14;
+  }
+
+  drawCardBox(doc, PDF_PAGE.marginLeft, cursorY, PDF_PAGE.contentWidth, 46, 'Net Settlement Summary', PDF_COLORS.slate800);
+  const summaryCy = cursorY + 20;
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(...PDF_COLORS.slate600);
-  doc.text(`Base Pay: ${formatCurrency(calculatedBaseDriverPay)}`, PDF_PAGE.marginLeft + 10, hy + 10);
-  doc.text(`+ Reimbursements: ${formatCurrency(totalReimbursements)}`, PDF_PAGE.marginLeft + 150, hy + 10);
-  doc.text(`- Deductions: ${formatCurrency(totalDeductions)}`, PDF_PAGE.marginLeft + 300, hy + 10);
+  doc.text(`Base Pay: ${formatCurrency(calculatedBaseDriverPay)}`, PDF_PAGE.marginLeft + 12, summaryCy + 14);
+  doc.text(`+ Reimbursements: ${formatCurrency(totalReimbursements)}`, PDF_PAGE.marginLeft + 140, summaryCy + 14);
+  doc.text(`- Deductions: ${formatCurrency(totalDeductions)}`, PDF_PAGE.marginLeft + 275, summaryCy + 14);
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
+  doc.setFontSize(9.5);
   doc.setTextColor(...PDF_COLORS.indigo);
-  doc.text(`NET PAYOUT: ${formatCurrency(netSettlementPayout)}`, PDF_PAGE.marginRight - 10, hy + 10, { align: 'right' });
+  doc.text(`NET PAYOUT: ${formatCurrency(netSettlementPayout)}`, PDF_PAGE.marginRight - 12, summaryCy + 14, { align: 'right' });
 
-  startY += 58;
+  cursorY += 46 + 12;
 
   // 6. Driver Acknowledgement & Signatures
   const sigBoxWidth = (PDF_PAGE.contentWidth - 14) / 2;
   const sigBoxHeight = 52;
 
   // Left: Driver Sign-off
-  drawCardBox(doc, PDF_PAGE.marginLeft, startY, sigBoxWidth, sigBoxHeight, 'Driver Acceptance');
+  drawCardBox(doc, PDF_PAGE.marginLeft, cursorY, sigBoxWidth, sigBoxHeight, 'Driver Acceptance');
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(...PDF_COLORS.slate600);
-  doc.text('Driver Signature: _______________________________', PDF_PAGE.marginLeft + 8, startY + 34);
-  doc.text('Date: ________________________', PDF_PAGE.marginLeft + 8, startY + 46);
+  doc.text('Driver Signature: _______________________________', PDF_PAGE.marginLeft + 8, cursorY + 33);
+  doc.text('Date: ________________________', PDF_PAGE.marginLeft + 8, cursorY + 45);
 
   // Right: Carrier Approval
-  drawCardBox(doc, PDF_PAGE.marginLeft + sigBoxWidth + 14, startY, sigBoxWidth, sigBoxHeight, 'Authorized Dispatch / Payroll');
-  doc.text('Authorized By: _________________________________', PDF_PAGE.marginLeft + sigBoxWidth + 22, startY + 34);
-  doc.text(`Date: ${formatInTimezone(new Date().toISOString(), operationalTimezone, { includeTime: false })}`, PDF_PAGE.marginLeft + sigBoxWidth + 22, startY + 46);
+  const sigRightX = PDF_PAGE.marginLeft + sigBoxWidth + 14;
+  drawCardBox(doc, sigRightX, cursorY, sigBoxWidth, sigBoxHeight, 'Authorized Dispatch / Payroll');
+  doc.text('Authorized By: _________________________________', sigRightX + 8, cursorY + 33);
+  doc.text(`Date: ${formatInTimezone(new Date().toISOString(), operationalTimezone, { includeTime: false })}`, sigRightX + 8, cursorY + 45);
 
   // 7. Add Multi-Page Footers
   addDocumentFooters(doc, {
     documentRef: `Settlement-${settlementNumber}`,
-    confidentialText: 'Driver Compensation & Settlement Agreement',
+    confidentialText: 'Driver Compensation & Settlement Statement',
   });
 
   return doc;

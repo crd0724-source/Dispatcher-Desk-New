@@ -10,6 +10,7 @@ import {
   drawCardBox,
   PDF_COLORS,
   PDF_PAGE,
+  PDF_CARD,
   formatCurrency,
   formatMiles,
   formatRPM,
@@ -54,38 +55,36 @@ export function generateRateConfirmationPdf(options: RateConfirmationPdfOptions)
 
   // 2. Carrier & Broker Entity Section (Two side-by-side cards)
   const cardWidth = (PDF_PAGE.contentWidth - 14) / 2;
-  const cardHeight = 88;
+  const cardHeight = 92;
 
   // Left Card: Carrier / Client
-  drawCardBox(doc, PDF_PAGE.marginLeft, startY, cardWidth, cardHeight, 'Carrier / Client Partner', PDF_COLORS.indigo);
-  let cy = startY + 22;
+  let leftCy = drawCardBox(doc, PDF_PAGE.marginLeft, startY, cardWidth, cardHeight, 'Carrier / Client Partner', PDF_COLORS.indigo);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(...PDF_COLORS.primaryDark);
-  doc.text(load.client?.company_name || 'Fleet Equipment Dispatched', PDF_PAGE.marginLeft + 8, cy);
+  doc.text(load.client?.company_name || 'Fleet Equipment Dispatched', PDF_PAGE.marginLeft + PDF_CARD.contentPaddingX, leftCy);
 
-  cy += 12;
+  leftCy += PDF_CARD.lineSpacingComfortable;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(...PDF_COLORS.slate600);
-  doc.text(`Contact: ${load.client?.contact_name || 'Operations Desk'}`, PDF_PAGE.marginLeft + 8, cy);
-  cy += 10;
-  doc.text(`Phone: ${load.client?.contact_phone || '—'}`, PDF_PAGE.marginLeft + 8, cy);
-  cy += 10;
-  doc.text(`Email: ${load.client?.contact_email || '—'}`, PDF_PAGE.marginLeft + 8, cy);
-  cy += 10;
-  doc.text(`Equipment Type: ${load.equipment_type.replace('_', ' ').toUpperCase()}`, PDF_PAGE.marginLeft + 8, cy);
+  doc.text(`Contact: ${load.client?.contact_name || 'Operations Desk'}`, PDF_PAGE.marginLeft + PDF_CARD.contentPaddingX, leftCy);
+  leftCy += PDF_CARD.lineSpacingStandard;
+  doc.text(`Phone: ${load.client?.contact_phone || '—'}`, PDF_PAGE.marginLeft + PDF_CARD.contentPaddingX, leftCy);
+  leftCy += PDF_CARD.lineSpacingStandard;
+  doc.text(`Email: ${load.client?.contact_email || '—'}`, PDF_PAGE.marginLeft + PDF_CARD.contentPaddingX, leftCy);
+  leftCy += PDF_CARD.lineSpacingStandard;
+  doc.text(`Equipment Type: ${load.equipment_type.replace('_', ' ').toUpperCase()}`, PDF_PAGE.marginLeft + PDF_CARD.contentPaddingX, leftCy);
 
   // Right Card: Broker / Shipper
-  drawCardBox(doc, PDF_PAGE.marginLeft + cardWidth + 14, startY, cardWidth, cardHeight, 'Broker / Freight Customer', PDF_COLORS.slate800);
-  cy = startY + 22;
-  const rx = PDF_PAGE.marginLeft + cardWidth + 22;
+  const rx = PDF_PAGE.marginLeft + cardWidth + 14;
+  let rightCy = drawCardBox(doc, rx, startY, cardWidth, cardHeight, 'Broker / Freight Customer', PDF_COLORS.slate800);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(...PDF_COLORS.primaryDark);
-  doc.text(load.broker?.company_name || 'Direct Broker / Customer', rx, cy);
+  doc.text(load.broker?.company_name || 'Direct Broker / Customer', rx + PDF_CARD.contentPaddingX, rightCy);
 
-  cy += 12;
+  rightCy += PDF_CARD.lineSpacingComfortable;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(...PDF_COLORS.slate600);
@@ -93,28 +92,28 @@ export function generateRateConfirmationPdf(options: RateConfirmationPdfOptions)
     load.broker?.mc_number ? `MC: ${load.broker.mc_number}` : null,
     load.broker?.dot_number ? `DOT: ${load.broker.dot_number}` : null,
   ].filter(Boolean).join(' • ');
-  doc.text(brokerAuth || 'Authority: Broker On File', rx, cy);
-  cy += 10;
-  doc.text(`Contact Person: ${load.broker?.contact_name || 'Brokerage Representative'}`, rx, cy);
-  cy += 10;
-  doc.text(`Phone: ${load.broker?.contact_phone || '—'} | Email: ${load.broker?.contact_email || '—'}`, rx, cy);
-  cy += 10;
-  doc.text(`Payment Terms: ${load.broker?.payment_terms_days ? `${load.broker.payment_terms_days} Days Net` : 'Standard Net 30'}`, rx, cy);
+  doc.text(brokerAuth || 'Authority: Broker On File', rx + PDF_CARD.contentPaddingX, rightCy);
+  rightCy += PDF_CARD.lineSpacingStandard;
+  doc.text(`Contact Person: ${load.broker?.contact_name || 'Brokerage Representative'}`, rx + PDF_CARD.contentPaddingX, rightCy);
+  rightCy += PDF_CARD.lineSpacingStandard;
+  doc.text(`Phone: ${load.broker?.contact_phone || '—'} | Email: ${load.broker?.contact_email || '—'}`, rx + PDF_CARD.contentPaddingX, rightCy);
+  rightCy += PDF_CARD.lineSpacingStandard;
+  doc.text(`Payment Terms: ${load.broker?.payment_terms_days ? `${load.broker.payment_terms_days} Days Net` : 'Standard Net 30'}`, rx + PDF_CARD.contentPaddingX, rightCy);
 
   startY += cardHeight + 10;
 
   // 3. Equipment, Driver & Load Specs Strip
-  drawCardBox(doc, PDF_PAGE.marginLeft, startY, PDF_PAGE.contentWidth, 54, 'Assigned Equipment & Cargo Specifications', PDF_COLORS.slate700);
-  let ey = startY + 24;
+  const specsCardHeight = 56;
+  let ey = drawCardBox(doc, PDF_PAGE.marginLeft, startY, PDF_PAGE.contentWidth, specsCardHeight, 'Assigned Equipment & Cargo Specifications', PDF_COLORS.slate700);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
 
   // Col 1: Equipment
   doc.setTextColor(...PDF_COLORS.slate500);
-  doc.text('EQUIPMENT TYPE:', PDF_PAGE.marginLeft + 8, ey);
+  doc.text('EQUIPMENT TYPE:', PDF_PAGE.marginLeft + PDF_CARD.contentPaddingX, ey);
   doc.setTextColor(...PDF_COLORS.primaryDark);
   doc.setFont('helvetica', 'bold');
-  doc.text(load.equipment_type.replace('_', ' ').toUpperCase(), PDF_PAGE.marginLeft + 8, ey + 10);
+  doc.text(load.equipment_type.replace('_', ' ').toUpperCase(), PDF_PAGE.marginLeft + PDF_CARD.contentPaddingX, ey + 10);
 
   // Col 2: Truck & VIN
   const col2X = PDF_PAGE.marginLeft + 130;
@@ -149,7 +148,7 @@ export function generateRateConfirmationPdf(options: RateConfirmationPdfOptions)
   const weight = load.weight_lbs ? `${load.weight_lbs.toLocaleString()} lbs` : 'Standard Max';
   doc.text(`${commodity} (${weight})`, col4X, ey + 10);
 
-  startY += 62;
+  startY += specsCardHeight + 10;
 
   // 4. Pickup & Delivery Route Schedule Table
   const pickupTime = formatDualTime(load.pickup_datetime, operationalTimezone, dispatcherTimezone);
@@ -264,8 +263,8 @@ export function generateRateConfirmationPdf(options: RateConfirmationPdfOptions)
   startY = (doc as any).lastAutoTable.finalY + 12;
 
   // 6. Special Instructions & Check-Call Protocol
-  drawCardBox(doc, PDF_PAGE.marginLeft, startY, PDF_PAGE.contentWidth, 68, 'Operational Instructions & Dispatch Rules', PDF_COLORS.slate800);
-  let py = startY + 22;
+  const instructionsCardHeight = 68;
+  let py = drawCardBox(doc, PDF_PAGE.marginLeft, startY, PDF_PAGE.contentWidth, instructionsCardHeight, 'Operational Instructions & Dispatch Rules', PDF_COLORS.slate800);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(...PDF_COLORS.slate700);
@@ -275,21 +274,21 @@ export function generateRateConfirmationPdf(options: RateConfirmationPdfOptions)
     : 'STANDARD DISPATCH PROTOCOL: Daily check-calls required by 09:00 CST and upon arrival/departure at every facility.';
 
   const splitNotes = doc.splitTextToSize(instructionsText, PDF_PAGE.contentWidth - 16);
-  doc.text(splitNotes.slice(0, 3), PDF_PAGE.marginLeft + 8, py);
-  py += 22;
+  doc.text(splitNotes.slice(0, 3), PDF_PAGE.marginLeft + PDF_CARD.contentPaddingX, py);
+  py += 20;
 
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...PDF_COLORS.primaryDark);
-  doc.text('DETENTION & PAPERWORK CLAUSE:', PDF_PAGE.marginLeft + 8, py);
+  doc.text('DETENTION & PAPERWORK CLAUSE:', PDF_PAGE.marginLeft + PDF_CARD.contentPaddingX, py);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(...PDF_COLORS.slate600);
   doc.text(
     'Detention begins after 2 hours free time with verified timestamped check-in. Signed POD must be submitted within 24 hours of delivery.',
-    PDF_PAGE.marginLeft + 8,
+    PDF_PAGE.marginLeft + PDF_CARD.contentPaddingX,
     py + 9
   );
 
-  startY += 78;
+  startY += instructionsCardHeight + 10;
 
   // 7. Signature & Confirmation Block
   const sigBoxWidth = (PDF_PAGE.contentWidth - 14) / 2;
@@ -300,13 +299,13 @@ export function generateRateConfirmationPdf(options: RateConfirmationPdfOptions)
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(...PDF_COLORS.slate600);
-  doc.text('Signature: ____________________________________', PDF_PAGE.marginLeft + 8, startY + 34);
-  doc.text(`Date: ${new Date().toLocaleDateString()}`, PDF_PAGE.marginLeft + 8, startY + 46);
+  doc.text('Signature: ____________________________________', PDF_PAGE.marginLeft + PDF_CARD.contentPaddingX, startY + 34);
+  doc.text(`Date: ${new Date().toLocaleDateString()}`, PDF_PAGE.marginLeft + PDF_CARD.contentPaddingX, startY + 46);
 
   // Right: Carrier / Driver Acceptance
   drawCardBox(doc, PDF_PAGE.marginLeft + sigBoxWidth + 14, startY, sigBoxWidth, sigBoxHeight, 'Carrier / Driver Acceptance');
-  doc.text('Signature: ____________________________________', PDF_PAGE.marginLeft + sigBoxWidth + 22, startY + 34);
-  doc.text('Date: ________________________', PDF_PAGE.marginLeft + sigBoxWidth + 22, startY + 46);
+  doc.text('Signature: ____________________________________', PDF_PAGE.marginLeft + sigBoxWidth + 14 + PDF_CARD.contentPaddingX, startY + 34);
+  doc.text('Date: ________________________', PDF_PAGE.marginLeft + sigBoxWidth + 14 + PDF_CARD.contentPaddingX, startY + 46);
 
   // 8. Add Multi-Page Footers
   addDocumentFooters(doc, {

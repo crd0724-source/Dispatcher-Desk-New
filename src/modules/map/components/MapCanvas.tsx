@@ -17,6 +17,60 @@ import {
   Compass,
 } from 'lucide-react';
 
+// Safeguard Leaflet against uncaught "Cannot read properties of undefined (reading '_leaflet_pos')"
+// which occurs when React updates/unmounts DOM nodes during active Leaflet animations or transitions.
+if (typeof window !== 'undefined' && L && L.DomUtil) {
+  const origGetPosition = L.DomUtil.getPosition;
+  L.DomUtil.getPosition = function (el: HTMLElement | undefined | null) {
+    if (!el) return new L.Point(0, 0);
+    try {
+      return origGetPosition.call(L.DomUtil, el) || (el as any)._leaflet_pos || new L.Point(0, 0);
+    } catch {
+      return (el as any)?._leaflet_pos || new L.Point(0, 0);
+    }
+  };
+
+  const origSetPosition = L.DomUtil.setPosition;
+  L.DomUtil.setPosition = function (el: HTMLElement | undefined | null, point: L.Point) {
+    if (!el) return;
+    try {
+      origSetPosition.call(L.DomUtil, el, point);
+    } catch {
+      if (el) (el as any)._leaflet_pos = point;
+    }
+  };
+
+  if (L.Marker && (L.Marker.prototype as any)._setPos) {
+    const origMarkerSetPos = (L.Marker.prototype as any)._setPos;
+    (L.Marker.prototype as any)._setPos = function (pos: any) {
+      if (!this._icon) return;
+      try {
+        origMarkerSetPos.call(this, pos);
+      } catch {}
+    };
+  }
+
+  if (L.Marker && (L.Marker.prototype as any)._animateZoom) {
+    const origMarkerAnimate = (L.Marker.prototype as any)._animateZoom;
+    (L.Marker.prototype as any)._animateZoom = function (opt: any) {
+      if (!this._map || !this._icon) return;
+      try {
+        origMarkerAnimate.call(this, opt);
+      } catch {}
+    };
+  }
+
+  if (L.Popup && (L.Popup.prototype as any)._animateZoom) {
+    const origPopupAnimateZoom = (L.Popup.prototype as any)._animateZoom;
+    (L.Popup.prototype as any)._animateZoom = function (opt: any) {
+      if (!this._container || !this._map) return;
+      try {
+        origPopupAnimateZoom.call(this, opt);
+      } catch {}
+    };
+  }
+}
+
 interface MapCanvasProps {
   routes: MapLoadRoute[];
   selectedLoadId: string | null;
@@ -98,14 +152,26 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
 
     // Resize observer to ensure Leaflet renders correctly across layout shifts
     const resizeObserver = new ResizeObserver(() => {
-      map.invalidateSize();
+      if (mapInstanceRef.current && mapContainerRef.current) {
+        try {
+          map.invalidateSize();
+        } catch {}
+      }
     });
     resizeObserver.observe(container);
 
     return () => {
       container.removeEventListener('click', handlePopupClick);
       resizeObserver.disconnect();
-      map.remove();
+      try {
+        map.stop();
+        map.closePopup();
+        if (layerGroupRef.current) layerGroupRef.current.clearLayers();
+        if (polylineGroupRef.current) polylineGroupRef.current.clearLayers();
+        map.remove();
+      } catch (err) {
+        console.warn('Map cleanup error:', err);
+      }
       mapInstanceRef.current = null;
     };
   }, []);
@@ -114,7 +180,9 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
   useEffect(() => {
     if (!mapInstanceRef.current || !tileLayerRef.current) return;
     const map = mapInstanceRef.current;
-    tileLayerRef.current.remove();
+    try {
+      tileLayerRef.current.remove();
+    } catch {}
 
     const tileUrl = activeTileTheme === 'dark' ? DARK_TILE_URL : VOYAGER_TILE_URL;
 
@@ -142,12 +210,16 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
     });
 
     if (allPoints.length > 0) {
-      const bounds = L.latLngBounds(allPoints);
-      map.fitBounds(bounds, {
-        padding: [50, 50],
-        maxZoom: 11,
-        animate: true,
-      });
+      try {
+        const bounds = L.latLngBounds(allPoints);
+        map.fitBounds(bounds, {
+          padding: [50, 50],
+          maxZoom: 11,
+          animate: true,
+        });
+      } catch (err) {
+        console.warn('fitAllVisibleBounds error:', err);
+      }
     }
   }, [routes]);
 
@@ -159,8 +231,12 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
 
     if (!map || !markerGroup || !polyGroup) return;
 
-    markerGroup.clearLayers();
-    polyGroup.clearLayers();
+    // Safely close open popups before clearing layers to avoid race condition during animations
+    try {
+      map.closePopup();
+      markerGroup.clearLayers();
+      polyGroup.clearLayers();
+    } catch {}
 
     if (routes.length === 0) return;
 
@@ -209,8 +285,8 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
         const icon = L.divIcon({
           className: 'custom-map-stop-marker',
           html: iconHtml,
-          iconSize: [0, 0],
-          iconAnchor: [0, 0],
+          iconSize: [24, 24],
+          iconAnchor: [12, 24],
         });
 
         const popupHtml = createStopPopupHtml(stop, route.load.load_number);
@@ -220,6 +296,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
             className: 'dispatchdesk-map-popup',
             maxWidth: 300,
             closeButton: true,
+            autoPan: false, // Prevent conflicting pan animations
           })
           .addTo(markerGroup);
 
@@ -239,17 +316,21 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
     if (!selectedRoute || selectedRoute.stops.length === 0) return;
 
     const stopCoords: L.LatLngExpression[] = selectedRoute.stops.map((s) => [s.lat, s.lng]);
-    if (stopCoords.length === 1) {
-      map.flyTo(stopCoords[0], 9, { animate: true });
-    } else if (stopCoords.length > 1) {
-      const bounds = L.latLngBounds(stopCoords);
-      map.fitBounds(bounds, {
-        padding: [60, 60],
-        maxZoom: 10,
-        animate: true,
-      });
+    try {
+      if (stopCoords.length === 1) {
+        map.flyTo(stopCoords[0], 9, { animate: true });
+      } else if (stopCoords.length > 1) {
+        const bounds = L.latLngBounds(stopCoords);
+        map.fitBounds(bounds, {
+          padding: [60, 60],
+          maxZoom: 10,
+          animate: true,
+        });
+      }
+    } catch (err) {
+      console.warn('Map zoom/pan error:', err);
     }
-  }, [selectedLoadId]);
+  }, [selectedLoadId, routes]);
 
   return (
     <div id="dispatch-map-canvas-container" className="relative w-full h-full min-h-[350px] bg-slate-950 overflow-hidden select-none">

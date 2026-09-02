@@ -85,6 +85,29 @@ export const AIAssistantView: React.FC = () => {
   const [copiedFull, setCopiedFull] = useState<boolean>(false);
   const [copiedSubject, setCopiedSubject] = useState<boolean>(false);
   const [copiedDraft, setCopiedDraft] = useState<boolean>(false);
+  const [copiedActionIndex, setCopiedActionIndex] = useState<number | null>(null);
+
+  // Safe clipboard helper for cross-browser and iframe compatibility
+  const safeCopyToClipboard = async (text: string, onSuccess: () => void) => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.opacity = '0';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      onSuccess();
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
+    }
+  };
 
   // Task Creation Modal for AI suggested tasks (human confirmation)
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
@@ -207,28 +230,34 @@ export const AIAssistantView: React.FC = () => {
     const textToCopy = isEditingDraft
       ? editableDraftContent
       : activeResponse.markdownContent || activeResponse.content;
-    navigator.clipboard.writeText(textToCopy);
-    setCopiedFull(true);
-    setTimeout(() => setCopiedFull(false), 2000);
+    safeCopyToClipboard(textToCopy, () => {
+      setCopiedFull(true);
+      setTimeout(() => setCopiedFull(false), 2000);
+    });
   };
 
   // Copy Subject
   const handleCopySubject = () => {
     if (!activeResponse?.subject) return;
-    navigator.clipboard.writeText(activeResponse.subject);
-    setCopiedSubject(true);
-    setTimeout(() => setCopiedSubject(false), 2000);
+    safeCopyToClipboard(activeResponse.subject, () => {
+      setCopiedSubject(true);
+      setTimeout(() => setCopiedSubject(false), 2000);
+    });
   };
 
   // Copy Draft Body
   const handleCopyDraft = () => {
-    navigator.clipboard.writeText(editableDraftContent);
-    setCopiedDraft(true);
-    setTimeout(() => setCopiedDraft(false), 2000);
+    safeCopyToClipboard(editableDraftContent, () => {
+      setCopiedDraft(true);
+      setTimeout(() => setCopiedDraft(false), 2000);
+    });
   };
 
   // Handle Suggested Action Click
-  const handleSuggestedAction = (actionItem: { label: string; action: string; payload?: any }) => {
+  const handleSuggestedAction = (
+    actionItem: { label: string; action: string; payload?: any },
+    actionIndex?: number
+  ) => {
     if (actionItem.action === 'create_task') {
       setTaskModalData({
         title: actionItem.payload?.title,
@@ -247,9 +276,30 @@ export const AIAssistantView: React.FC = () => {
         actionItem.payload?.loadId
       );
     } else if (actionItem.action === 'copy_clipboard') {
-      navigator.clipboard.writeText(actionItem.payload?.text || '');
-      setCopiedFull(true);
-      setTimeout(() => setCopiedFull(false), 2000);
+      const isBody =
+        actionItem.label?.toLowerCase().includes('body') ||
+        actionItem.label?.toLowerCase().includes('draft') ||
+        actionItem.label?.toLowerCase().includes('message');
+      const isSubject = actionItem.label?.toLowerCase().includes('subject');
+
+      let textToCopy = actionItem.payload?.text;
+      if (!textToCopy) {
+        if (isSubject && activeResponse?.subject) {
+          textToCopy = activeResponse.subject;
+        } else if (isBody && (editableDraftContent || activeResponse?.content)) {
+          textToCopy = editableDraftContent || activeResponse?.content || '';
+        } else {
+          textToCopy = activeResponse?.markdownContent || activeResponse?.content || '';
+        }
+      }
+      safeCopyToClipboard(textToCopy, () => {
+        if (actionIndex !== undefined) {
+          setCopiedActionIndex(actionIndex);
+          setTimeout(() => setCopiedActionIndex(null), 2500);
+        }
+        setCopiedFull(true);
+        setTimeout(() => setCopiedFull(false), 2000);
+      });
     }
   };
 
@@ -695,26 +745,31 @@ export const AIAssistantView: React.FC = () => {
                 </span>
               </div>
 
-              <div className="flex flex-wrap gap-2 pt-1">
+              <div className="flex items-center gap-2 overflow-x-auto pb-1.5 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-900/40 flex-nowrap w-full pt-1">
                 {activeResponse.suggestedActions.map((actionItem, idx) => {
                   const isCreateTask = actionItem.action === 'create_task';
+                  const isCopied = copiedActionIndex === idx;
                   return (
                     <button
                       key={idx}
                       type="button"
-                      onClick={() => handleSuggestedAction(actionItem)}
-                      className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-xs ${
+                      onClick={() => handleSuggestedAction(actionItem, idx)}
+                      className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-all cursor-pointer shadow-xs ${
                         isCreateTask
                           ? 'bg-violet-600/90 hover:bg-violet-600 text-white border border-violet-500/50 hover:border-violet-400'
+                          : isCopied
+                          ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/80'
                           : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600'
                       }`}
                     >
                       {isCreateTask ? (
                         <Plus className="w-3.5 h-3.5 text-violet-200" />
+                      ) : isCopied ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
                       ) : (
                         <Sparkles className="w-3 h-3 text-indigo-400" />
                       )}
-                      <span>{actionItem.label}</span>
+                      <span>{isCopied ? 'Copied to Clipboard!' : actionItem.label}</span>
                     </button>
                   );
                 })}

@@ -3,6 +3,8 @@
 @layer base {
   html {
     scrollbar-gutter: stable;
+    scrollbar-color: #334155 #090d16;
+    scrollbar-width: thin;
   }
 
   body {
@@ -12,22 +14,30 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     overflow-x: hidden;
+    scrollbar-color: #334155 #090d16;
+    scrollbar-width: thin;
   }
 
-  /* Refined dark mode scrollbars */
+  * {
+    scrollbar-color: #334155 #090d16;
+    scrollbar-width: thin;
+  }
+
+  /* Refined dark mode scrollbars for desktop & all containers */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
   }
   ::-webkit-scrollbar-track {
     background: #090d16;
   }
   ::-webkit-scrollbar-thumb {
-    background: #1e293b;
+    background: #334155;
     border-radius: 9999px;
+    border: 1px solid #090d16;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #334155;
+    background: #475569;
   }
 }
 

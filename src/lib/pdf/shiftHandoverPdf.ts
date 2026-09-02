@@ -12,6 +12,7 @@ import {
   drawCardBox,
   PDF_COLORS,
   PDF_PAGE,
+  PDF_CARD,
   formatCurrency,
   formatMiles,
   formatInTimezone,
@@ -51,7 +52,7 @@ export interface ShiftHandoverPdfOptions {
 export function generateShiftHandoverPdf(options: ShiftHandoverPdfOptions): jsPDF {
   const {
     organization,
-    shiftName = 'US Day Shift ➔ India Night Shift',
+    shiftName = 'US Day Shift -> India Night Shift',
     snapshotTimestamp = new Date().toISOString(),
     dispatcherName = 'DispatcherDesk Lead',
     activeLoads = [],
@@ -123,7 +124,7 @@ export function generateShiftHandoverPdf(options: ShiftHandoverPdfOptions): jsPD
 
   const loadRows = activeLoads.map((l) => {
     const truckDrv = `${l.truck?.truck_number ? `Trk #${l.truck.truck_number}` : 'Unassigned'} / ${l.driver?.full_name || 'No Driver'}`;
-    const route = `${l.origin_city}, ${l.origin_state} ➔ ${l.dest_city}, ${l.dest_state}`;
+    const route = `${l.origin_city}, ${l.origin_state} -> ${l.dest_city}, ${l.dest_state}`;
     const puTime = l.pickup_datetime ? formatInTimezone(l.pickup_datetime, operationalTimezone, { includeDate: true, includeTime: true }) : 'TBD';
     const delTime = l.delivery_datetime ? formatInTimezone(l.delivery_datetime, operationalTimezone, { includeDate: true, includeTime: true }) : 'TBD';
     
@@ -144,7 +145,7 @@ export function generateShiftHandoverPdf(options: ShiftHandoverPdfOptions): jsPD
 
   autoTable(doc, {
     startY,
-    head: [['Load #', 'Carrier Client', 'Truck / Driver', 'Route (Origin ➔ Dest)', 'Stage', 'Schedule (Ops TZ)', 'Gross Rate']],
+    head: [['Load #', 'Carrier Client', 'Truck / Driver', 'Route (Origin -> Dest)', 'Stage', 'Schedule (Ops TZ)', 'Gross Rate']],
     body: loadRows,
     theme: 'grid',
     headStyles: {
@@ -439,12 +440,12 @@ export function generateShiftHandoverPdf(options: ShiftHandoverPdfOptions): jsPD
   }
 
   // 9. Sign-off & Verification Card
-  drawCardBox(doc, PDF_PAGE.marginLeft, startY, PDF_PAGE.contentWidth, 42, 'Shift Handover Dispatcher Verification');
+  let signCy = drawCardBox(doc, PDF_PAGE.marginLeft, startY, PDF_PAGE.contentWidth, 42, 'Shift Handover Dispatcher Verification');
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(...PDF_COLORS.slate600);
-  doc.text(`Outgoing Lead Dispatcher: ${dispatcherName}`, PDF_PAGE.marginLeft + 8, startY + 28);
-  doc.text('Incoming Shift Receiver: ____________________________________', PDF_PAGE.marginLeft + 260, startY + 28);
+  doc.text(`Outgoing Lead Dispatcher: ${dispatcherName}`, PDF_PAGE.marginLeft + PDF_CARD.contentPaddingX, signCy + 2);
+  doc.text('Incoming Shift Receiver: ____________________________________', PDF_PAGE.marginLeft + 260, signCy + 2);
 
   // 10. Add Multi-Page Footers
   addDocumentFooters(doc, {

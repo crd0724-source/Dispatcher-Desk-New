@@ -56,12 +56,26 @@ export const PDF_PAGE = {
  * Creates a standard jsPDF instance initialized with US Letter portrait geometry
  */
 export function createStandardPdf(): jsPDF {
-  return new jsPDF({
+  const JsPdfConstructor = (jsPDF as any).jsPDF || jsPDF;
+  return new JsPdfConstructor({
     orientation: 'portrait',
     unit: 'pt',
     format: 'letter',
     compress: true,
   });
+}
+
+/**
+ * Helper to truncate text to fit within a given point width in jsPDF
+ */
+export function truncateText(doc: jsPDF, text: string, maxWidth: number): string {
+  if (!text) return '';
+  if (doc.getTextWidth(text) <= maxWidth) return text;
+  let truncated = text;
+  while (truncated.length > 0 && doc.getTextWidth(truncated + '…') > maxWidth) {
+    truncated = truncated.slice(0, -1);
+  }
+  return truncated.length > 0 ? truncated + '…' : '';
 }
 
 /**
@@ -93,74 +107,90 @@ export function drawDocumentHeader(
 
   let y = PDF_PAGE.marginTop;
 
-  // Background Accent Brand Top Bar
+  // Background Accent Brand Top Bar (Row 0: Y = 36, height = 3.5)
   doc.setFillColor(...PDF_COLORS.indigo);
-  doc.rect(PDF_PAGE.marginLeft, y, PDF_PAGE.contentWidth, 4, 'F');
-  y += 14;
+  doc.rect(PDF_PAGE.marginLeft, y, PDF_PAGE.contentWidth, 3.5, 'F');
+  y += 12; // y becomes 48
 
-  // DispatchDesk Brand Tag + Org Name
+  // Compute right column widths to prevent left-side text from colliding
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11.5);
+  const titleWidth = doc.getTextWidth(docTypeTitle.toUpperCase());
+
+  doc.setFontSize(10);
+  const numberWidth = docNumber ? doc.getTextWidth(docNumber) : 0;
+
+  const dualTime = formatDualTime(generatedAt, operationalTimezone, dispatcherTimezone);
+  const timestampText = `Generated: ${dualTime.primary} (${dualTime.secondary})`;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  const timeWidth = doc.getTextWidth(timestampText);
+
+  const rightBlockWidth = Math.max(titleWidth, numberWidth, timeWidth) + 14;
+  const maxLeftWidth = PDF_PAGE.contentWidth - rightBlockWidth - 10;
+
+  // --- ROW 1: (Y = 48 + 9 = 57) ---
+  // Left: DispatchDesk Brand Tag (Width 84, Height 15)
   doc.setFillColor(...PDF_COLORS.slate800);
-  doc.roundedRect(PDF_PAGE.marginLeft, y - 2, 90, 16, 2, 2, 'F');
+  doc.roundedRect(PDF_PAGE.marginLeft, y - 2, 84, 15, 2, 2, 'F');
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  doc.text('DISPATCHERDESK', PDF_PAGE.marginLeft + 6, y + 9);
+  doc.setFontSize(7.5);
+  doc.text('DISPATCHERDESK', PDF_PAGE.marginLeft + 5, y + 8.5);
 
-  // Organization Name
+  // Left: Organization Name (bounded safely between tag and right block)
   doc.setTextColor(...PDF_COLORS.primaryDark);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.text(organizationName, PDF_PAGE.marginLeft + 98, y + 10);
+  doc.setFontSize(11.5);
+  const maxOrgNameWidth = maxLeftWidth - 90;
+  const safeOrgName = truncateText(doc, organizationName, Math.max(maxOrgNameWidth, 120));
+  doc.text(safeOrgName, PDF_PAGE.marginLeft + 90, y + 9);
 
-  // Right Side: Document Type Title Badge
+  // Right: Document Type Title (e.g. DRIVER SETTLEMENT)
   doc.setTextColor(...PDF_COLORS.indigo);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12);
-  doc.text(docTypeTitle.toUpperCase(), PDF_PAGE.marginRight, y + 6, { align: 'right' });
+  doc.setFontSize(11.5);
+  doc.text(docTypeTitle.toUpperCase(), PDF_PAGE.marginRight, y + 9, { align: 'right' });
 
-  // Document Number on Right
-  if (docNumber) {
-    doc.setTextColor(...PDF_COLORS.primaryDark);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.text(docNumber, PDF_PAGE.marginRight, y + 19, { align: 'right' });
-  }
-
-  y += 24;
-
-  // MC/DOT & Subtitle
+  // --- ROW 2: (Y = 48 + 23 = 71) ---
+  // Left: Authority / Subtitle info
   doc.setTextColor(...PDF_COLORS.slate600);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-
+  doc.setFontSize(8);
   const orgSubtext = [
     mcDot ? `Authority: ${mcDot}` : null,
     docSubtitle || null,
   ].filter(Boolean).join(' • ');
 
   if (orgSubtext) {
-    doc.text(orgSubtext, PDF_PAGE.marginLeft, y);
+    const safeSubtext = truncateText(doc, orgSubtext, maxLeftWidth);
+    doc.text(safeSubtext, PDF_PAGE.marginLeft, y + 23);
   }
 
-  // Dual Timestamp on right
-  const dualTime = formatDualTime(generatedAt, operationalTimezone, dispatcherTimezone);
+  // Right: Document Number / Reference (e.g. SET-APX-78421) - Distinct vertical line below title!
+  if (docNumber) {
+    doc.setTextColor(...PDF_COLORS.primaryDark);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    const safeDocNumber = truncateText(doc, docNumber, rightBlockWidth);
+    doc.text(safeDocNumber, PDF_PAGE.marginRight, y + 23, { align: 'right' });
+  }
+
+  // --- ROW 3: (Y = 48 + 35 = 83) ---
+  // Right: Dual Timestamp
   doc.setTextColor(...PDF_COLORS.slate500);
-  doc.setFontSize(8);
-  doc.text(
-    `Generated: ${dualTime.primary} (${dualTime.secondary})`,
-    PDF_PAGE.marginRight,
-    y,
-    { align: 'right' }
-  );
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.text(timestampText, PDF_PAGE.marginRight, y + 35, { align: 'right' });
 
-  y += 12;
-
-  // Subtle separator line
+  // --- Separator Line (Y = 48 + 44 = 92) ---
+  y += 44;
   doc.setDrawColor(...PDF_COLORS.slate200);
   doc.setLineWidth(0.75);
   doc.line(PDF_PAGE.marginLeft, y, PDF_PAGE.marginRight, y);
 
-  return y + 14;
+  // Content starts cleanly at y + 12 (Y = 104)
+  return y + 12;
 }
 
 /**
@@ -202,7 +232,25 @@ export function addDocumentFooters(
 }
 
 /**
- * Draws a clean card / container box with optional header title
+ * Shared layout metrics for PDF card boxes, section containers, and field rows
+ */
+export const PDF_CARD = {
+  headerHeight: 16,            // Height of the header strip (y to y + 16)
+  headerTitleOffset: 11,       // Text baseline for header title inside strip
+  headerFontSize: 8,           // Font size for header title
+  contentStartYOffset: 26,     // Universal baseline for first line of content under a titled card (y + 26: gives 10pt clearance below header)
+  contentPaddingX: 8,          // Standard left/right horizontal padding for text inside cards
+  cardPaddingTop: 12,          // Universal baseline for untitled cards
+  lineSpacingTight: 9.5,       // Standard tight line advance (for 6.5-7pt text)
+  lineSpacingStandard: 11,     // Standard line advance (for 7.5-8pt text)
+  lineSpacingComfortable: 13,  // Line advance for 9pt bold text or prominent headings
+  sectionHeadingGap: 8,        // Standard gap between standalone text headings and content/tables below
+};
+
+/**
+ * Draws a clean card / container box with optional header title.
+ * Returns the exact standard Y-coordinate (baseline) for the first line of content inside the card,
+ * providing consistent, balanced breathing room below the header strip across all documents.
  */
 export function drawCardBox(
   doc: jsPDF,
@@ -213,7 +261,7 @@ export function drawCardBox(
   title?: string,
   accentColor: [number, number, number] = PDF_COLORS.slate800
 ): number {
-  // Card background
+  // Card background & border
   doc.setFillColor(...PDF_COLORS.slate50);
   doc.setDrawColor(...PDF_COLORS.slate200);
   doc.setLineWidth(0.75);
@@ -222,17 +270,18 @@ export function drawCardBox(
   if (title) {
     // Header strip
     doc.setFillColor(...accentColor);
-    doc.roundedRect(x, y, width, 16, 4, 4, 'F');
-    // Square off bottom of header strip
-    doc.rect(x, y + 10, width, 6, 'F');
+    doc.roundedRect(x, y, width, PDF_CARD.headerHeight, 4, 4, 'F');
+    // Square off bottom corners of header strip
+    doc.rect(x, y + 10, width, PDF_CARD.headerHeight - 10, 'F');
 
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8);
-    doc.text(title.toUpperCase(), x + 8, y + 11);
+    doc.setFontSize(PDF_CARD.headerFontSize);
+    doc.text(title.toUpperCase(), x + PDF_CARD.contentPaddingX, y + PDF_CARD.headerTitleOffset);
   }
 
-  return y + (title ? 22 : 6);
+  // Returns the universal, standard content start Y (giving 10pt clearance below header strip)
+  return y + (title ? PDF_CARD.contentStartYOffset : PDF_CARD.cardPaddingTop);
 }
 
 export { formatCurrency, formatMiles, formatRPM, formatInTimezone, formatDualTime };

@@ -189,6 +189,8 @@ export const ContextualCopilotModal: React.FC<ContextualCopilotModalProps> = ({
     [orgId, userRole, effectiveLoadId, claimId, copilotMode, operationalTimezone, dispatcherTimezone, profile, user]
   );
 
+  const [copiedActionIndex, setCopiedActionIndex] = useState<number | null>(null);
+
   // Auto-run active action when modal opens
   useEffect(() => {
     if (isOpen && orgId) {
@@ -196,10 +198,30 @@ export const ContextualCopilotModal: React.FC<ContextualCopilotModalProps> = ({
     }
   }, [isOpen, activeAction]);
 
-  const handleCopy = (text: string, targetKey: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedTarget(targetKey);
-    setTimeout(() => setCopiedTarget(null), 2500);
+  const handleCopy = async (text: string, targetKey: string, actionIndex?: number) => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.opacity = '0';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setCopiedTarget(targetKey);
+      if (actionIndex !== undefined) {
+        setCopiedActionIndex(actionIndex);
+        setTimeout(() => setCopiedActionIndex(null), 2500);
+      }
+      setTimeout(() => setCopiedTarget(null), 2500);
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
+    }
   };
 
   const handleCustomSubmit = (e: React.FormEvent) => {
@@ -208,7 +230,10 @@ export const ContextualCopilotModal: React.FC<ContextualCopilotModalProps> = ({
     executeAction(activeAction, customQuery);
   };
 
-  const handleSuggestedAction = (actionItem: { label: string; action: string; payload?: any }) => {
+  const handleSuggestedAction = (
+    actionItem: { label: string; action: string; payload?: any },
+    index?: number
+  ) => {
     if (actionItem.action === 'create_task') {
       setTaskModalData({
         title: actionItem.payload?.title,
@@ -220,8 +245,29 @@ export const ContextualCopilotModal: React.FC<ContextualCopilotModalProps> = ({
         load_number: actionItem.payload?.load_number,
       });
       setIsTaskModalOpen(true);
+    } else if (actionItem.action === 'quick_prompt') {
+      const nextAction = (actionItem.payload?.action || 'analyze_load') as CopilotAction;
+      setActiveAction(nextAction);
+      setCustomQuery('');
+      executeAction(nextAction);
     } else if (actionItem.action === 'copy_clipboard') {
-      handleCopy(actionItem.payload?.text || '', 'markdown');
+      const isBody =
+        actionItem.label?.toLowerCase().includes('body') ||
+        actionItem.label?.toLowerCase().includes('draft') ||
+        actionItem.label?.toLowerCase().includes('message');
+      const isSubject = actionItem.label?.toLowerCase().includes('subject');
+
+      let textToCopy = actionItem.payload?.text;
+      if (!textToCopy) {
+        if (isSubject && response?.subject) {
+          textToCopy = response.subject;
+        } else if (isBody && editableDraft) {
+          textToCopy = editableDraft;
+        } else {
+          textToCopy = response?.content || response?.markdownContent || '';
+        }
+      }
+      handleCopy(textToCopy, actionItem.label, index);
     }
   };
 
@@ -290,7 +336,7 @@ export const ContextualCopilotModal: React.FC<ContextualCopilotModalProps> = ({
         </div>
 
         {/* Quick Action Navigation Pills */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-900/40 flex-nowrap w-full">
           {CONTEXT_ACTION_TABS.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeAction === tab.action;
@@ -479,26 +525,31 @@ export const ContextualCopilotModal: React.FC<ContextualCopilotModalProps> = ({
                   <Sparkles className="w-3.5 h-3.5 text-violet-400" />
                   <span>Suggested Follow-up Actions (Human Review Required)</span>
                 </h5>
-                <div className="flex flex-wrap gap-2 pt-0.5">
+                <div className="flex items-center gap-2 overflow-x-auto pb-1.5 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-900/40 flex-nowrap w-full pt-0.5">
                   {response.suggestedActions.map((actionItem, i) => {
                     const isCreate = actionItem.action === 'create_task';
+                    const isCopied = copiedActionIndex === i;
                     return (
                       <button
                         key={i}
                         type="button"
-                        onClick={() => handleSuggestedAction(actionItem)}
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-xs ${
+                        onClick={() => handleSuggestedAction(actionItem, i)}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-all cursor-pointer shadow-xs ${
                           isCreate
                             ? 'bg-violet-600/90 hover:bg-violet-600 text-white border border-violet-500/50'
+                            : isCopied
+                            ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/80'
                             : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
                         }`}
                       >
                         {isCreate ? (
                           <Plus className="w-3 h-3 text-violet-200" />
+                        ) : isCopied ? (
+                          <Check className="w-3 h-3 text-emerald-400" />
                         ) : (
                           <Sparkles className="w-3 h-3 text-indigo-400" />
                         )}
-                        <span>{actionItem.label}</span>
+                        <span>{isCopied ? 'Copied to Clipboard!' : actionItem.label}</span>
                       </button>
                     );
                   })}
