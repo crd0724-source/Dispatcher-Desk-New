@@ -7,9 +7,11 @@ import { Truck, AlertCircle } from 'lucide-react';
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSuccessSignUp?: () => void;
+  onSuccessSignIn?: () => void;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
+export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccessSignUp, onSuccessSignIn }) => {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -49,17 +51,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             full_name: fullName.trim() || null,
             preferred_timezone: 'Asia/Kolkata',
           });
-          await refreshUserData();
+          await refreshUserData(data.user);
           onClose();
+          if (onSuccessSignUp) {
+            onSuccessSignUp();
+          }
         }
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email: email.trim(),
           password: password.trim(),
         });
         if (error) throw error;
-        await refreshUserData();
+        await refreshUserData(data?.user);
         onClose();
+        if (onSuccessSignIn) {
+          onSuccessSignIn();
+        }
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Authentication failed';

@@ -3,6 +3,7 @@ import {
   ExtractionResponse,
   ApplyExtractionToLoadInput,
 } from './extractionTypes.ts';
+import { parseRateConfirmationText } from './rateConParser.ts';
 import { loadService } from '../loads/loadService.ts';
 import { documentService } from './documentService.ts';
 import { activityService } from '../activity/activityService.ts';
@@ -81,7 +82,7 @@ class ExtractionService {
           fileSize: params.file?.size,
           mimeType: mimeType || 'text/plain',
           extractedAt: resData.extractedAt || new Date().toISOString(),
-          model: resData.source || 'gemini-3.7-flash',
+          model: resData.source || 'gemini-3.8-flash',
           sourceType: params.file
             ? params.file.type.includes('pdf')
               ? 'uploaded_pdf'
@@ -98,6 +99,11 @@ class ExtractionService {
       return extraction;
     } catch (err: any) {
       console.warn('Extraction API request failed or offline. Attempting deterministic fallback.', err);
+      if (params.documentText) {
+        const fallbackExtraction = parseRateConfirmationText(params.documentText, fileName);
+        this.validateFinancialConsistency(fallbackExtraction);
+        return fallbackExtraction;
+      }
       throw err;
     }
   }
@@ -311,7 +317,7 @@ class ExtractionService {
         extractedBroker: extractedData.broker.company_name,
         extractedRate: extractedData.load_info.rate,
         confidence: extractedData.confidence_scores.overall,
-        model: extractedData.provenance?.model || 'gemini-3.7-flash',
+        model: extractedData.provenance?.model || 'gemini-3.8-flash',
       }
     );
 

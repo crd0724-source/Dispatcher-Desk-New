@@ -197,9 +197,12 @@ class ProfitabilityService {
    */
   async getProfitabilitySummary(
     organizationId: string,
-    filters: ProfitabilityFilters
+    filters: ProfitabilityFilters,
+    precomputedRows?: ProfitabilityLoadRow[]
   ): Promise<ProfitabilitySummary> {
-    const rows = await this.getLoadProfitability(organizationId, filters);
+    const rows =
+      precomputedRows ??
+      (await this.getLoadProfitability(organizationId, filters));
 
     if (rows.length === 0) {
       return {
@@ -287,9 +290,12 @@ class ProfitabilityService {
    */
   async getClientProfitability(
     organizationId: string,
-    filters: ProfitabilityFilters
+    filters: ProfitabilityFilters,
+    precomputedRows?: ProfitabilityLoadRow[]
   ): Promise<ClientProfitability[]> {
-    const rows = await this.getLoadProfitability(organizationId, filters);
+    const rows =
+      precomputedRows ??
+      (await this.getLoadProfitability(organizationId, filters));
     const map = new Map<string, { client: Client; rows: ProfitabilityLoadRow[] }>();
 
     for (const r of rows) {
@@ -340,9 +346,12 @@ class ProfitabilityService {
    */
   async getBrokerProfitability(
     organizationId: string,
-    filters: ProfitabilityFilters
+    filters: ProfitabilityFilters,
+    precomputedRows?: ProfitabilityLoadRow[]
   ): Promise<BrokerProfitability[]> {
-    const rows = await this.getLoadProfitability(organizationId, filters);
+    const rows =
+      precomputedRows ??
+      (await this.getLoadProfitability(organizationId, filters));
     const map = new Map<string, { broker: Broker; rows: ProfitabilityLoadRow[] }>();
 
     for (const r of rows) {
@@ -390,9 +399,12 @@ class ProfitabilityService {
    */
   async getTruckProfitability(
     organizationId: string,
-    filters: ProfitabilityFilters
+    filters: ProfitabilityFilters,
+    precomputedRows?: ProfitabilityLoadRow[]
   ): Promise<TruckProfitability[]> {
-    const rows = await this.getLoadProfitability(organizationId, filters);
+    const rows =
+      precomputedRows ??
+      (await this.getLoadProfitability(organizationId, filters));
     const map = new Map<string, { truck: Truck; client?: Client | null; rows: ProfitabilityLoadRow[] }>();
 
     for (const r of rows) {
@@ -441,9 +453,12 @@ class ProfitabilityService {
    */
   async getDriverProfitability(
     organizationId: string,
-    filters: ProfitabilityFilters
+    filters: ProfitabilityFilters,
+    precomputedRows?: ProfitabilityLoadRow[]
   ): Promise<DriverProfitability[]> {
-    const rows = await this.getLoadProfitability(organizationId, filters);
+    const rows =
+      precomputedRows ??
+      (await this.getLoadProfitability(organizationId, filters));
     const map = new Map<string, { driver: Driver; client?: Client | null; rows: ProfitabilityLoadRow[] }>();
 
     for (const r of rows) {
@@ -493,9 +508,12 @@ class ProfitabilityService {
    */
   async getLaneProfitability(
     organizationId: string,
-    filters: ProfitabilityFilters
+    filters: ProfitabilityFilters,
+    precomputedRows?: ProfitabilityLoadRow[]
   ): Promise<LaneProfitability[]> {
-    const rows = await this.getLoadProfitability(organizationId, filters);
+    const rows =
+      precomputedRows ??
+      (await this.getLoadProfitability(organizationId, filters));
     const map = new Map<string, { originState: string; destState: string; rows: ProfitabilityLoadRow[] }>();
 
     for (const r of rows) {
@@ -552,9 +570,12 @@ class ProfitabilityService {
    */
   async getOperationalAlerts(
     organizationId: string,
-    filters: ProfitabilityFilters
+    filters: ProfitabilityFilters,
+    precomputedRows?: ProfitabilityLoadRow[]
   ): Promise<ProfitabilityAlertItem[]> {
-    const rows = await this.getLoadProfitability(organizationId, filters);
+    const rows =
+      precomputedRows ??
+      (await this.getLoadProfitability(organizationId, filters));
     const alerts: ProfitabilityAlertItem[] = [];
 
     for (const r of rows) {

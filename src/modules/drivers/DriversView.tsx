@@ -18,8 +18,13 @@ import {
   Trash2,
   Users,
 } from 'lucide-react';
+import { NavModule } from '../../components/layout/Sidebar.tsx';
 
-export const DriversView: React.FC = () => {
+interface DriversViewProps {
+  onNavigate?: (module: NavModule) => void;
+}
+
+export const DriversView: React.FC<DriversViewProps> = ({ onNavigate }) => {
   const { activeOrganization, userRole } = useAuth();
 
   // Effective org ID (support fallback demo-org-1 if no active org yet)
@@ -225,13 +230,26 @@ export const DriversView: React.FC = () => {
           <button
             id="header-add-driver-btn"
             onClick={() => {
+              if (clients.length === 0 && onNavigate) {
+                onNavigate('clients');
+                return;
+              }
               setDriverToEdit(null);
               setIsAddEditModalOpen(true);
             }}
             className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg shadow-sm transition-colors cursor-pointer self-start sm:self-auto"
           >
-            <Plus className="w-4 h-4" />
-            <span>Add Driver</span>
+            {clients.length === 0 ? (
+              <>
+                <Building2 className="w-4 h-4" />
+                <span>Add Client</span>
+              </>
+            ) : (
+              <>
+                <Plus className="w-4 h-4" />
+                <span>Add Driver</span>
+              </>
+            )}
           </button>
         )}
       </div>
@@ -284,12 +302,17 @@ export const DriversView: React.FC = () => {
           setDriverToDelete(driver);
         }}
         onAddDriver={() => {
+          if (clients.length === 0 && onNavigate) {
+            onNavigate('clients');
+            return;
+          }
           setDriverToEdit(null);
           setIsAddEditModalOpen(true);
         }}
         canEdit={canEdit}
         canDelete={canDelete}
         updatingDriverId={updatingDriverId}
+        onNavigateToClients={() => onNavigate?.('clients')}
       />
 
       {/* Add / Edit Driver Modal */}

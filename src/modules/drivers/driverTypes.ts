@@ -54,6 +54,7 @@ export const DRIVER_STATUS_OPTIONS: { value: DriverStatus; label: string; color:
   { value: 'available', label: 'Available / Ready', color: 'emerald' },
   { value: 'on_load', label: 'On Dispatched Load', color: 'purple' },
   { value: 'off_duty', label: 'Off Duty / Rest Period', color: 'amber' },
+  { value: 'inactive', label: 'Inactive / Suspended', color: 'slate' },
 ];
 
 export function formatDriverPayRate(payType: DriverPayType, payRate: number): string {

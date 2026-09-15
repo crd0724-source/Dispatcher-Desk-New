@@ -13,8 +13,13 @@ import {
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import { StatusBadge } from '../../components/common/StatusBadge.tsx';
 import { TeamMembersSection } from './TeamMembersSection.tsx';
+import { CreditCard, ArrowRight } from 'lucide-react';
 
-export const SettingsView: React.FC = () => {
+interface SettingsViewProps {
+  onNavigateToBilling?: () => void;
+}
+
+export const SettingsView: React.FC<SettingsViewProps> = ({ onNavigateToBilling }) => {
   const { activeOrganization, userRole, memberships, isConfigured } = useAuth();
   const [copiedSql, setCopiedSql] = useState(false);
 
@@ -66,6 +71,30 @@ export const SettingsView: React.FC = () => {
           {isConfigured
             ? 'Supabase client is configured via VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.'
             : 'To connect your real Supabase PostgreSQL instance, define VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment, and execute the migrations in /supabase/migrations/.'}
+        </p>
+      </div>
+
+      {/* Subscription & Fleet Billing Card */}
+      <div id="settings-billing-card" className="bg-slate-900 border border-slate-800/80 rounded-xl p-5 shadow-sm space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CreditCard className="w-5 h-5 text-indigo-400" />
+            <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider">
+              Subscription & Fleet Capacity
+            </h2>
+          </div>
+          {onNavigateToBilling && (
+            <button
+              id="btn-settings-view-billing"
+              onClick={onNavigateToBilling}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+            >
+              Manage Plans & Invoices <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+        <p className="text-xs text-slate-400 leading-relaxed">
+          Review Active Managed Truck (AMT) entitlement limits, subscribe to Starter (10 AMT), Growth (25 AMT), or Agency (50 AMT) plans, cancel subscriptions, and access payment transaction receipts.
         </p>
       </div>
 

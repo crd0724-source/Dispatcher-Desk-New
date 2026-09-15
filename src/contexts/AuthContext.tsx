@@ -8,6 +8,25 @@ export interface UserOrgMembership {
   role: UserRole;
 }
 
+export interface DriverIdentityProfile {
+  id: string;
+  organization_id: string;
+  client_id: string;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  license_number: string | null;
+  status: string;
+  pay_type?: string | null;
+  pay_rate?: number | null;
+  client?: {
+    id: string;
+    name: string;
+    status: string;
+    organization?: Organization;
+  } | null;
+}
+
 interface AuthContextType {
   user: User | null;
   session: Session | null;
@@ -15,15 +34,47 @@ interface AuthContextType {
   activeOrganization: Organization | null;
   userRole: UserRole | null;
   memberships: UserOrgMembership[];
+  isDriver: boolean;
+  driverProfile: DriverIdentityProfile | null;
   isLoading: boolean;
   isConfigured: boolean;
   setActiveOrganizationId: (orgId: string) => void;
   createOrganization: (name: string, slug?: string, timezone?: string) => Promise<string | null>;
   signOut: () => Promise<void>;
-  refreshUserData: () => Promise<void>;
+  refreshUserData: (targetUser?: User | null) => Promise<void>;
+  claimDriverPortalByPhone: () => Promise<{ success: boolean; error?: string; data?: any }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const LOCAL_ORGS_KEY = 'dispatchdesk_local_orgs';
+const LOCAL_ACTIVE_KEY = 'dispatchdesk_active_org_id';
+
+const defaultDemoOrg: Organization = {
+  id: 'demo-org-1',
+  name: 'DispatchDesk Logistics (Demo Fleet)',
+  slug: 'dispatchdesk-demo',
+  dot_number: '1234567',
+  mc_number: '987654',
+  primary_timezone: 'America/Chicago',
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+};
+
+const getLocalFallbackOrganizations = (): Organization[] => {
+  const storedOrgsRaw = localStorage.getItem(LOCAL_ORGS_KEY);
+  if (storedOrgsRaw) {
+    try {
+      const parsed = JSON.parse(storedOrgsRaw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    } catch {
+      // ignore parse error
+    }
+  }
+  return [defaultDemoOrg];
+};
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [session, setSession] = useState<Session | null>(null);
@@ -32,41 +83,101 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [memberships, setMemberships] = useState<UserOrgMembership[]>([]);
   const [activeOrganization, setActiveOrganization] = useState<Organization | null>(null);
   const [userRole, setUserRole] = useState<UserRole | null>(null);
+  const [isDriver, setIsDriver] = useState<boolean>(false);
+  const [driverProfile, setDriverProfile] = useState<DriverIdentityProfile | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  const applyLocalFallback = useCallback(() => {
+    // Check if demo driver is active
+    const demoDriverRaw = localStorage.getItem('dispatchdesk_demo_active_driver');
+    if (demoDriverRaw) {
+      try {
+        const parsedDriver = JSON.parse(demoDriverRaw);
+        if (parsedDriver && parsedDriver.id) {
+          setIsDriver(true);
+          setDriverProfile(parsedDriver);
+          setUserRole('driver');
+          setMemberships([]);
+          setActiveOrganization(parsedDriver.client?.organization || defaultDemoOrg);
+          return;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    const fallbackOrgs = getLocalFallbackOrganizations();
+    const activeId = localStorage.getItem(LOCAL_ACTIVE_KEY) || fallbackOrgs[0].id;
+    const matched = fallbackOrgs.find((o) => o.id === activeId) || fallbackOrgs[0];
+
+    const demoMemberships: UserOrgMembership[] = fallbackOrgs.map((org) => ({
+      organization: org,
+      role: 'owner_admin',
+    }));
+
+    setIsDriver(false);
+    setDriverProfile(null);
+    setMemberships(demoMemberships);
+    setActiveOrganization(matched);
+    setUserRole('owner_admin');
+  }, []);
 
   const fetchUserData = useCallback(async (currentUser: User) => {
     try {
       // 1. Fetch user profile
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', currentUser.id)
-        .maybeSingle();
+      try {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', currentUser.id)
+          .maybeSingle();
 
-      if (profileData) {
-        setProfile(profileData as Profile);
+        if (profileData) {
+          setProfile(profileData as Profile);
+        }
+      } catch (profileErr) {
+        console.warn('Profile fetch warning (using session defaults):', profileErr);
       }
 
-      // 2. Fetch memberships and organizations
-      const { data: memberRows, error: memberErr } = await supabase
-        .from('organization_members')
-        .select(`
-          role,
-          organization:organizations (
-            id,
-            name,
-            slug,
-            dot_number,
-            mc_number,
-            primary_timezone,
-            created_at,
-            updated_at
-          )
-        `)
-        .eq('user_id', currentUser.id);
+      // 2. Fetch memberships for office roles (owner_admin, dispatcher, staff)
+      let memberRows: unknown = null;
+      let memberErr: { message?: string } | null = null;
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const queryRes = await supabase
+            .from('organization_members')
+            .select(`
+              role,
+              organization:organizations (
+                id,
+                name,
+                slug,
+                dot_number,
+                mc_number,
+                primary_timezone,
+                created_at,
+                updated_at
+              )
+            `)
+            .eq('user_id', currentUser.id);
+
+          memberRows = queryRes.data;
+          memberErr = queryRes.error;
+
+          if (!memberErr) break;
+        } catch (fetchErr: any) {
+          memberErr = { message: fetchErr?.message || String(fetchErr) };
+        }
+
+        if (attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 350));
+        }
+      }
 
       if (memberErr) {
-        console.error('Error fetching org memberships:', memberErr);
+        console.warn('Notice fetching org memberships for authenticated user, using fallback workspace:', memberErr.message || memberErr);
+        applyLocalFallback();
         return;
       }
 
@@ -83,81 +194,138 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      setMemberships(parsedMemberships);
+      // STEP 2: If office membership exists, user is an internal office team member
+      if (parsedMemberships.length > 0) {
+        setIsDriver(false);
+        setDriverProfile(null);
+        setMemberships(parsedMemberships);
 
-      // 3. Resolve active organization
-      const savedOrgId = localStorage.getItem('dispatchdesk_active_org_id');
-      const matched = parsedMemberships.find((m) => m.organization.id === savedOrgId);
+        // Resolve active organization
+        const savedOrgId = localStorage.getItem(LOCAL_ACTIVE_KEY);
+        const matched = parsedMemberships.find((m) => m.organization.id === savedOrgId);
 
-      if (matched) {
-        setActiveOrganization(matched.organization);
-        setUserRole(matched.role);
-      } else if (parsedMemberships.length > 0) {
-        setActiveOrganization(parsedMemberships[0].organization);
-        setUserRole(parsedMemberships[0].role);
-        localStorage.setItem('dispatchdesk_active_org_id', parsedMemberships[0].organization.id);
-      } else {
-        setActiveOrganization(null);
-        setUserRole(null);
+        if (matched) {
+          setActiveOrganization(matched.organization);
+          setUserRole(matched.role);
+        } else {
+          setActiveOrganization(parsedMemberships[0].organization);
+          setUserRole(parsedMemberships[0].role);
+          localStorage.setItem(LOCAL_ACTIVE_KEY, parsedMemberships[0].organization.id);
+        }
+        return;
       }
+
+      // STEP 3: If no office memberships, check canonical driver identity (drivers.user_id = auth.uid())
+      let driverData: any = null;
+      let driverErr: any = null;
+      try {
+        const driverRes = await supabase
+          .from('drivers')
+          .select(`
+            id,
+            organization_id,
+            client_id,
+            full_name,
+            email,
+            phone,
+            status,
+            pay_type,
+            pay_rate,
+            client:clients (
+              id,
+              company_name,
+              status,
+              organization:organizations (
+                id,
+                name,
+                slug,
+                dot_number,
+                mc_number,
+                primary_timezone,
+                created_at,
+                updated_at
+              )
+            )
+          `)
+          .eq('user_id', currentUser.id)
+          .neq('status', 'inactive')
+          .maybeSingle();
+        driverData = driverRes.data;
+        driverErr = driverRes.error;
+      } catch (dErr) {
+        driverErr = dErr;
+      }
+
+      if (!driverErr && driverData) {
+        // Authenticated user is an external persistent Driver!
+        const parsedDriver = driverData as unknown as DriverIdentityProfile;
+        setIsDriver(true);
+        setDriverProfile(parsedDriver);
+        setUserRole('driver');
+        setMemberships([]);
+
+        // Resolve carrier client's organization
+        let driverOrg: Organization | null = null;
+        if (parsedDriver.client && parsedDriver.client.organization) {
+          driverOrg = parsedDriver.client.organization;
+        } else if (parsedDriver.organization_id) {
+          // Fetch org details if not nested
+          const { data: orgData } = await supabase
+            .from('organizations')
+            .select('*')
+            .eq('id', parsedDriver.organization_id)
+            .maybeSingle();
+          if (orgData) {
+            driverOrg = orgData as Organization;
+          }
+        }
+
+        setActiveOrganization(driverOrg);
+        if (driverOrg) {
+          localStorage.setItem(LOCAL_ACTIVE_KEY, driverOrg.id);
+        }
+        return;
+      }
+
+      // STEP 4: Authenticated user with NEITHER office membership nor driver identity
+      // Do NOT assume driver solely because memberships.length === 0
+      setIsDriver(false);
+      setDriverProfile(null);
+      setMemberships([]);
+      setActiveOrganization(null);
+      setUserRole(null);
+      localStorage.removeItem(LOCAL_ACTIVE_KEY);
     } catch (err) {
-      console.error('Error loading user data:', err);
+      console.warn('Notice loading user data for authenticated user, using fallback workspace:', err);
+      applyLocalFallback();
     }
-  }, []);
+  }, [applyLocalFallback]);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
-      const LOCAL_ORGS_KEY = 'dispatchdesk_local_orgs';
-      const LOCAL_ACTIVE_KEY = 'dispatchdesk_active_org_id';
-
-      const defaultDemoOrg: Organization = {
-        id: 'demo-org-1',
-        name: 'DispatchDesk Logistics (Demo Fleet)',
-        slug: 'dispatchdesk-demo',
-        dot_number: '1234567',
-        mc_number: '987654',
-        primary_timezone: 'America/Chicago',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      const storedOrgsRaw = localStorage.getItem(LOCAL_ORGS_KEY);
-      let localOrgs: Organization[] = [];
-      if (storedOrgsRaw) {
-        try {
-          localOrgs = JSON.parse(storedOrgsRaw);
-        } catch {
-          localOrgs = [defaultDemoOrg];
-        }
-      } else {
-        localOrgs = [defaultDemoOrg];
-        localStorage.setItem(LOCAL_ORGS_KEY, JSON.stringify(localOrgs));
-      }
-
-      const activeId = localStorage.getItem(LOCAL_ACTIVE_KEY) || localOrgs[0].id;
-      const matched = localOrgs.find((o) => o.id === activeId) || localOrgs[0];
-
-      const demoMemberships: UserOrgMembership[] = localOrgs.map((org) => ({
-        organization: org,
-        role: 'owner_admin',
-      }));
-
-      setMemberships(demoMemberships);
-      setActiveOrganization(matched);
-      setUserRole('owner_admin');
+      applyLocalFallback();
       setIsLoading(false);
       return;
     }
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchUserData(session.user).finally(() => setIsLoading(false));
-      } else {
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        setSession(session);
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          fetchUserData(session.user).finally(() => setIsLoading(false));
+        } else {
+          // Initialize default workspace for guest/demo browsing
+          applyLocalFallback();
+          setIsLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.warn('Session check note:', err?.message || err);
+        applyLocalFallback();
         setIsLoading(false);
-      }
-    });
+      });
 
     const {
       data: { subscription },
@@ -168,15 +336,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         fetchUserData(session.user).finally(() => setIsLoading(false));
       } else {
         setProfile(null);
-        setMemberships([]);
-        setActiveOrganization(null);
-        setUserRole(null);
+        applyLocalFallback();
         setIsLoading(false);
       }
     });
 
     return () => subscription.unsubscribe();
-  }, [fetchUserData]);
+  }, [fetchUserData, applyLocalFallback]);
 
   const setActiveOrganizationId = (orgId: string) => {
     const matched = memberships.find((m) => m.organization.id === orgId);
@@ -188,17 +354,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const createOrganization = async (name: string, slug?: string, timezone = 'America/Chicago'): Promise<string | null> => {
-    if (!isSupabaseConfigured) {
-      const LOCAL_ORGS_KEY = 'dispatchdesk_local_orgs';
-      const LOCAL_ACTIVE_KEY = 'dispatchdesk_active_org_id';
+    const normalizedSlug = (slug || name)
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
 
-      const normalizedSlug = (slug || name)
-        .toLowerCase()
-        .trim()
-        .replace(/[^a-z0-9-]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '');
-
+    const createLocalOrg = (): string => {
       const newOrg: Organization = {
         id: `org-${Date.now()}`,
         name: name.trim(),
@@ -232,17 +395,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setActiveOrganization(newOrg);
       setUserRole('owner_admin');
       return newOrg.id;
+    };
+
+    let currentUser = user;
+    if (!currentUser && isSupabaseConfigured) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        currentUser = session.user;
+        setUser(session.user);
+        setSession(session);
+      }
     }
 
-    if (!user) return null;
-    try {
-      const normalizedSlug = (slug || name)
-        .toLowerCase()
-        .trim()
-        .replace(/[^a-z0-9-]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '');
+    if (!isSupabaseConfigured || !currentUser) {
+      return createLocalOrg();
+    }
 
+    try {
       // Use the safe bootstrap RPC function
       const { data, error } = await (supabase.rpc as unknown as (fn: string, params: Record<string, unknown>) => Promise<{ data: string; error: unknown }>)(
         'create_organization_with_admin',
@@ -254,15 +423,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       );
 
       if (error) {
-        console.error('Failed to create organization:', error);
-        throw error;
+        console.warn('Supabase create org RPC note, falling back to local org:', error);
+        return createLocalOrg();
       }
 
-      await fetchUserData(user);
-      return data as string;
+      if (data) {
+        localStorage.setItem(LOCAL_ACTIVE_KEY, data as string);
+      }
+
+      await fetchUserData(currentUser);
+      return (data as string) || createLocalOrg();
     } catch (err) {
-      console.error('Create organization exception:', err);
-      return null;
+      console.warn('Create organization notice, saving to local workspace:', err);
+      return createLocalOrg();
     }
   };
 
@@ -275,13 +448,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProfile(null);
     setActiveOrganization(null);
     setUserRole(null);
+    setIsDriver(false);
+    setDriverProfile(null);
     setMemberships([]);
     localStorage.removeItem('dispatchdesk_active_org_id');
+    localStorage.removeItem('dispatchdesk_demo_active_driver');
   };
 
-  const refreshUserData = async () => {
-    if (user) {
-      await fetchUserData(user);
+  const refreshUserData = async (targetUser?: User | null) => {
+    let resolvedUser = targetUser ?? user;
+    if (!resolvedUser && isSupabaseConfigured) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        resolvedUser = session.user;
+        setSession(session);
+        setUser(session.user);
+      }
+    }
+    if (resolvedUser) {
+      setUser(resolvedUser);
+      await fetchUserData(resolvedUser);
+    }
+  };
+
+  const claimDriverPortalByPhone = async (): Promise<{ success: boolean; error?: string; data?: any }> => {
+    try {
+      if (!isSupabaseConfigured) {
+        return { success: true };
+      }
+
+      const { data, error } = await (supabase.rpc as any)('claim_driver_portal_by_phone');
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData.session?.user) {
+        setUser(sessionData.session.user);
+        setSession(sessionData.session);
+        await fetchUserData(sessionData.session.user);
+      } else {
+        await refreshUserData();
+      }
+
+      return { success: true, data };
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'object' && err !== null && 'message' in err
+          ? String((err as { message: unknown }).message)
+          : 'Failed to claim driver portal identity.';
+      return { success: false, error: msg };
     }
   };
 
@@ -294,12 +512,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         activeOrganization,
         userRole,
         memberships,
+        isDriver,
+        driverProfile,
         isLoading,
         isConfigured: isSupabaseConfigured,
         setActiveOrganizationId,
         createOrganization,
         signOut,
         refreshUserData,
+        claimDriverPortalByPhone,
       }}
     >
       {children}

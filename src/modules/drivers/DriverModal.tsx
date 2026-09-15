@@ -134,6 +134,18 @@ export const DriverModal: React.FC<DriverModalProps> = ({
       errors.fullName = 'Full driver name is required';
     }
 
+    if (phone.trim()) {
+      const trimmedPhone = phone.trim();
+      if (!trimmedPhone.startsWith('+')) {
+        errors.phone = 'Phone number must include country code in E.164 format (e.g. +12145550199)';
+      } else {
+        const digits = trimmedPhone.substring(1).replace(/\D/g, '');
+        if (digits.length < 7 || digits.length > 15 || digits.startsWith('0')) {
+          errors.phone = 'Please enter a valid international phone number (7-15 digits, e.g. +12145550199)';
+        }
+      }
+    }
+
     if (email.trim()) {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email.trim())) {
@@ -175,11 +187,15 @@ export const DriverModal: React.FC<DriverModalProps> = ({
     setIsSubmitting(true);
 
     try {
+      const canonicalPhone = phone.trim()
+        ? '+' + phone.trim().substring(1).replace(/\D/g, '')
+        : null;
+
       const payload = {
         client_id: clientId || null,
         assigned_truck_id: assignedTruckId || null,
         full_name: fullName.trim(),
-        phone: phone.trim() || null,
+        phone: canonicalPhone,
         email: email.trim() || null,
         pay_type: payType,
         pay_rate: parseFloat(payRate) || 0,
@@ -271,15 +287,22 @@ export const DriverModal: React.FC<DriverModalProps> = ({
         {/* Phone & Email */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="block text-slate-300 font-medium mb-1">Phone Number</label>
+            <label className="block text-slate-300 font-medium mb-1">Phone Number (E.164)</label>
             <input
               id="driver-phone-input"
               type="tel"
-              placeholder="e.g. (214) 555-0199"
+              placeholder="e.g. +12145550199"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 font-mono"
+              className={`w-full px-3 py-2 bg-slate-950 border rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 font-mono ${
+                fieldErrors.phone ? 'border-rose-500' : 'border-slate-800'
+              }`}
             />
+            {fieldErrors.phone ? (
+              <p className="text-[11px] text-rose-400 mt-1">{fieldErrors.phone}</p>
+            ) : (
+              <p className="text-[10px] text-slate-400 mt-0.5">Required for Driver Portal SMS login. Include '+' and country code.</p>
+            )}
           </div>
 
           <div>

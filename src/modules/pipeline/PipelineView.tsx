@@ -17,6 +17,7 @@ import { PipelineFilters } from './PipelineFilters.tsx';
 import { PipelineBoard } from './PipelineBoard.tsx';
 import { LoadDetailModal } from '../loads/LoadDetailModal.tsx';
 import { LoadModal } from '../loads/LoadModal.tsx';
+import { documentService } from '../documents/documentService.ts';
 import { Modal } from '../../components/common/Modal.tsx';
 import { formatCurrency } from '../../lib/calculations.ts';
 import {
@@ -197,10 +198,32 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick, onNa
   };
 
   // Create load submit handler
-  const handleCreateSave = async (input: CreateLoadInput | UpdateLoadInput) => {
+  const handleCreateSave = async (
+    input: CreateLoadInput | UpdateLoadInput,
+    rateConFile?: File | null
+  ) => {
     setIsSaving(true);
     try {
-      await loadService.createLoad(orgId, input as CreateLoadInput);
+      const created = await loadService.createLoad(orgId, input as CreateLoadInput);
+
+      if (rateConFile) {
+        try {
+          await documentService.createDocument(
+            orgId,
+            {
+              load_id: created.id,
+              doc_type: 'rate_confirmation',
+              file_name: rateConFile.name,
+              file_size_bytes: rateConFile.size,
+              mime_type: rateConFile.type || 'application/pdf',
+            },
+            rateConFile
+          );
+        } catch (docErr) {
+          console.error('Failed to attach Rate Con document after load creation in pipeline:', docErr);
+        }
+      }
+
       await loadData();
       setIsCreateModalOpen(false);
       showAlert('success', `Load ${(input as CreateLoadInput).load_number} booked successfully.`);

@@ -12,11 +12,15 @@ import {
   Truck,
   Driver,
   PipelineStatus,
+  TeamMember,
 } from '../../types/domain.types.ts';
 import { loadService } from './loadService.ts';
+import { teamService } from '../team/teamService.ts';
+import { documentService } from '../documents/documentService.ts';
 import { LoadList } from './LoadList.tsx';
 import { LoadModal } from './LoadModal.tsx';
 import { LoadDetailModal } from './LoadDetailModal.tsx';
+import { BulkAssignTeamMemberModal } from './BulkAssignTeamMemberModal.tsx';
 import { Modal } from '../../components/common/Modal.tsx';
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import { RateConExtractionModal } from '../documents/RateConExtractionModal.tsx';
@@ -29,16 +33,22 @@ import {
   Trash2,
   Sparkles,
   FileSpreadsheet,
+  Building2,
+  Truck as TruckIcon,
+  UserCheck,
 } from 'lucide-react';
+import { NavModule } from '../../components/layout/Sidebar.tsx';
 
 interface LoadsViewProps {
   isModalOpenExternal?: boolean;
   onCloseModalExternal?: () => void;
+  onNavigate?: (module: NavModule) => void;
 }
 
 export const LoadsView: React.FC<LoadsViewProps> = ({
   isModalOpenExternal,
   onCloseModalExternal,
+  onNavigate,
 }) => {
   const { activeOrganization, userRole } = useAuth();
   const orgId = activeOrganization?.id || 'demo-organization-default';
@@ -49,11 +59,42 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
   const [brokers, setBrokers] = useState<Broker[]>([]);
   const [trucks, setTrucks] = useState<Truck[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [nextLoadNumber, setNextLoadNumber] = useState<string>('');
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Multi-load Selection & Bulk Operations State
+  const [selectedLoadIds, setSelectedLoadIds] = useState<string[]>([]);
+  const [isBulkAssignModalOpen, setIsBulkAssignModalOpen] = useState(false);
+
+  const handleSelectLoad = (loadId: string, selected: boolean) => {
+    setSelectedLoadIds((prev) =>
+      selected
+        ? prev.includes(loadId)
+          ? prev
+          : [...prev, loadId]
+        : prev.filter((id) => id !== loadId)
+    );
+  };
+
+  const handleSelectAll = (selected: boolean) => {
+    if (selected) {
+      setSelectedLoadIds(loads.map((l) => l.id));
+    } else {
+      setSelectedLoadIds([]);
+    }
+  };
+
+  const handleBulkAssigned = async (count: number, memberName: string | null) => {
+    const targetLabel = memberName ? `to ${memberName}` : '(unassigned)';
+    showToast(`Successfully assigned ${count} load${count === 1 ? '' : 's'} ${targetLabel}.`);
+    setSelectedLoadIds([]);
+    setIsBulkAssignModalOpen(false);
+    await fetchData();
+  };
 
   // Filters State
   const [filters, setFilters] = useState<LoadFilterCriteria>({
@@ -79,11 +120,11 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
 
   // Toast Feedback State
   const [feedback, setFeedback] = useState<{
-    type: 'success' | 'error';
+    type: 'success' | 'error' | 'warning';
     message: string;
   } | null>(null);
 
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => {
     setFeedback({ message, type });
     setTimeout(() => {
       setFeedback(null);
@@ -97,10 +138,28 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
   // External modal open sync
   useEffect(() => {
     if (isModalOpenExternal) {
+      if (!isLoading && clients.length === 0 && onNavigate) {
+        onCloseModalExternal?.();
+        onNavigate('clients');
+        return;
+      }
       setLoadToEdit(null);
       setIsAddEditModalOpen(true);
     }
-  }, [isModalOpenExternal]);
+  }, [isModalOpenExternal, isLoading, clients.length, onNavigate, onCloseModalExternal]);
+
+  const handleCreateLoadClick = () => {
+    if (clients.length === 0 && onNavigate) {
+      onNavigate('clients');
+      return;
+    }
+    if ((trucks.length === 0 || drivers.length === 0) && onNavigate) {
+      onNavigate(trucks.length === 0 ? 'trucks' : 'drivers');
+      return;
+    }
+    setLoadToEdit(null);
+    setIsAddEditModalOpen(true);
+  };
 
   const handleCloseAddEditModal = () => {
     setIsAddEditModalOpen(false);
@@ -121,6 +180,7 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
         fetchedBrokers,
         fetchedTrucks,
         fetchedDrivers,
+        fetchedTeamMembers,
         generatedLoadNo,
       ] = await Promise.all([
         loadService.getLoads(orgId, filters),
@@ -128,6 +188,7 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
         loadService.getBrokers(orgId),
         loadService.getTrucks(orgId),
         loadService.getDrivers(orgId),
+        teamService.getTeamMembers(orgId),
         loadService.generateNextLoadNumber(orgId),
       ]);
 
@@ -136,6 +197,7 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
       setBrokers(fetchedBrokers);
       setTrucks(fetchedTrucks);
       setDrivers(fetchedDrivers);
+      setTeamMembers(fetchedTeamMembers);
       setNextLoadNumber(generatedLoadNo);
     } catch (err: any) {
       console.error('Error fetching loads data:', err);
@@ -150,7 +212,7 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
   }, [fetchData]);
 
   // Handle Save (Create or Update)
-  const handleSaveLoad = async (input: CreateLoadInput | UpdateLoadInput) => {
+  const handleSaveLoad = async (input: CreateLoadInput | UpdateLoadInput, rateConFile?: File | null) => {
     setIsSaving(true);
     try {
       if (loadToEdit) {
@@ -158,7 +220,33 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
         showToast(`Load ${updated.load_number} successfully updated.`);
       } else {
         const created = await loadService.createLoad(orgId, input as CreateLoadInput);
-        showToast(`Load ${created.load_number} successfully created and booked.`);
+
+        // Attach original Rate Con PDF if one was uploaded during Book Load
+        if (rateConFile) {
+          try {
+            await documentService.createDocument(
+              orgId,
+              {
+                load_id: created.id,
+                doc_type: 'rate_confirmation',
+                file_name: rateConFile.name,
+                file_size_bytes: rateConFile.size,
+                mime_type: rateConFile.type || 'application/pdf',
+              },
+              rateConFile
+            );
+            showToast(`Load ${created.load_number} successfully created with Rate Con PDF attached.`);
+          } catch (docErr: any) {
+            console.error('Failed to attach Rate Con document after load creation:', docErr);
+            // CRITICAL: DO NOT rollback or delete the load. Inform the user gracefully.
+            showToast(
+              `Load ${created.load_number} was created, but attaching the Rate Con PDF failed. You can upload it anytime in Documents.`,
+              'warning'
+            );
+          }
+        } else {
+          showToast(`Load ${created.load_number} successfully created and booked.`);
+        }
       }
       handleCloseAddEditModal();
       await fetchData();
@@ -221,11 +309,15 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
           className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg border text-xs font-semibold animate-in fade-in slide-in-from-bottom-3 duration-200 ${
             feedback.type === 'success'
               ? 'bg-emerald-950 text-emerald-200 border-emerald-800'
+              : feedback.type === 'warning'
+              ? 'bg-amber-950 text-amber-200 border-amber-800'
               : 'bg-rose-950 text-rose-200 border-rose-800'
           }`}
         >
           {feedback.type === 'success' ? (
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          ) : feedback.type === 'warning' ? (
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
           ) : (
             <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
           )}
@@ -271,7 +363,13 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
               <button
                 id="header-ai-ratecon-btn"
                 type="button"
-                onClick={() => setIsExtractionModalOpen(true)}
+                onClick={() => {
+                  if (clients.length === 0 && onNavigate) {
+                    onNavigate('clients');
+                    return;
+                  }
+                  setIsExtractionModalOpen(true);
+                }}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 rounded-lg shadow-sm transition-all cursor-pointer border border-indigo-400/30 self-start sm:self-auto"
               >
                 <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
@@ -281,14 +379,34 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
               <button
                 id="header-create-load-btn"
                 type="button"
-                onClick={() => {
-                  setLoadToEdit(null);
-                  setIsAddEditModalOpen(true);
-                }}
-                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-200 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg shadow-sm transition-colors cursor-pointer self-start sm:self-auto"
+                onClick={handleCreateLoadClick}
+                className={`inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer self-start sm:self-auto ${
+                  clients.length === 0
+                    ? 'text-white bg-indigo-600 hover:bg-indigo-500'
+                    : 'text-slate-200 bg-slate-900 hover:bg-slate-800 border border-slate-700'
+                }`}
               >
-                <Plus className="w-4 h-4" />
-                <span>Book / Create Load</span>
+                {clients.length === 0 ? (
+                  <>
+                    <Building2 className="w-4 h-4" />
+                    <span>Add Client First</span>
+                  </>
+                ) : trucks.length === 0 ? (
+                  <>
+                    <TruckIcon className="w-4 h-4" />
+                    <span>Add Truck First</span>
+                  </>
+                ) : drivers.length === 0 ? (
+                  <>
+                    <UserCheck className="w-4 h-4" />
+                    <span>Add Driver First</span>
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4" />
+                    <span>Book / Create Load</span>
+                  </>
+                )}
               </button>
             </div>
           )}
@@ -300,15 +418,13 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
         loads={loads}
         clients={clients}
         brokers={brokers}
+        teamMembers={teamMembers}
         isLoading={isLoading}
         error={error}
         filters={filters}
         onFilterChange={setFilters}
         onRefresh={fetchData}
-        onAddLoad={() => {
-          setLoadToEdit(null);
-          setIsAddEditModalOpen(true);
-        }}
+        onAddLoad={handleCreateLoadClick}
         onViewLoad={(load) => {
           setSelectedLoadForDetail(load);
           setIsDetailModalOpen(true);
@@ -319,8 +435,15 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
         }}
         onDeleteLoad={(load) => setLoadToDelete(load)}
         onStatusChange={handleStatusChange}
+        selectedLoadIds={selectedLoadIds}
+        onSelectLoad={handleSelectLoad}
+        onSelectAll={handleSelectAll}
+        onBulkAssignClick={() => setIsBulkAssignModalOpen(true)}
         canEdit={canEdit}
         canDelete={canDelete}
+        trucksCount={trucks.length}
+        driversCount={drivers.length}
+        onNavigate={onNavigate}
       />
 
       {/* Create / Edit Load Modal */}
@@ -333,6 +456,7 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
         brokers={brokers}
         trucks={trucks}
         drivers={drivers}
+        teamMembers={teamMembers}
         nextLoadNumber={nextLoadNumber}
         isSaving={isSaving}
       />
@@ -351,6 +475,16 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
         }}
         onStatusChange={handleStatusChange}
         canEdit={canEdit}
+      />
+
+      {/* Bulk Assign Team Member Modal */}
+      <BulkAssignTeamMemberModal
+        isOpen={isBulkAssignModalOpen}
+        onClose={() => setIsBulkAssignModalOpen(false)}
+        selectedLoadIds={selectedLoadIds}
+        selectedLoads={loads.filter((l) => selectedLoadIds.includes(l.id))}
+        organizationId={orgId}
+        onAssigned={handleBulkAssigned}
       />
 
       {/* AI Rate Confirmation OCR & Assisted Load Extraction Modal */}

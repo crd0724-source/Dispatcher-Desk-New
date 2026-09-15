@@ -28,6 +28,7 @@ import { AgendaCalendarView } from './AgendaCalendarView.tsx';
 // Modals
 import { LoadDetailModal } from '../loads/LoadDetailModal.tsx';
 import { LoadModal } from '../loads/LoadModal.tsx';
+import { documentService } from '../documents/documentService.ts';
 import { TaskModal } from '../tasks/TaskModal.tsx';
 import { CheckCallModal } from '../checkcalls/CheckCallModal.tsx';
 import { checkCallService } from '../checkcalls/checkCallService.ts';
@@ -253,13 +254,35 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onNewLoadClick }) =>
     }
   };
 
-  const handleSaveLoad = async (input: CreateLoadInput | UpdateLoadInput) => {
+  const handleSaveLoad = async (
+    input: CreateLoadInput | UpdateLoadInput,
+    rateConFile?: File | null
+  ) => {
     try {
       if (loadToEdit) {
         await loadService.updateLoad(orgId, loadToEdit.id, input as UpdateLoadInput);
         showToast(`Load #${loadToEdit.load_number} updated successfully.`);
       } else {
         const created = await loadService.createLoad(orgId, input as CreateLoadInput);
+
+        if (rateConFile) {
+          try {
+            await documentService.createDocument(
+              orgId,
+              {
+                load_id: created.id,
+                doc_type: 'rate_confirmation',
+                file_name: rateConFile.name,
+                file_size_bytes: rateConFile.size,
+                mime_type: rateConFile.type || 'application/pdf',
+              },
+              rateConFile
+            );
+          } catch (docErr) {
+            console.error('Failed to attach Rate Con document after load creation in calendar:', docErr);
+          }
+        }
+
         showToast(`Load #${created.load_number} booked and added to calendar.`);
       }
       setIsLoadModalOpen(false);

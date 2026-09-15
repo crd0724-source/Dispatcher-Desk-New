@@ -8,6 +8,8 @@ function isUUID(str?: string | null): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 }
 
+export const DEMO_ORGANIZATION_ID = 'demo-org-1';
+
 // Storage keys
 const TRUCKS_STORAGE_PREFIX = 'dispatchdesk_demo_trucks_';
 const CLIENTS_STORAGE_PREFIX = 'dispatchdesk_demo_clients_';
@@ -139,10 +141,15 @@ export interface ITruckService {
 }
 
 class TruckService implements ITruckService {
+  private inFlightGetTrucks = new Map<string, Promise<TruckWithClient[]>>();
+
   private ensureInitialized(organizationId: string): Truck[] {
     const key = `${TRUCKS_STORAGE_PREFIX}${organizationId}`;
     let trucks = loadFromStorage<Truck[]>(key, []);
     if (trucks.length === 0) {
+      if (isUUID(organizationId) && organizationId !== DEMO_ORGANIZATION_ID) {
+        return [];
+      }
       trucks = SEED_TRUCKS.map((t) => ({
         ...t,
         organization_id: organizationId,
@@ -156,90 +163,170 @@ class TruckService implements ITruckService {
     return clientService.getClients(organizationId);
   }
 
-  async getTrucks(organizationId: string): Promise<TruckWithClient[]> {
-    let rawTrucks: Truck[] = [];
+  getTrucks(organizationId: string): Promise<TruckWithClient[]> {
+    if (!organizationId) return Promise.resolve([]);
 
-    if (isSupabaseConfigured && isUUID(organizationId)) {
-      const { data, error } = await supabase
-        .from('trucks')
-        .select('*')
-        .eq('organization_id', organizationId)
-        .order('created_at', { ascending: false });
-      if (error) {
-        console.error('[TruckService] Supabase getTrucks error:', error);
-        throw new Error(error.message || 'Failed to fetch trucks from database.');
-      }
-      rawTrucks = (data || []) as Truck[];
-    } else if (isSupabaseConfigured) {
-      try {
-        const { data, error } = await supabase
-          .from('trucks')
-          .select('*')
-          .eq('organization_id', organizationId)
-          .order('created_at', { ascending: false });
-        if (!error && data) {
-          rawTrucks = data as Truck[];
-        }
-      } catch (err) {
-        console.warn('Supabase getTrucks failed, falling back to local storage:', err);
-      }
+    const inFlight = this.inFlightGetTrucks.get(organizationId);
+    if (inFlight) {
+      return inFlight;
     }
 
-    if (rawTrucks.length === 0 && !isUUID(organizationId)) {
-      rawTrucks = this.ensureInitialized(organizationId);
-    }
+    const request = (async () => {
+      let rawTrucks: Truck[] = [];
 
-    const clients = await this.getClients(organizationId);
-    const clientMap = new Map<string, Client>();
-    clients.forEach((c) => clientMap.set(c.id, c));
-
-    return rawTrucks.map((t) => {
-      const matchingClient = t.client_id ? clientMap.get(t.client_id) : null;
-      return {
-        ...t,
-        client: matchingClient
-          ? {
-              id: matchingClient.id,
-              company_name: matchingClient.company_name,
-              client_type: matchingClient.client_type,
-              contact_name: matchingClient.contact_name,
-              contact_phone: matchingClient.contact_phone,
-              contact_email: matchingClient.contact_email,
+      if (isSupabaseConfigured && isUUID(organizationId)) {
+        if (organizationId !== DEMO_ORGANIZATION_ID) {
+          try {
+            const { data, error } = await supabase
+              .from('trucks')
+              .select('*')
+              .eq('organization_id', organizationId)
+              .order('created_at', { ascending: false });
+            if (error) {
+              console.error('[TruckService] Supabase getTrucks error for real org:', error);
+              rawTrucks = [];
+            } else {
+              rawTrucks = (data || []) as Truck[];
             }
-          : null,
-      } as TruckWithClient;
+          } catch (fetchErr) {
+            console.error('[TruckService] Supabase getTrucks network error for real org:', fetchErr);
+            rawTrucks = [];
+          }
+        } else {
+          // Demo org flow
+          try {
+            const { data, error } = await supabase
+              .from('trucks')
+              .select('*')
+              .eq('organization_id', organizationId)
+              .order('created_at', { ascending: false });
+            if (error) {
+              console.warn('[TruckService] Supabase getTrucks error, using fallback:', error);
+              rawTrucks = this.ensureInitialized(organizationId);
+            } else {
+              rawTrucks = (data || []) as Truck[];
+              if (rawTrucks.length === 0) {
+                rawTrucks = this.ensureInitialized(organizationId);
+              }
+            }
+          } catch (fetchErr) {
+            console.warn('[TruckService] Supabase getTrucks network error, using fallback:', fetchErr);
+            rawTrucks = this.ensureInitialized(organizationId);
+          }
+        }
+      } else if (isSupabaseConfigured) {
+        try {
+          const { data, error } = await supabase
+            .from('trucks')
+            .select('*')
+            .eq('organization_id', organizationId)
+            .order('created_at', { ascending: false });
+          if (!error && data) {
+            rawTrucks = data as Truck[];
+          }
+        } catch (err) {
+          console.warn('Supabase getTrucks failed, falling back to local storage:', err);
+        }
+      }
+
+      if (rawTrucks.length === 0 && (!isUUID(organizationId) || organizationId === DEMO_ORGANIZATION_ID)) {
+        rawTrucks = this.ensureInitialized(organizationId);
+      }
+
+      const clients = await this.getClients(organizationId);
+      const clientMap = new Map<string, Client>();
+      clients.forEach((c) => clientMap.set(c.id, c));
+
+      return rawTrucks.map((t) => {
+        const matchingClient = t.client_id ? clientMap.get(t.client_id) : null;
+        return {
+          ...t,
+          client: matchingClient
+            ? {
+                id: matchingClient.id,
+                company_name: matchingClient.company_name,
+                client_type: matchingClient.client_type,
+                contact_name: matchingClient.contact_name,
+                contact_phone: matchingClient.contact_phone,
+                contact_email: matchingClient.contact_email,
+              }
+            : null,
+        } as TruckWithClient;
+      });
+    })().finally(() => {
+      this.inFlightGetTrucks.delete(organizationId);
     });
+
+    this.inFlightGetTrucks.set(organizationId, request);
+    return request;
   }
 
   async getTruckById(organizationId: string, id: string): Promise<TruckWithClient | null> {
-    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(id)) {
-      const { data, error } = await supabase
-        .from('trucks')
-        .select('*')
-        .eq('id', id)
-        .eq('organization_id', organizationId)
-        .maybeSingle();
-      if (error) {
-        console.error('[TruckService] Supabase getTruckById error:', error);
-        throw new Error(error.message || 'Failed to fetch truck from database.');
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      if (organizationId !== DEMO_ORGANIZATION_ID) {
+        if (!isUUID(id)) return null;
+        const { data, error } = await supabase
+          .from('trucks')
+          .select('*')
+          .eq('id', id)
+          .eq('organization_id', organizationId)
+          .maybeSingle();
+        if (error) {
+          console.error('[TruckService] Supabase getTruckById error:', error);
+          throw new Error(error.message || 'Failed to fetch truck from database.');
+        }
+        if (!data) return null;
+        const t = data as Truck;
+        const clients = await this.getClients(organizationId);
+        const matchingClient = t.client_id ? clients.find((c) => c.id === t.client_id) : null;
+        return {
+          ...t,
+          client: matchingClient
+            ? {
+                id: matchingClient.id,
+                company_name: matchingClient.company_name,
+                client_type: matchingClient.client_type,
+                contact_name: matchingClient.contact_name,
+                contact_phone: matchingClient.contact_phone,
+                contact_email: matchingClient.contact_email,
+              }
+            : null,
+        } as TruckWithClient;
       }
-      if (!data) return null;
-      const t = data as Truck;
-      const clients = await this.getClients(organizationId);
-      const matchingClient = t.client_id ? clients.find((c) => c.id === t.client_id) : null;
-      return {
-        ...t,
-        client: matchingClient
-          ? {
-              id: matchingClient.id,
-              company_name: matchingClient.company_name,
-              client_type: matchingClient.client_type,
-              contact_name: matchingClient.contact_name,
-              contact_phone: matchingClient.contact_phone,
-              contact_email: matchingClient.contact_email,
-            }
-          : null,
-      } as TruckWithClient;
+
+      if (isUUID(id)) {
+        const { data, error } = await supabase
+          .from('trucks')
+          .select('*')
+          .eq('id', id)
+          .eq('organization_id', organizationId)
+          .maybeSingle();
+        if (error) {
+          console.error('[TruckService] Supabase getTruckById error:', error);
+          throw new Error(error.message || 'Failed to fetch truck from database.');
+        }
+        if (!data) return null;
+        const t = data as Truck;
+        const clients = await this.getClients(organizationId);
+        const matchingClient = t.client_id ? clients.find((c) => c.id === t.client_id) : null;
+        return {
+          ...t,
+          client: matchingClient
+            ? {
+                id: matchingClient.id,
+                company_name: matchingClient.company_name,
+                client_type: matchingClient.client_type,
+                contact_name: matchingClient.contact_name,
+                contact_phone: matchingClient.contact_phone,
+                contact_email: matchingClient.contact_email,
+              }
+            : null,
+        } as TruckWithClient;
+      }
+    }
+
+    if (isUUID(organizationId) && organizationId !== DEMO_ORGANIZATION_ID) {
+      return null;
     }
 
     const trucks = await this.getTrucks(organizationId);

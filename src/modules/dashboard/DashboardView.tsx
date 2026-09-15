@@ -18,6 +18,11 @@ import {
   AlertCircle,
   Clock,
   CheckSquare,
+  Users,
+  Building2,
+  UserCheck,
+  Check,
+  Sparkles,
 } from 'lucide-react';
 import { MetricCard } from '../../components/common/MetricCard.tsx';
 import { StatusBadge } from '../../components/common/StatusBadge.tsx';
@@ -25,12 +30,304 @@ import { EmptyState } from '../../components/common/EmptyState.tsx';
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import { NavModule } from '../../components/layout/Sidebar.tsx';
 import { loadService } from '../loads/loadService.ts';
-import { documentService } from '../documents/documentService.ts';
 import { checkCallService } from '../checkcalls/checkCallService.ts';
 import { LoadWithRelations } from '../loads/loadTypes.ts';
-import { DocumentStats, LoadDocumentSummary } from '../documents/documentTypes.ts';
-import { TrackingStats } from '../checkcalls/checkCallTypes.ts';
+import {
+  DocumentStats,
+  LoadDocumentSummary,
+  DocumentChecklistItem,
+  DOCUMENT_TYPE_LABELS,
+  DOCUMENT_TYPE_SHORT_LABELS,
+  getRequiredDocumentsForLoadStatus,
+} from '../documents/documentTypes.ts';
+import {
+  TrackingStats,
+  CheckCall,
+  isOperationalException,
+} from '../checkcalls/checkCallTypes.ts';
+import { Document, DocumentType, DocumentStatus } from '../../types/domain.types.ts';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase.ts';
 import { formatCurrency, formatRPM } from '../../lib/calculations.ts';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DEMO_ORGANIZATION_ID = 'demo-org-1';
+function isUUID(str?: string | null): boolean {
+  return Boolean(str && UUID_REGEX.test(str.trim()));
+}
+
+const SEED_DOCUMENTS: Omit<Document, 'organization_id'>[] = [
+  {
+    id: 'demo-doc-1',
+    load_id: 'demo-load-1',
+    doc_type: 'rate_confirmation',
+    doc_status: 'verified',
+    file_path: 'freight-documents/demo-org-1/demo-load-1/RateCon_Apex_8841.pdf',
+    file_name: 'RateCon_Apex_8841.pdf',
+    file_size_bytes: 342100,
+    mime_type: 'application/pdf',
+    uploaded_by: 'Sarah Jenkins (Apex Broker)',
+    notes: 'Signed rate confirmation received via Apex EDI. Fuel surcharge and detention terms agreed at $75/hr after 2 hrs.',
+    created_at: new Date(Date.now() - 4 * 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 3 * 86400000).toISOString(),
+  },
+  {
+    id: 'demo-doc-2',
+    load_id: 'demo-load-2',
+    doc_type: 'rate_confirmation',
+    doc_status: 'verified',
+    file_path: 'freight-documents/demo-org-1/demo-load-2/RateCon_BlueRidge_8842.pdf',
+    file_name: 'RateCon_BlueRidge_8842.pdf',
+    file_size_bytes: 419200,
+    mime_type: 'application/pdf',
+    uploaded_by: 'Brandon Cole',
+    notes: 'Rate con signed for 44k lbs reefer produce. Continuous temperature monitoring active at 34°F.',
+    created_at: new Date(Date.now() - 3 * 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 2 * 86400000).toISOString(),
+  },
+  {
+    id: 'demo-doc-3',
+    load_id: 'demo-load-2',
+    doc_type: 'bol',
+    doc_status: 'received',
+    file_path: 'freight-documents/demo-org-1/demo-load-2/BOL_Shipper_Signed_8842.pdf',
+    file_name: 'BOL_Shipper_Signed_8842.pdf',
+    file_size_bytes: 885000,
+    mime_type: 'application/pdf',
+    uploaded_by: 'Driver Elena Rostova',
+    notes: 'Shipper signed clean BOL at Salinas packing house. 22 pallets loaded, seal #774921.',
+    created_at: new Date(Date.now() - 2 * 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 2 * 86400000).toISOString(),
+  },
+  {
+    id: 'demo-doc-4',
+    load_id: 'demo-load-3',
+    doc_type: 'rate_confirmation',
+    doc_status: 'verified',
+    file_path: 'freight-documents/demo-org-1/demo-load-3/RateCon_Horizon_8843.pdf',
+    file_name: 'RateCon_Horizon_8843.pdf',
+    file_size_bytes: 298400,
+    mime_type: 'application/pdf',
+    uploaded_by: 'Amanda Cross',
+    notes: 'Horizon Express flatbed rate confirmation.',
+    created_at: new Date(Date.now() - 5 * 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 4 * 86400000).toISOString(),
+  },
+  {
+    id: 'demo-doc-5',
+    load_id: 'demo-load-3',
+    doc_type: 'bol',
+    doc_status: 'verified',
+    file_path: 'freight-documents/demo-org-1/demo-load-3/BOL_Pickup_Signed_8843.pdf',
+    file_name: 'BOL_Pickup_Signed_8843.pdf',
+    file_size_bytes: 612000,
+    mime_type: 'application/pdf',
+    uploaded_by: 'Driver Marcus Vance',
+    notes: 'Clean pickup BOL stamped by Gary Steel Mill.',
+    created_at: new Date(Date.now() - 4 * 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 3 * 86400000).toISOString(),
+  },
+  {
+    id: 'demo-doc-6',
+    load_id: 'demo-load-3',
+    doc_type: 'pod',
+    doc_status: 'pending',
+    file_path: 'freight-documents/demo-org-1/demo-load-3/Signed_POD_Rec_8843.jpg',
+    file_name: 'Signed_POD_Rec_8843.jpg',
+    file_size_bytes: 1420000,
+    mime_type: 'image/jpeg',
+    uploaded_by: 'Driver Marcus Vance',
+    notes: 'Receiver stamped delivery receipt. Awaiting dispatcher audit for unloader signature verification.',
+    created_at: new Date(Date.now() - 1 * 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 1 * 86400000).toISOString(),
+  },
+  {
+    id: 'demo-doc-7',
+    load_id: 'demo-load-4',
+    doc_type: 'rate_confirmation',
+    doc_status: 'verified',
+    file_path: 'freight-documents/demo-org-1/demo-load-4/RateCon_Keystone_8844.pdf',
+    file_name: 'RateCon_Keystone_8844.pdf',
+    file_size_bytes: 312000,
+    mime_type: 'application/pdf',
+    uploaded_by: 'David Morrison',
+    notes: 'Rate con verified.',
+    created_at: new Date(Date.now() - 7 * 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 6 * 86400000).toISOString(),
+  },
+  {
+    id: 'demo-doc-8',
+    load_id: 'demo-load-4',
+    doc_type: 'bol',
+    doc_status: 'verified',
+    file_path: 'freight-documents/demo-org-1/demo-load-4/BOL_Signed_8844.pdf',
+    file_name: 'BOL_Signed_8844.pdf',
+    file_size_bytes: 540000,
+    mime_type: 'application/pdf',
+    uploaded_by: 'Driver David Chen',
+    notes: 'Shipper signed.',
+    created_at: new Date(Date.now() - 6 * 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 5 * 86400000).toISOString(),
+  },
+  {
+    id: 'demo-doc-9',
+    load_id: 'demo-load-4',
+    doc_type: 'pod',
+    doc_status: 'verified',
+    file_path: 'freight-documents/demo-org-1/demo-load-4/POD_Delivery_8844.pdf',
+    file_name: 'POD_Delivery_8844.pdf',
+    file_size_bytes: 780000,
+    mime_type: 'application/pdf',
+    uploaded_by: 'Driver David Chen',
+    notes: 'Signed and dated POD with receiver stamp.',
+    created_at: new Date(Date.now() - 4 * 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 3 * 86400000).toISOString(),
+  },
+  {
+    id: 'demo-doc-10',
+    load_id: 'demo-load-4',
+    doc_type: 'invoice',
+    doc_status: 'verified',
+    file_path: 'freight-documents/demo-org-1/demo-load-4/Invoice_DD_8844.pdf',
+    file_name: 'Invoice_DD_8844.pdf',
+    file_size_bytes: 245000,
+    mime_type: 'application/pdf',
+    uploaded_by: 'Admin / Billing Dept',
+    notes: 'Factoring billing packet generated and submitted to OTR Capital.',
+    created_at: new Date(Date.now() - 2 * 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 1 * 86400000).toISOString(),
+  },
+];
+
+async function fetchDashboardRawDocuments(orgId: string): Promise<Document[]> {
+  if (!orgId) return [];
+  if (isSupabaseConfigured && isUUID(orgId)) {
+    try {
+      const { data, error } = await supabase
+        .from('documents')
+        .select('*')
+        .eq('organization_id', orgId)
+        .order('created_at', { ascending: false });
+      if (!error && data) {
+        return data as Document[];
+      }
+      if (orgId !== DEMO_ORGANIZATION_ID) {
+        return [];
+      }
+    } catch (err) {
+      console.warn('Dashboard document fetch failed, falling back:', err);
+      if (orgId !== DEMO_ORGANIZATION_ID) {
+        return [];
+      }
+    }
+  } else if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('documents')
+        .select('*')
+        .eq('organization_id', orgId)
+        .order('created_at', { ascending: false });
+      if (!error && data) {
+        return data as Document[];
+      }
+    } catch (err) {
+      console.warn('Dashboard document fetch failed for demo organization:', err);
+    }
+  }
+
+  if (isUUID(orgId) && orgId !== DEMO_ORGANIZATION_ID) {
+    return [];
+  }
+
+  // Fallback to local storage (same as documentService fallback)
+  try {
+    const raw = localStorage.getItem(`dispatchdesk_demo_documents_${orgId}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((d: Document) => d && d.organization_id === orgId)
+          .filter((d: Document) => !(isUUID(orgId) && orgId !== DEMO_ORGANIZATION_ID && typeof d.id === 'string' && d.id.startsWith('demo-doc-')));
+      }
+    } else if (!isUUID(orgId) || orgId === DEMO_ORGANIZATION_ID) {
+      const seeded: Document[] = SEED_DOCUMENTS.map((doc) => ({
+        ...doc,
+        organization_id: orgId,
+      }));
+      localStorage.setItem(`dispatchdesk_demo_documents_${orgId}`, JSON.stringify(seeded));
+      return seeded;
+    }
+  } catch {
+    // Ignore local storage read errors
+  }
+  return [];
+}
+
+function computeLoadDocumentSummary(
+  load: LoadWithRelations,
+  loadDocs: Document[]
+): LoadDocumentSummary {
+  const requiredTypes = getRequiredDocumentsForLoadStatus(load.pipeline_status);
+  const allStandardTypes: DocumentType[] = ['rate_confirmation', 'bol', 'pod', 'invoice'];
+
+  const checklist: DocumentChecklistItem[] = allStandardTypes.map((docType) => {
+    const isReq = requiredTypes.includes(docType);
+    const existing = loadDocs.find((d) => d.doc_type === docType) || null;
+    let requirementReason = 'Not required yet';
+    if (isReq) {
+      if (docType === 'rate_confirmation') requirementReason = 'Mandatory for Booked & In Transit status';
+      if (docType === 'bol') requirementReason = 'Mandatory for Delivered status';
+      if (docType === 'pod') requirementReason = 'Mandatory for Delivered & Invoicing';
+      if (docType === 'invoice') requirementReason = 'Mandatory for Invoiced & Paid settlement';
+    }
+    let status: DocumentStatus = 'missing';
+    if (existing) {
+      status = existing.doc_status;
+    }
+    return {
+      doc_type: docType,
+      label: DOCUMENT_TYPE_LABELS[docType],
+      shortLabel: DOCUMENT_TYPE_SHORT_LABELS[docType],
+      isRequired: isReq,
+      requirementReason,
+      status,
+      document: existing ? ({ ...existing, load_number: load.load_number, load: load as any } as any) : null,
+    };
+  });
+
+  const receivedTypes = loadDocs
+    .filter((d) => d.doc_status === 'received' || d.doc_status === 'verified')
+    .map((d) => d.doc_type as DocumentType);
+
+  const missingTypes = requiredTypes.filter((t) => !receivedTypes.includes(t));
+  const totalRequired = requiredTypes.length;
+  const totalCompleted = requiredTypes.filter((t) => receivedTypes.includes(t)).length;
+  const isComplete = totalRequired > 0 ? missingTypes.length === 0 : true;
+
+  const hasRateCon = loadDocs.some(
+    (d) => d.doc_type === 'rate_confirmation' && (d.doc_status === 'received' || d.doc_status === 'verified')
+  );
+  const hasBOL = loadDocs.some(
+    (d) => d.doc_type === 'bol' && (d.doc_status === 'received' || d.doc_status === 'verified')
+  );
+  const hasPOD = loadDocs.some(
+    (d) => d.doc_type === 'pod' && (d.doc_status === 'received' || d.doc_status === 'verified')
+  );
+  const isReadyToInvoice = load.pipeline_status === 'delivered' && hasRateCon && hasBOL && hasPOD;
+
+  return {
+    loadId: load.id,
+    loadNumber: load.load_number,
+    pipelineStatus: load.pipeline_status,
+    requiredTypes,
+    receivedTypes,
+    missingTypes,
+    totalRequired,
+    totalCompleted,
+    isComplete,
+    isReadyToInvoice,
+    checklist,
+  };
+}
 
 interface DashboardViewProps {
   onNavigate: (module: NavModule) => void;
@@ -38,8 +335,9 @@ interface DashboardViewProps {
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onNewLoadClick }) => {
-  const { activeOrganization } = useAuth();
+  const { activeOrganization, userRole } = useAuth();
   const orgId = activeOrganization?.id || '';
+  const isOwnerAdmin = userRole === 'owner_admin';
 
   const [isLoading, setIsLoading] = useState(true);
   const [activeLoads, setActiveLoads] = useState<LoadWithRelations[]>([]);
@@ -86,18 +384,130 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onNewL
     const fetchDashData = async () => {
       setIsLoading(true);
       try {
-        const [allLoads, [trucks, drivers, clients, brokers], dStats, missingDocs, tStats, missingCheckIns] =
-          await Promise.all([
-            loadService.getLoads(orgId),
-            loadService.getDependencies(orgId),
-            documentService.getDocumentStats(orgId),
-            documentService.getMissingDocuments(orgId),
-            checkCallService.getTrackingStats(orgId),
-            checkCallService.getLoadsMissingRecentCheckIn(orgId),
-          ]);
+        // Fetch base datasets once in parallel: loads, dependencies, documents, check_calls
+        const [loadsRes, depsRes, docsRes, callsRes] = await Promise.allSettled([
+          loadService.getLoads(orgId),
+          loadService.getDependencies(orgId),
+          fetchDashboardRawDocuments(orgId),
+          checkCallService.getCheckCalls(orgId),
+        ]);
 
         if (!isMounted) return;
 
+        const allLoads: LoadWithRelations[] = loadsRes.status === 'fulfilled' ? loadsRes.value : [];
+        const deps = depsRes.status === 'fulfilled' ? depsRes.value : [[], [], [], [], []];
+        const [trucks, drivers, clients, brokers] = deps;
+        const allDocs: Document[] = docsRes.status === 'fulfilled' ? docsRes.value : [];
+        const allCalls: CheckCall[] = callsRes.status === 'fulfilled' ? callsRes.value : [];
+
+        // 1. Group documents by load_id
+        const docsByLoadId = new Map<string, Document[]>();
+        let pendingVerificationCount = 0;
+        let verifiedCount = 0;
+        let receivedCount = 0;
+
+        for (const d of allDocs) {
+          if (d.doc_status === 'pending') pendingVerificationCount++;
+          if (d.doc_status === 'verified') verifiedCount++;
+          if (d.doc_status === 'received') receivedCount++;
+
+          if (d.load_id) {
+            const existing = docsByLoadId.get(d.load_id);
+            if (existing) {
+              existing.push(d);
+            } else {
+              docsByLoadId.set(d.load_id, [d]);
+            }
+          }
+        }
+
+        // 2. Compute missing documents and document stats across all loads
+        let missingRateConsCount = 0;
+        let missingPODsCount = 0;
+        let readyToInvoiceLoadsCount = 0;
+        const missingDocsList: { load: LoadWithRelations; missingDocs: string[]; summary: LoadDocumentSummary }[] = [];
+
+        for (const load of allLoads) {
+          const loadDocs = docsByLoadId.get(load.id) || [];
+          const summary = computeLoadDocumentSummary(load, loadDocs);
+
+          if (summary.missingTypes.length > 0) {
+            missingDocsList.push({
+              load,
+              missingDocs: summary.missingTypes,
+              summary,
+            });
+          }
+
+          if (summary.missingTypes.includes('rate_confirmation')) {
+            missingRateConsCount++;
+          }
+          if (summary.missingTypes.includes('pod')) {
+            missingPODsCount++;
+          }
+          if (summary.isReadyToInvoice) {
+            readyToInvoiceLoadsCount++;
+          }
+        }
+
+        const dStats: DocumentStats = {
+          totalDocuments: allDocs.length,
+          pendingVerificationCount,
+          verifiedCount,
+          receivedCount,
+          missingRateConsCount,
+          missingPODsCount,
+          readyToInvoiceLoadsCount,
+        };
+
+        // 3. Compute tracking stats and missing check-ins across active loads
+        const activeTrackingLoads = allLoads.filter(
+          (l) => l.pipeline_status === 'booked' || l.pipeline_status === 'in_transit'
+        );
+
+        let onTimeCount = 0;
+        let delayedCount = 0;
+        let atRiskCount = 0;
+        let exceptionsCount = 0;
+        let missingRecentCheckInCount = 0;
+        const twentyFourHoursAgoMs = Date.now() - 24 * 3600000;
+        const missingCheckIns: LoadWithRelations[] = [];
+
+        for (const load of activeTrackingLoads) {
+          const loadCalls = allCalls.filter((c) => c.load_id === load.id);
+          const latest = loadCalls.length > 0 ? loadCalls[0] : null;
+
+          if (!latest) {
+            missingRecentCheckInCount++;
+            missingCheckIns.push(load);
+          } else {
+            const lastTime = new Date(latest.created_at).getTime();
+            if (lastTime < twentyFourHoursAgoMs) {
+              missingRecentCheckInCount++;
+              missingCheckIns.push(load);
+            }
+
+            if (latest.status === 'on_time') onTimeCount++;
+            else if (latest.status === 'delayed') delayedCount++;
+            else if (latest.status === 'at_risk') atRiskCount++;
+
+            if (isOperationalException(latest.call_type, latest.status)) {
+              exceptionsCount++;
+            }
+          }
+        }
+
+        const tStats: TrackingStats = {
+          totalCheckCalls: allCalls.length,
+          activeLoadsTrackingCount: activeTrackingLoads.length,
+          onTimeCount,
+          delayedCount,
+          atRiskCount,
+          exceptionsCount,
+          missingRecentCheckInCount,
+        };
+
+        // 4. Update state contracts identically
         setTotalLoadsCount(allLoads.length);
         const inFlight = allLoads.filter(
           (l: LoadWithRelations) => l.pipeline_status === 'booked' || l.pipeline_status === 'in_transit'
@@ -116,11 +526,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onNewL
         setBrokersCount(brokers.length);
         setDriversCount(drivers.length);
         setDocStats(dStats);
-        setMissingDocItems(missingDocs as unknown as { load: LoadWithRelations; missingDocs: string[]; summary: LoadDocumentSummary }[]);
+        setMissingDocItems(missingDocsList);
         setTrackingStats(tStats);
         setMissingCheckInLoads(missingCheckIns);
       } catch (err) {
-        console.error('Error fetching dashboard statistics:', err);
+        console.warn('Dashboard statistics load warning (gracefully handled):', err);
       } finally {
         if (isMounted) {
           setIsLoading(false);
@@ -133,6 +543,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onNewL
       isMounted = false;
     };
   }, [orgId]);
+
+  const isSetupComplete = clientsCount > 0 && trucksCount > 0 && driversCount > 0 && totalLoadsCount > 0;
+  const completedSteps = 1 + (clientsCount > 0 ? 1 : 0) + (trucksCount > 0 ? 1 : 0) + (driversCount > 0 ? 1 : 0) + (totalLoadsCount > 0 ? 1 : 0);
+  const setupPercent = Math.round((completedSteps / 5) * 100);
+
+  const handleNewLoadClick = () => {
+    if (clientsCount === 0) {
+      onNavigate('clients');
+      return;
+    }
+    if (trucksCount === 0) {
+      onNavigate('trucks');
+      return;
+    }
+    if (driversCount === 0) {
+      onNavigate('drivers');
+      return;
+    }
+    onNewLoadClick();
+  };
 
   if (isLoading) {
     return (
@@ -232,6 +662,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onNewL
             >
               Documents
             </button>
+            {isOwnerAdmin && (
+              <button
+                id="dash-quick-workload-btn"
+                type="button"
+                onClick={() => onNavigate('workload')}
+                className="px-2.5 py-1.5 text-xs font-semibold text-indigo-300 hover:text-indigo-200 hover:bg-indigo-950/80 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <Users className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Workload</span>
+              </button>
+            )}
           </div>
 
           {/* Strong Secondary Navigation: Operations Calendar */}
@@ -245,15 +686,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onNewL
             <span>Operations Calendar</span>
           </button>
 
-          {/* Dominant Primary CTA: Book New Load */}
+          {/* Dominant Primary CTA */}
           <button
             id="dash-new-load-btn"
             type="button"
-            onClick={onNewLoadClick}
+            onClick={handleNewLoadClick}
             className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-sm transition-colors cursor-pointer shrink-0"
           >
-            <Plus className="w-4 h-4" />
-            <span>Book New Load</span>
+            {clientsCount === 0 ? (
+              <>
+                <Building2 className="w-4 h-4" />
+                <span>Add First Client</span>
+              </>
+            ) : trucksCount === 0 ? (
+              <>
+                <Truck className="w-4 h-4" />
+                <span>Add First Truck</span>
+              </>
+            ) : driversCount === 0 ? (
+              <>
+                <UserCheck className="w-4 h-4" />
+                <span>Add First Driver</span>
+              </>
+            ) : (
+              <>
+                <Plus className="w-4 h-4" />
+                <span>Book New Load</span>
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -294,6 +754,248 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onNewL
         />
       </div>
 
+      {/* Dispatcher Setup & Fleet Onboarding Guide */}
+      {!isSetupComplete && (
+        <div
+          id="dispatcher-setup-guide"
+          className="bg-slate-900/90 border border-indigo-900/40 rounded-2xl p-5 sm:p-6 shadow-sm space-y-5"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm sm:text-base font-bold text-slate-100 tracking-tight">
+                    Dispatcher Setup Guide
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Follow the standard dispatch lifecycle to prepare your operations for load booking.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 self-start sm:self-auto">
+              <span className="text-xs font-semibold px-3 py-1 rounded-full bg-indigo-950/80 text-indigo-300 border border-indigo-800/60 font-mono">
+                {completedSteps} / 5 Steps Complete ({setupPercent}%)
+              </span>
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          <div className="w-full bg-slate-800/80 rounded-full h-1.5 overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-indigo-500 to-emerald-400 transition-all duration-500"
+              style={{ width: `${setupPercent}%` }}
+            />
+          </div>
+
+          {/* Step Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3">
+            {/* Step 1: Organization */}
+            <div className="p-3.5 rounded-xl border border-emerald-800/40 bg-emerald-950/20 flex flex-col justify-between space-y-3">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">Step 1</span>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                </div>
+                <h3 className="text-xs font-bold text-slate-200">Organization</h3>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Workspace created for <span className="text-slate-300 font-medium">{activeOrganization?.name || 'team'}</span>.
+                </p>
+              </div>
+              <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
+                <Check className="w-3.5 h-3.5" /> Completed
+              </span>
+            </div>
+
+            {/* Step 2: Carrier Client */}
+            <div
+              className={`p-3.5 rounded-xl border flex flex-col justify-between space-y-3 transition-colors ${
+                clientsCount > 0
+                  ? 'border-emerald-800/40 bg-emerald-950/20'
+                  : 'border-indigo-500/50 bg-indigo-950/30 ring-1 ring-indigo-500/30'
+              }`}
+            >
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className={`text-[11px] font-bold uppercase tracking-wider ${clientsCount > 0 ? 'text-emerald-400' : 'text-indigo-400'}`}>
+                    Step 2 • Required
+                  </span>
+                  {clientsCount > 0 ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  ) : (
+                    <Building2 className="w-4 h-4 text-indigo-400" />
+                  )}
+                </div>
+                <h3 className="text-xs font-bold text-slate-200">Carrier Client</h3>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  {clientsCount > 0
+                    ? `${clientsCount} carrier company on file.`
+                    : 'The motor carrier company you dispatch for.'}
+                </p>
+              </div>
+              {clientsCount > 0 ? (
+                <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
+                  <Check className="w-3.5 h-3.5" /> Completed
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onNavigate('clients')}
+                  className="w-full py-1.5 px-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors cursor-pointer text-center"
+                >
+                  Add Client
+                </button>
+              )}
+            </div>
+
+            {/* Step 3: Fleet Trucks */}
+            <div
+              className={`p-3.5 rounded-xl border flex flex-col justify-between space-y-3 transition-colors ${
+                trucksCount > 0
+                  ? 'border-emerald-800/40 bg-emerald-950/20'
+                  : clientsCount > 0
+                  ? 'border-indigo-500/50 bg-indigo-950/30 ring-1 ring-indigo-500/30'
+                  : 'border-slate-800/80 bg-slate-950/40 opacity-70'
+              }`}
+            >
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className={`text-[11px] font-bold uppercase tracking-wider ${trucksCount > 0 ? 'text-emerald-400' : clientsCount > 0 ? 'text-indigo-400' : 'text-slate-500'}`}>
+                    Step 3 • Required
+                  </span>
+                  {trucksCount > 0 ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  ) : (
+                    <Truck className={`w-4 h-4 ${clientsCount > 0 ? 'text-indigo-400' : 'text-slate-600'}`} />
+                  )}
+                </div>
+                <h3 className="text-xs font-bold text-slate-200">Power Units</h3>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  {trucksCount > 0
+                    ? `${trucksCount} truck(s) registered.`
+                    : clientsCount > 0
+                    ? 'Trucks and tractors for your client.'
+                    : 'Requires carrier client first.'}
+                </p>
+              </div>
+              {trucksCount > 0 ? (
+                <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
+                  <Check className="w-3.5 h-3.5" /> Completed
+                </span>
+              ) : clientsCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => onNavigate('trucks')}
+                  className="w-full py-1.5 px-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors cursor-pointer text-center"
+                >
+                  Add Truck
+                </button>
+              ) : (
+                <span className="text-[11px] text-slate-500 font-medium">Locked</span>
+              )}
+            </div>
+
+            {/* Step 4: Drivers */}
+            <div
+              className={`p-3.5 rounded-xl border flex flex-col justify-between space-y-3 transition-colors ${
+                driversCount > 0
+                  ? 'border-emerald-800/40 bg-emerald-950/20'
+                  : clientsCount > 0
+                  ? 'border-indigo-500/50 bg-indigo-950/30 ring-1 ring-indigo-500/30'
+                  : 'border-slate-800/80 bg-slate-950/40 opacity-70'
+              }`}
+            >
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className={`text-[11px] font-bold uppercase tracking-wider ${driversCount > 0 ? 'text-emerald-400' : clientsCount > 0 ? 'text-indigo-400' : 'text-slate-500'}`}>
+                    Step 4 • Required
+                  </span>
+                  {driversCount > 0 ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  ) : (
+                    <UserCheck className={`w-4 h-4 ${clientsCount > 0 ? 'text-indigo-400' : 'text-slate-600'}`} />
+                  )}
+                </div>
+                <h3 className="text-xs font-bold text-slate-200">Drivers</h3>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  {driversCount > 0
+                    ? `${driversCount} driver(s) registered.`
+                    : clientsCount > 0
+                    ? 'Qualified operators for your client.'
+                    : 'Requires carrier client first.'}
+                </p>
+              </div>
+              {driversCount > 0 ? (
+                <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
+                  <Check className="w-3.5 h-3.5" /> Completed
+                </span>
+              ) : clientsCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => onNavigate('drivers')}
+                  className="w-full py-1.5 px-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors cursor-pointer text-center"
+                >
+                  Add Driver
+                </button>
+              ) : (
+                <span className="text-[11px] text-slate-500 font-medium">Locked</span>
+              )}
+            </div>
+
+            {/* Step 5: Book First Load */}
+            <div
+              className={`p-3.5 rounded-xl border flex flex-col justify-between space-y-3 transition-colors ${
+                totalLoadsCount > 0
+                  ? 'border-emerald-800/40 bg-emerald-950/20'
+                  : clientsCount > 0 && trucksCount > 0 && driversCount > 0
+                  ? 'border-indigo-500/50 bg-indigo-950/30 ring-1 ring-indigo-500/30'
+                  : 'border-slate-800/80 bg-slate-950/40 opacity-70'
+              }`}
+            >
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className={`text-[11px] font-bold uppercase tracking-wider ${totalLoadsCount > 0 ? 'text-emerald-400' : clientsCount > 0 && trucksCount > 0 && driversCount > 0 ? 'text-indigo-400' : 'text-slate-500'}`}>
+                    Step 5 • Goal
+                  </span>
+                  {totalLoadsCount > 0 ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  ) : (
+                    <PackageCheck className={`w-4 h-4 ${clientsCount > 0 && trucksCount > 0 && driversCount > 0 ? 'text-indigo-400' : 'text-slate-600'}`} />
+                  )}
+                </div>
+                <h3 className="text-xs font-bold text-slate-200">First Load</h3>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  {totalLoadsCount > 0
+                    ? `${totalLoadsCount} load(s) dispatched.`
+                    : clientsCount > 0 && trucksCount > 0 && driversCount > 0
+                    ? 'All fleet prerequisites met! Book your first trip.'
+                    : 'Requires client, truck & driver.'}
+                </p>
+              </div>
+              {totalLoadsCount > 0 ? (
+                <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
+                  <Check className="w-3.5 h-3.5" /> Completed
+                </span>
+              ) : clientsCount > 0 && trucksCount > 0 && driversCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={handleNewLoadClick}
+                  className="w-full py-1.5 px-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors cursor-pointer text-center"
+                >
+                  Book Load
+                </button>
+              ) : (
+                <span className="text-[11px] text-slate-500 font-medium">Locked</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Operational Grids */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 2 Cols: Active Loads Pipeline & Paperwork Attention */}
@@ -319,14 +1021,43 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onNewL
 
             <div className="pt-3">
               {activeLoads.length === 0 ? (
-                <EmptyState
-                  id="empty-dash-loads"
-                  icon={PackageCheck}
-                  title="No Active Dispatches in Progress"
-                  description="When you book loads for your owner-operators and fleet clients, active pickups and en-route tracking will appear here."
-                  actionLabel="Dispatch First Load"
-                  onAction={onNewLoadClick}
-                />
+                clientsCount === 0 ? (
+                  <EmptyState
+                    id="empty-dash-no-clients"
+                    icon={Building2}
+                    title="Add your first carrier client"
+                    description="In DispatcherDesk, a client is the motor carrier company you dispatch for. Add your carrier client before booking loads."
+                    actionLabel="Add Carrier Client"
+                    onAction={() => onNavigate('clients')}
+                  />
+                ) : trucksCount === 0 ? (
+                  <EmptyState
+                    id="empty-dash-no-trucks"
+                    icon={Truck}
+                    title="Add fleet power units"
+                    description="Add trucks for your carrier client so you can assign equipment to freight loads."
+                    actionLabel="Add First Truck"
+                    onAction={() => onNavigate('trucks')}
+                  />
+                ) : driversCount === 0 ? (
+                  <EmptyState
+                    id="empty-dash-no-drivers"
+                    icon={UserCheck}
+                    title="Add carrier drivers"
+                    description="Add drivers for your carrier client so you can assign personnel to freight loads."
+                    actionLabel="Add First Driver"
+                    onAction={() => onNavigate('drivers')}
+                  />
+                ) : (
+                  <EmptyState
+                    id="empty-dash-loads"
+                    icon={PackageCheck}
+                    title="No Active Dispatches in Progress"
+                    description="When you book loads for your owner-operators and fleet clients, active pickups and en-route tracking will appear here."
+                    actionLabel="Dispatch First Load"
+                    onAction={handleNewLoadClick}
+                  />
+                )
               ) : (
                 <div className="divide-y divide-slate-800/60 font-sans">
                   {activeLoads.map((load) => (

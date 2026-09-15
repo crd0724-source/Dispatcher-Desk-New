@@ -12,6 +12,7 @@ import {
   RefreshCw,
   LogOut,
   Sparkles,
+  Truck,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import { teamService, normalizeEmail } from './teamService.ts';
@@ -199,6 +200,8 @@ export const InvitationAcceptView: React.FC<InvitationAcceptViewProps> = ({
         return 'Dispatcher';
       case 'staff':
         return 'Staff & Operations';
+      case 'driver':
+        return 'Driver';
       default:
         return role || 'Team Member';
     }
@@ -273,11 +276,18 @@ export const InvitationAcceptView: React.FC<InvitationAcceptViewProps> = ({
             </div>
             <div className="space-y-1">
               <h2 className="text-lg font-bold text-emerald-300">
-                You're now a member!
+                {invitation.role === 'driver' ? 'Driver Identity Linked!' : "You're now a member!"}
               </h2>
               <p className="text-xs text-slate-300 leading-relaxed">
-                Welcome to <strong className="text-white">{invitation.organization_name || 'the organization'}</strong>. Your account has been provisioned with the <strong className="text-white">{formatRoleTitle(invitation.role)}</strong> role.
+                {invitation.role === 'driver'
+                  ? `Welcome to ${invitation.organization_name || 'the fleet'}. Your account has been securely linked to driver profile ${invitation.driver_name || 'Driver'}.`
+                  : `Welcome to ${invitation.organization_name || 'the organization'}. Your account has been provisioned with the ${formatRoleTitle(invitation.role)} role.`}
               </p>
+              {invitation.role === 'driver' && (
+                <div className="mt-2 p-2.5 rounded-lg bg-emerald-950/60 border border-emerald-800/60 text-emerald-200 text-xs">
+                  Your persistent driver identity is now active. All future load dispatches assigned to you by your dispatcher will appear in your portal automatically without requiring new invites.
+                </div>
+              )}
             </div>
             <button
               id="btn-enter-workspace"
@@ -285,7 +295,7 @@ export const InvitationAcceptView: React.FC<InvitationAcceptViewProps> = ({
               onClick={onDismiss}
               className="inline-flex items-center gap-2 px-6 py-3 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition cursor-pointer shadow-lg shadow-indigo-600/30"
             >
-              <span>Enter Organization Workspace</span>
+              <span>{invitation.role === 'driver' ? 'Open Mobile Driver Portal' : 'Enter Organization Workspace'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
@@ -317,6 +327,62 @@ export const InvitationAcceptView: React.FC<InvitationAcceptViewProps> = ({
             >
               Return to Home
             </button>
+          </div>
+        ) : invitation.role === 'driver' ? (
+          /* Driver Migration Notice for Legacy Invitations */
+          <div className="space-y-6">
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-6 space-y-4 text-center">
+              <div className="w-14 h-14 rounded-full bg-indigo-950/60 border border-indigo-800/80 text-indigo-400 flex items-center justify-center mx-auto shadow-inner">
+                <Truck className="w-7 h-7" />
+              </div>
+
+              <div className="space-y-2">
+                <h2 className="text-base font-bold text-slate-100">
+                  Driver Portal Authentication has migrated to Phone OTP.
+                </h2>
+                <p className="text-xs text-slate-300 max-w-sm mx-auto leading-relaxed">
+                  Please log in using your registered mobile phone number.
+                </p>
+              </div>
+
+              <div className="divide-y divide-slate-800/70 text-xs text-left bg-slate-900/60 rounded-lg p-3.5 border border-slate-800">
+                <div className="py-1.5 flex items-center justify-between">
+                  <span className="text-slate-400">Organization:</span>
+                  <span className="font-semibold text-slate-200">{invitation.organization_name || 'Fleet Organization'}</span>
+                </div>
+                {invitation.driver_name && (
+                  <div className="py-1.5 flex items-center justify-between">
+                    <span className="text-slate-400">Driver Profile:</span>
+                    <span className="font-semibold text-slate-200">{invitation.driver_name}</span>
+                  </div>
+                )}
+                <div className="py-1.5 flex items-center justify-between">
+                  <span className="text-slate-400">Invited Email:</span>
+                  <span className="font-mono text-slate-300">{invitation.email}</span>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <a
+                  id="btn-driver-portal-login"
+                  href="/driver/login"
+                  className="inline-flex items-center justify-center gap-2 w-full py-3 px-4 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 transition shadow-lg shadow-indigo-600/30 cursor-pointer"
+                >
+                  <span>Go to Driver Portal Login</span>
+                  <ArrowRight className="w-4 h-4" />
+                </a>
+              </div>
+            </div>
+
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={onDismiss}
+                className="text-xs text-slate-400 hover:text-slate-300 transition cursor-pointer"
+              >
+                Return to Home
+              </button>
+            </div>
           </div>
         ) : (
           /* Valid Active Invitation Flow */

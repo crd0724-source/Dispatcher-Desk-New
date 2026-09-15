@@ -587,7 +587,7 @@ export const AIAssistantView: React.FC = () => {
               <p className="text-xs text-slate-400 mt-1">
                 Generated at {new Date(activeResponse.timestamp).toLocaleTimeString()} • Engine:{' '}
                 <span className="text-slate-300 font-mono">
-                  {activeResponse.mode === 'gemini' ? 'Gemini 3.7 Server Proxy' : 'Local Deterministic Template'}
+                  {activeResponse.mode === 'gemini' ? 'Gemini 3.8 Server Proxy' : 'Local Deterministic Template'}
                 </span>
               </p>
             </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   UserPlus,
   Mail,
@@ -9,28 +9,35 @@ import {
   Check,
   AlertCircle,
   RefreshCw,
-  ExternalLink,
 } from 'lucide-react';
 import { Modal } from '../../components/common/Modal.tsx';
 import { UserRole, TeamInvitation } from '../../types/domain.types.ts';
 import { teamService } from './teamService.ts';
 import { useAuth } from '../../contexts/AuthContext.tsx';
-import { StatusBadge } from '../../components/common/StatusBadge.tsx';
 
 interface InviteMemberModalProps {
   isOpen: boolean;
   onClose: () => void;
   onInvitationCreated?: (invitation: TeamInvitation) => void;
+  initialRole?: UserRole;
+  initialDriverId?: string | null;
+  initialEmail?: string | null;
 }
 
 export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({
   isOpen,
   onClose,
   onInvitationCreated,
+  initialRole,
+  initialEmail,
 }) => {
   const { activeOrganization, user, userRole } = useAuth();
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState<UserRole>('dispatcher');
+  const isOwnerAdmin = userRole === 'owner_admin' || userRole === null;
+
+  const defaultRole: UserRole = initialRole && initialRole !== 'driver' ? initialRole : 'dispatcher';
+  const [email, setEmail] = useState(initialEmail || '');
+  const [role, setRole] = useState<UserRole>(defaultRole);
+
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [createdInvite, setCreatedInvite] = useState<{
@@ -39,6 +46,18 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({
     rawToken: string;
   } | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // Sync props when opening modal
+  useEffect(() => {
+    if (isOpen) {
+      setEmail(initialEmail || '');
+      setRole(initialRole && initialRole !== 'driver' ? initialRole : 'dispatcher');
+      setErrorMessage(null);
+      setCreatedInvite(null);
+      setCopied(false);
+      setIsLoading(false);
+    }
+  }, [isOpen, initialEmail, initialRole]);
 
   const resetForm = () => {
     setEmail('');
@@ -70,7 +89,8 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({
         email.trim(),
         role,
         user?.id,
-        userRole
+        userRole,
+        null
       );
 
       setCreatedInvite(result);
@@ -161,7 +181,7 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({
             </div>
 
             <p className="text-[11px] text-slate-400 leading-relaxed">
-              Share this single-use link with the invitee. When they open the link, they will be prompted to authenticate with <span className="font-mono text-slate-300">{createdInvite.invitation.email}</span> to join the fleet workspace.
+              Share this single-use link with the invitee. When they open the link, they will authenticate with <span className="font-mono text-slate-300">{createdInvite.invitation.email}</span> to join the fleet workspace.
             </p>
           </div>
 
@@ -194,25 +214,7 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({
             </div>
           )}
 
-          <div>
-            <label className="block text-slate-300 font-medium mb-1 flex items-center gap-1.5">
-              <Mail className="w-3.5 h-3.5 text-slate-400" />
-              <span>Invitee Email Address *</span>
-            </label>
-            <input
-              id="input-invite-email"
-              type="email"
-              required
-              placeholder="teammate@company.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 transition"
-            />
-            <p className="text-[11px] text-slate-500 mt-1">
-              Must match the email the team member will use to authenticate.
-            </p>
-          </div>
-
+          {/* Role Selection */}
           <div>
             <label className="block text-slate-300 font-medium mb-1 flex items-center gap-1.5">
               <Shield className="w-3.5 h-3.5 text-slate-400" />
@@ -226,8 +228,30 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({
             >
               <option value="dispatcher">Dispatcher — Full Operational Dispatch & Paperwork</option>
               <option value="staff">Staff — Read-Only & Document Check-in</option>
-              <option value="owner_admin">Owner / Admin — Full Org & Team Control</option>
+              {isOwnerAdmin && (
+                <option value="owner_admin">Owner / Admin — Full Org & Team Control</option>
+              )}
             </select>
+          </div>
+
+          {/* Email Input */}
+          <div>
+            <label className="block text-slate-300 font-medium mb-1 flex items-center gap-1.5">
+              <Mail className="w-3.5 h-3.5 text-slate-400" />
+              <span>Invitee Email Address *</span>
+            </label>
+            <input
+              id="input-invite-email"
+              type="email"
+              required
+              placeholder="e.g. colleague@logistics.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 transition"
+            />
+            <p className="text-[11px] text-slate-500 mt-1">
+              A single-use link will be generated. The recipient must authenticate with this email.
+            </p>
           </div>
 
           {/* Warning for Owner/Admin */}
@@ -270,12 +294,12 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({
               {isLoading ? (
                 <>
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  Generating...
+                  <span>Generating...</span>
                 </>
               ) : (
                 <>
                   <UserPlus className="w-3.5 h-3.5" />
-                  Send Invitation
+                  <span>Send Invitation</span>
                 </>
               )}
             </button>

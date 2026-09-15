@@ -188,6 +188,40 @@ export const DriverDetailModal: React.FC<DriverDetailModalProps> = ({
                   <StatusBadge status={driver.status} type="driver" size="sm" />
                 </div>
               </div>
+
+              <div>
+                <span className="text-slate-500 block text-[11px]">Mobile Portal Account</span>
+                <div className="mt-1">
+                  {driver.user_id ? (
+                    <div>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-400 bg-emerald-950/50 border border-emerald-800/40 px-2 py-0.5 rounded">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                        Active & Linked (Phone OTP Verified)
+                      </span>
+                    </div>
+                  ) : driver.phone ? (
+                    <div className="space-y-1">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-400 bg-indigo-950/40 border border-indigo-800/40 px-2 py-0.5 rounded">
+                        <Phone className="w-3 h-3 text-indigo-400" />
+                        Awaiting Phone Login (Driver authenticates with mobile phone)
+                      </span>
+                      <p className="text-[10px] text-slate-400">
+                        Driver authenticates using mobile number {driver.phone}.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-400 bg-amber-950/40 border border-amber-800/40 px-2 py-0.5 rounded">
+                        <AlertCircle className="w-3 h-3 text-amber-400" />
+                        Phone Required (Add phone number to enable Driver Portal access)
+                      </span>
+                      <p className="text-[10px] text-slate-400">
+                        Add a phone number to enable Driver Portal access.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 

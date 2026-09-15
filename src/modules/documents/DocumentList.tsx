@@ -22,6 +22,7 @@ import {
   User,
   ShieldCheck,
   Download,
+  PackageCheck,
 } from 'lucide-react';
 import { EmptyState } from '../../components/common/EmptyState.tsx';
 
@@ -36,6 +37,11 @@ interface DocumentListProps {
   onNewDocumentClick: () => void;
   onResetFilters?: () => void;
   hasActiveFilters?: boolean;
+  loadsCount?: number;
+  clientsCount?: number;
+  trucksCount?: number;
+  driversCount?: number;
+  onNavigate?: (module: any) => void;
 }
 
 export const DocumentList: React.FC<DocumentListProps> = ({
@@ -49,6 +55,11 @@ export const DocumentList: React.FC<DocumentListProps> = ({
   onNewDocumentClick,
   onResetFilters,
   hasActiveFilters = false,
+  loadsCount,
+  clientsCount,
+  trucksCount,
+  driversCount,
+  onNavigate,
 }) => {
   const { operationalTimezone } = useTimezone();
 
@@ -155,13 +166,59 @@ export const DocumentList: React.FC<DocumentListProps> = ({
       );
     }
 
+    if (loadsCount !== undefined && loadsCount === 0) {
+      if (clientsCount !== undefined && clientsCount === 0) {
+        return (
+          <EmptyState
+            id="empty-documents-no-clients"
+            icon={FileText}
+            title="No Freight Paperwork Uploaded"
+            description="Upload signed rate confirmations, bills of lading (BOLs), proof of delivery receipts (PODs), or general documents. You can also add carrier clients to organize your fleet."
+            actionLabel="Upload Document"
+            onAction={onNewDocumentClick}
+            secondaryActionLabel={onNavigate ? 'Add Client' : undefined}
+            onSecondaryAction={() => onNavigate?.('clients')}
+          />
+        );
+      }
+      if (
+        (trucksCount !== undefined && trucksCount === 0) ||
+        (driversCount !== undefined && driversCount === 0)
+      ) {
+        return (
+          <EmptyState
+            id="empty-documents-missing-fleet"
+            icon={FileText}
+            title="No Freight Paperwork Uploaded"
+            description="Upload paperwork or general documents directly. You can also complete fleet setup to attach documents to loads."
+            actionLabel="Upload Document"
+            onAction={onNewDocumentClick}
+            secondaryActionLabel={onNavigate ? (trucksCount === 0 ? 'Add Truck' : 'Add Driver') : undefined}
+            onSecondaryAction={() => onNavigate?.(trucksCount === 0 ? 'trucks' : 'drivers')}
+          />
+        );
+      }
+      return (
+        <EmptyState
+          id="empty-documents-no-loads"
+          icon={FileText}
+          title="No Freight Paperwork Uploaded"
+          description="Upload standalone or general paperwork anytime, or create loads to manage dispatched freight."
+          actionLabel="Upload Document"
+          onAction={onNewDocumentClick}
+          secondaryActionLabel={onNavigate ? 'Create First Load' : undefined}
+          onSecondaryAction={() => onNavigate?.('loads')}
+        />
+      );
+    }
+
     return (
       <EmptyState
         id="empty-documents-list"
         icon={FileText}
         title="No Freight Paperwork Uploaded"
         description="Upload signed rate confirmations, bills of lading (BOLs), proof of delivery receipts (PODs), or carrier factoring invoices."
-        actionLabel="Upload First Document"
+        actionLabel="Upload Document"
         onAction={onNewDocumentClick}
       />
     );

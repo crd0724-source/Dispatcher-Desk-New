@@ -16,6 +16,17 @@ import {
 
 const CHECK_CALLS_STORAGE_PREFIX = 'dispatchdesk_demo_check_calls_';
 
+export const DEMO_ORGANIZATION_ID = 'demo-org-1';
+
+const KNOWN_DEMO_CHECK_CALL_IDS = new Set([
+  'demo-checkcall-1',
+  'demo-checkcall-2',
+  'demo-checkcall-3',
+  'demo-checkcall-4',
+  'demo-checkcall-5',
+  'demo-checkcall-6',
+]);
+
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function isUUID(str?: string | null): boolean {
@@ -127,23 +138,29 @@ class CheckCallService implements ICheckCallService {
   private readRawCheckCalls(organizationId: string): CheckCall[] {
     if (!organizationId) return [];
 
+    const isDemoOrg = organizationId === DEMO_ORGANIZATION_ID || !isUUID(organizationId);
+
     try {
       const raw = localStorage.getItem(this.getStorageKey(organizationId));
       if (!raw) {
-        // Seed default check calls for the initial demo organization
-        const seeded: CheckCall[] = SEED_CHECK_CALLS.map((call) => ({
-          ...call,
-          organization_id: organizationId,
-        }));
-        this.writeRawCheckCalls(organizationId, seeded);
-        return seeded;
+        if (isDemoOrg) {
+          // Seed default check calls for the initial demo organization
+          const seeded: CheckCall[] = SEED_CHECK_CALLS.map((call) => ({
+            ...call,
+            organization_id: organizationId,
+          }));
+          this.writeRawCheckCalls(organizationId, seeded);
+          return seeded;
+        }
+        // Non-demo normal UUID organization: NEVER seed demo check calls
+        return [];
       }
 
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
 
       // Guarantee strict tenant isolation and schema validation
-      return parsed.filter((c: CheckCall) => {
+      let tenantCalls = parsed.filter((c: CheckCall) => {
         return (
           c &&
           typeof c === 'object' &&
@@ -153,6 +170,28 @@ class CheckCallService implements ICheckCallService {
           typeof c.call_type === 'string'
         );
       });
+
+      // For normal UUID organizations: sanitize stale demo contamination
+      if (!isDemoOrg) {
+        const hasContamination = tenantCalls.some(
+          (c) =>
+            KNOWN_DEMO_CHECK_CALL_IDS.has(c.id) ||
+            c.id.startsWith('demo-') ||
+            c.load_id.startsWith('demo-')
+        );
+
+        if (hasContamination) {
+          tenantCalls = tenantCalls.filter(
+            (c) =>
+              !KNOWN_DEMO_CHECK_CALL_IDS.has(c.id) &&
+              !c.id.startsWith('demo-') &&
+              !c.load_id.startsWith('demo-')
+          );
+          this.writeRawCheckCalls(organizationId, tenantCalls);
+        }
+      }
+
+      return tenantCalls;
     } catch (err) {
       console.error('Error reading check calls from storage:', err);
       return [];
@@ -178,8 +217,9 @@ class CheckCallService implements ICheckCallService {
     if (!organizationId) return [];
 
     let rawCalls: CheckCall[] = [];
+    let isSupabaseAuthoritative = false;
 
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && isUUID(organizationId)) {
       try {
         let query = (supabase.from('check_calls' as any) as any)
           .select('*')
@@ -200,15 +240,47 @@ class CheckCallService implements ICheckCallService {
 
         const { data, error } = await query;
 
-        if (!error && data) {
+        if (!error && data !== null) {
           rawCalls = (data as unknown) as CheckCall[];
+          isSupabaseAuthoritative = true;
+        } else if (error) {
+          console.warn('Supabase getCheckCalls error, falling back to local storage:', error);
         }
       } catch (err) {
         console.warn('Supabase getCheckCalls failed, falling back to local storage:', err);
       }
+    } else if (isSupabaseConfigured) {
+      // Non-UUID or demo organization with Supabase configured
+      try {
+        let query = (supabase.from('check_calls' as any) as any)
+          .select('*')
+          .eq('organization_id', organizationId)
+          .order('created_at', { ascending: false });
+
+        if (loadId) {
+          query = query.eq('load_id', loadId);
+        }
+
+        if (filters?.callType && filters.callType !== 'all') {
+          query = query.eq('call_type', filters.callType);
+        }
+
+        if (filters?.status && filters.status !== 'all') {
+          query = query.eq('status', filters.status);
+        }
+
+        const { data, error } = await query;
+
+        if (!error && data && data.length > 0) {
+          rawCalls = (data as unknown) as CheckCall[];
+          isSupabaseAuthoritative = true;
+        }
+      } catch (err) {
+        console.warn('Supabase getCheckCalls fallback for demo organization:', err);
+      }
     }
 
-    if (rawCalls.length === 0) {
+    if (!isSupabaseAuthoritative) {
       const all = this.readRawCheckCalls(organizationId);
       let filtered = all;
 

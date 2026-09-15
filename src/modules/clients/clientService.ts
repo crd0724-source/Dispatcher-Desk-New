@@ -6,6 +6,8 @@ function isUUID(str?: string | null): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 }
 
+export const DEMO_ORGANIZATION_ID = 'demo-org-1';
+
 // Storage keys
 const CLIENTS_STORAGE_PREFIX = 'dispatchdesk_demo_clients_';
 
@@ -118,10 +120,15 @@ export interface IClientService {
 }
 
 class ClientService implements IClientService {
+  private inFlightGetClients = new Map<string, Promise<Client[]>>();
+
   private ensureInitialized(organizationId: string): Client[] {
     const key = `${CLIENTS_STORAGE_PREFIX}${organizationId}`;
     let clients = loadFromStorage<Client[]>(key, []);
     if (clients.length === 0) {
+      if (isUUID(organizationId) && organizationId !== DEMO_ORGANIZATION_ID) {
+        return [];
+      }
       clients = SEED_CLIENTS.map((c) => ({
         ...c,
         organization_id: organizationId,
@@ -131,50 +138,112 @@ class ClientService implements IClientService {
     return clients;
   }
 
-  async getClients(organizationId: string): Promise<Client[]> {
-    if (isSupabaseConfigured && isUUID(organizationId)) {
-      const { data, error } = await supabase
-        .from('clients')
-        .select('*')
-        .eq('organization_id', organizationId)
-        .order('company_name', { ascending: true });
-      if (error) {
-        console.error('[ClientService] Supabase getClients error:', error);
-        throw new Error(error.message || 'Failed to fetch clients from database.');
-      }
-      return (data || []) as Client[];
+  getClients(organizationId: string): Promise<Client[]> {
+    if (!organizationId) return Promise.resolve([]);
+
+    const inFlight = this.inFlightGetClients.get(organizationId);
+    if (inFlight) {
+      return inFlight;
     }
 
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error } = await supabase
-          .from('clients')
-          .select('*')
-          .eq('organization_id', organizationId)
-          .order('company_name', { ascending: true });
-        if (!error && data) return data as Client[];
-      } catch (err) {
-        console.warn('Supabase getClients failed, falling back to local storage:', err);
-      }
-    }
+    const request = (async () => {
+      if (isSupabaseConfigured && isUUID(organizationId)) {
+        if (organizationId !== DEMO_ORGANIZATION_ID) {
+          try {
+            const { data, error } = await supabase
+              .from('clients')
+              .select('*')
+              .eq('organization_id', organizationId)
+              .order('company_name', { ascending: true });
+            if (error) {
+              console.error('[ClientService] Supabase getClients error for real org:', error);
+              return [];
+            }
+            return (data || []) as Client[];
+          } catch (fetchErr) {
+            console.error('[ClientService] Supabase getClients network error for real org:', fetchErr);
+            return [];
+          }
+        }
 
-    const clients = this.ensureInitialized(organizationId);
-    return [...clients].sort((a, b) => a.company_name.localeCompare(b.company_name));
+        // Demo org flow
+        try {
+          const { data, error } = await supabase
+            .from('clients')
+            .select('*')
+            .eq('organization_id', organizationId)
+            .order('company_name', { ascending: true });
+          if (error) {
+            console.warn('[ClientService] Supabase getClients error, using fallback:', error);
+            const clients = this.ensureInitialized(organizationId);
+            return [...clients].sort((a, b) => a.company_name.localeCompare(b.company_name));
+          }
+          const result = (data || []) as Client[];
+          if (result.length === 0) {
+            const clients = this.ensureInitialized(organizationId);
+            return [...clients].sort((a, b) => a.company_name.localeCompare(b.company_name));
+          }
+          return result;
+        } catch (fetchErr) {
+          console.warn('[ClientService] Supabase getClients network error, using fallback:', fetchErr);
+          const clients = this.ensureInitialized(organizationId);
+          return [...clients].sort((a, b) => a.company_name.localeCompare(b.company_name));
+        }
+      }
+
+      if (isSupabaseConfigured) {
+        try {
+          const { data, error } = await supabase
+            .from('clients')
+            .select('*')
+            .eq('organization_id', organizationId)
+            .order('company_name', { ascending: true });
+          if (!error && data) return data as Client[];
+        } catch (err) {
+          console.warn('Supabase getClients failed, falling back to local storage:', err);
+        }
+      }
+
+      const clients = this.ensureInitialized(organizationId);
+      return [...clients].sort((a, b) => a.company_name.localeCompare(b.company_name));
+    })().finally(() => {
+      this.inFlightGetClients.delete(organizationId);
+    });
+
+    this.inFlightGetClients.set(organizationId, request);
+    return request;
   }
 
   async getClientById(organizationId: string, id: string): Promise<Client | null> {
-    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(id)) {
-      const { data, error } = await supabase
-        .from('clients')
-        .select('*')
-        .eq('id', id)
-        .eq('organization_id', organizationId)
-        .maybeSingle();
-      if (error) {
-        console.error('[ClientService] Supabase getClientById error:', error);
-        throw new Error(error.message || 'Failed to fetch client from database.');
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      if (organizationId !== DEMO_ORGANIZATION_ID) {
+        if (!isUUID(id)) return null;
+        const { data, error } = await supabase
+          .from('clients')
+          .select('*')
+          .eq('id', id)
+          .eq('organization_id', organizationId)
+          .maybeSingle();
+        if (error) {
+          console.error('[ClientService] Supabase getClientById error:', error);
+          throw new Error(error.message || 'Failed to fetch client from database.');
+        }
+        return (data as Client) || null;
       }
-      return (data as Client) || null;
+
+      if (isUUID(id)) {
+        const { data, error } = await supabase
+          .from('clients')
+          .select('*')
+          .eq('id', id)
+          .eq('organization_id', organizationId)
+          .maybeSingle();
+        if (error) {
+          console.error('[ClientService] Supabase getClientById error:', error);
+          throw new Error(error.message || 'Failed to fetch client from database.');
+        }
+        return (data as Client) || null;
+      }
     }
 
     if (isSupabaseConfigured) {
@@ -189,6 +258,10 @@ class ClientService implements IClientService {
       } catch (err) {
         console.warn('Supabase getClientById failed, falling back to local storage:', err);
       }
+    }
+
+    if (isUUID(organizationId) && organizationId !== DEMO_ORGANIZATION_ID) {
+      return null;
     }
 
     const clients = this.ensureInitialized(organizationId);

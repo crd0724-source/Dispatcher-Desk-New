@@ -35,6 +35,7 @@ interface TruckListProps {
   canEdit: boolean;
   canDelete: boolean;
   togglingTruckId?: string | null;
+  onNavigateToClients?: () => void;
 }
 
 export const TruckList: React.FC<TruckListProps> = ({
@@ -51,6 +52,7 @@ export const TruckList: React.FC<TruckListProps> = ({
   canEdit,
   canDelete,
   togglingTruckId,
+  onNavigateToClients,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -228,14 +230,25 @@ export const TruckList: React.FC<TruckListProps> = ({
 
       {/* Main Table or Empty State */}
       {!isLoading && trucks.length === 0 && !error && (
-        <EmptyState
-          id="empty-trucks-state"
-          icon={TruckIcon}
-          title="No Truck Units Registered Yet"
-          description="Add power units and trailers operated by your carrier clients to manage staging locations, equipment specifications, and dispatch assignments."
-          actionLabel={canEdit ? 'Add First Truck Unit' : undefined}
-          onAction={canEdit ? onAddTruck : undefined}
-        />
+        clients.length === 0 ? (
+          <EmptyState
+            id="empty-trucks-no-clients-state"
+            icon={Building2}
+            title="Add a client first"
+            description="Trucks are managed for a carrier client. Add your first client before adding a truck."
+            actionLabel={canEdit && onNavigateToClients ? 'Add Client' : undefined}
+            onAction={onNavigateToClients}
+          />
+        ) : (
+          <EmptyState
+            id="empty-trucks-state"
+            icon={TruckIcon}
+            title="No Truck Units Registered Yet"
+            description="Add power units and trailers operated by your carrier clients to manage staging locations, equipment specifications, and dispatch assignments."
+            actionLabel={canEdit ? 'Add First Truck Unit' : undefined}
+            onAction={canEdit ? onAddTruck : undefined}
+          />
+        )
       )}
 
       {trucks.length > 0 && filteredTrucks.length === 0 && (

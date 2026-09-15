@@ -45,6 +45,7 @@ export interface DriverListProps {
   canEdit: boolean;
   canDelete: boolean;
   updatingDriverId?: string | null;
+  onNavigateToClients?: () => void;
 }
 
 export const DriverList: React.FC<DriverListProps> = ({
@@ -62,6 +63,7 @@ export const DriverList: React.FC<DriverListProps> = ({
   canEdit,
   canDelete,
   updatingDriverId,
+  onNavigateToClients,
 }) => {
   // Search and filter states
   const [searchQuery, setSearchQuery] = useState('');
@@ -333,14 +335,25 @@ export const DriverList: React.FC<DriverListProps> = ({
       {/* Empty State: Zero drivers registered */}
       {!isLoading && !error && drivers.length === 0 && (
         <div className="p-8 bg-slate-900 border border-slate-800 rounded-xl">
-          <EmptyState
-            id="empty-drivers-list"
-            title="No Drivers Registered Yet"
-            description="Start building your fleet dispatch roster by adding carrier company drivers or owner-operators."
-            icon={UserCheck}
-            actionLabel={canEdit ? 'Register First Driver' : undefined}
-            onAction={canEdit ? onAddDriver : undefined}
-          />
+          {clients.length === 0 ? (
+            <EmptyState
+              id="empty-drivers-no-clients-list"
+              title="Add a client first"
+              description="Drivers are managed for a carrier client. Add your first client before setting up drivers."
+              icon={Building2}
+              actionLabel={canEdit && onNavigateToClients ? 'Add Client' : undefined}
+              onAction={onNavigateToClients}
+            />
+          ) : (
+            <EmptyState
+              id="empty-drivers-list"
+              title="No Drivers Registered Yet"
+              description="Start building your fleet dispatch roster by adding carrier company drivers or owner-operators."
+              icon={UserCheck}
+              actionLabel={canEdit ? 'Register First Driver' : undefined}
+              onAction={canEdit ? onAddDriver : undefined}
+            />
+          )}
         </div>
       )}
 

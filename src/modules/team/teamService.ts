@@ -5,6 +5,8 @@ const TEAM_STORAGE_PREFIX = 'dispatchdesk_demo_team_members_';
 const INVITATION_STORAGE_PREFIX = 'dispatchdesk_demo_team_invitations_';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+export const DEMO_ORGANIZATION_ID = 'demo-org-1';
+
 function isUUID(str?: string | null): boolean {
   return Boolean(str && UUID_REGEX.test(str.trim()));
 }
@@ -93,6 +95,39 @@ export const SEED_DEMO_TEAM_MEMBERS: Omit<TeamMember, 'organization_id'>[] = [
     created_at: new Date(Date.now() - 20 * 86400000).toISOString(),
     updated_at: new Date(Date.now() - 1 * 86400000).toISOString(),
   },
+  {
+    id: 'demo-member-rahul',
+    user_id: 'usr-rahul-concrete',
+    role: 'dispatcher',
+    full_name: 'Rahul Sharma',
+    phone: '+91 98765 12345',
+    preferred_timezone: 'Asia/Kolkata',
+    email: 'rahul.dispatcher@dispatchdesk.demo',
+    created_at: new Date(Date.now() - 15 * 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 1 * 86400000).toISOString(),
+  },
+  {
+    id: 'demo-member-amit',
+    user_id: 'usr-amit-dispatcher',
+    role: 'dispatcher',
+    full_name: 'Amit Patel',
+    phone: '+91 98765 12346',
+    preferred_timezone: 'Asia/Kolkata',
+    email: 'amit.dispatcher@dispatchdesk.demo',
+    created_at: new Date(Date.now() - 12 * 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 1 * 86400000).toISOString(),
+  },
+  {
+    id: 'demo-member-manoj',
+    user_id: 'usr-manoj-dispatcher',
+    role: 'dispatcher',
+    full_name: 'Manoj Kumar',
+    phone: '+91 98765 12347',
+    preferred_timezone: 'Asia/Kolkata',
+    email: 'manoj.dispatcher@dispatchdesk.demo',
+    created_at: new Date(Date.now() - 10 * 86400000).toISOString(),
+    updated_at: new Date(Date.now() - 1 * 86400000).toISOString(),
+  },
 ];
 
 export const SEED_DEMO_INVITATIONS: Omit<TeamInvitation, 'organization_id'>[] = [
@@ -144,7 +179,8 @@ export interface ITeamService {
     email: string,
     role: UserRole,
     invitedByUserId?: string,
-    actorRole?: UserRole | null
+    actorRole?: UserRole | null,
+    driverId?: string | null
   ): Promise<{ invitation: TeamInvitation; rawToken: string; inviteUrl: string }>;
   listInvitations(
     organizationId: string,
@@ -159,12 +195,19 @@ export interface ITeamService {
   acceptInvitation(
     rawToken: string,
     user: { id: string; email?: string; full_name?: string }
-  ): Promise<{ organizationId: string; organizationName: string; role: UserRole }>;
+  ): Promise<{
+    organizationId: string;
+    organizationName: string;
+    role: UserRole;
+    driverId?: string | null;
+    driverName?: string | null;
+  }>;
 }
 
 class TeamService implements ITeamService {
   private memoryMembers: Map<string, string> = new Map();
   private memoryInvitations: Map<string, string> = new Map();
+  private inFlightGetTeamMembers = new Map<string, Promise<TeamMember[]>>();
 
   private getMemberStorageKey(organizationId: string): string {
     return `${TEAM_STORAGE_PREFIX}${organizationId}`;
@@ -207,12 +250,29 @@ class TeamService implements ITeamService {
 
   private ensureMembersInitialized(organizationId: string): TeamMember[] {
     let members = this.loadMembersFromStorage(organizationId);
+    if (isUUID(organizationId) && organizationId !== DEMO_ORGANIZATION_ID) {
+      return members.filter((m) => !m.id.startsWith('demo-member-'));
+    }
     if (members.length === 0) {
       members = SEED_DEMO_TEAM_MEMBERS.map((m) => ({
         ...m,
         organization_id: organizationId,
       }));
       this.saveMembersToStorage(organizationId, members);
+    } else {
+      let hasAdded = false;
+      for (const seed of SEED_DEMO_TEAM_MEMBERS) {
+        if (!members.some((m) => m.user_id === seed.user_id)) {
+          members.push({
+            ...seed,
+            organization_id: organizationId,
+          });
+          hasAdded = true;
+        }
+      }
+      if (hasAdded) {
+        this.saveMembersToStorage(organizationId, members);
+      }
     }
     return members;
   }
@@ -250,6 +310,9 @@ class TeamService implements ITeamService {
 
   private ensureInvitationsInitialized(organizationId: string): TeamInvitation[] {
     let invitations = this.loadInvitationsFromStorage(organizationId);
+    if (isUUID(organizationId) && organizationId !== DEMO_ORGANIZATION_ID) {
+      return invitations.filter((inv) => !inv.id.startsWith('demo-inv-'));
+    }
     if (invitations.length === 0) {
       invitations = SEED_DEMO_INVITATIONS.map((inv) => ({
         ...inv,
@@ -277,6 +340,7 @@ class TeamService implements ITeamService {
       owner_admin: 1,
       dispatcher: 2,
       staff: 3,
+      driver: 4,
     };
 
     return [...members].sort((a, b) => {
@@ -291,68 +355,154 @@ class TeamService implements ITeamService {
   /**
    * Fetch all team members in an organization with hydrated profiles.
    */
-  async getTeamMembers(organizationId: string): Promise<TeamMember[]> {
-    if (!organizationId) return [];
+  getTeamMembers(organizationId: string): Promise<TeamMember[]> {
+    if (!organizationId) return Promise.resolve([]);
 
-    if (isSupabaseConfigured && isUUID(organizationId)) {
-      const { data: memberRows, error: memberErr } = await supabase
-        .from('organization_members')
-        .select('*')
-        .eq('organization_id', organizationId)
-        .order('created_at', { ascending: true });
+    const inFlight = this.inFlightGetTeamMembers.get(organizationId);
+    if (inFlight) {
+      return inFlight;
+    }
 
-      if (memberErr) {
-        console.error('[TeamService] Error querying organization_members:', memberErr);
-        throw new Error(memberErr.message || 'Failed to load team members from Supabase.');
-      }
+    const request = (async () => {
+      if (isSupabaseConfigured && isUUID(organizationId)) {
+        if (organizationId !== DEMO_ORGANIZATION_ID) {
+          try {
+            const { data: memberRows, error: memberErr } = await supabase
+              .from('organization_members')
+              .select('*')
+              .eq('organization_id', organizationId)
+              .order('created_at', { ascending: true });
 
-      if (memberRows && memberRows.length > 0) {
-        const userIds = memberRows.map((m) => m.user_id).filter(Boolean);
+            if (memberErr) {
+              console.error('[TeamService] Error querying organization_members for real org:', memberErr);
+              return [];
+            }
 
-        const { data: profileRows, error: profileErr } = await supabase
-          .from('profiles')
-          .select('id, full_name, phone, preferred_timezone')
-          .in('id', userIds);
+            if (memberRows && memberRows.length > 0) {
+              const userIds = memberRows.map((m) => m.user_id).filter(Boolean);
 
-        if (profileErr) {
-          console.warn('[TeamService] Profile fetch warning:', profileErr);
-        }
+              const { data: profileRows, error: profileErr } = await supabase
+                .from('profiles')
+                .select('id, full_name, phone, preferred_timezone')
+                .in('id', userIds);
 
-        const profileMap = new Map<
-          string,
-          { full_name: string | null; phone: string | null; preferred_timezone: string | null }
-        >();
+              if (profileErr) {
+                console.warn('[TeamService] Profile fetch warning:', profileErr);
+              }
 
-        if (profileRows) {
-          for (const p of profileRows) {
-            profileMap.set(p.id, p);
+              const profileMap = new Map<
+                string,
+                { full_name: string | null; phone: string | null; preferred_timezone: string | null }
+              >();
+
+              if (profileRows) {
+                for (const p of profileRows) {
+                  profileMap.set(p.id, p);
+                }
+              }
+
+              const result: TeamMember[] = memberRows.map((m) => {
+                const profile = profileMap.get(m.user_id);
+                return {
+                  id: m.id,
+                  user_id: m.user_id,
+                  organization_id: m.organization_id,
+                  role: m.role as UserRole,
+                  created_at: m.created_at,
+                  updated_at: m.updated_at,
+                  full_name: profile?.full_name || 'Team Member',
+                  phone: profile?.phone || null,
+                  preferred_timezone: profile?.preferred_timezone || null,
+                  email: null,
+                };
+              });
+
+              return this.sortMembers(result);
+            }
+            return [];
+          } catch (fetchErr) {
+            console.error('[TeamService] Supabase getTeamMembers network error for real org:', fetchErr);
+            return [];
           }
         }
 
-        const result: TeamMember[] = memberRows.map((m) => {
-          const profile = profileMap.get(m.user_id);
-          return {
-            id: m.id,
-            user_id: m.user_id,
-            organization_id: m.organization_id,
-            role: m.role as UserRole,
-            created_at: m.created_at,
-            updated_at: m.updated_at,
-            full_name: profile?.full_name || 'Team Member',
-            phone: profile?.phone || null,
-            preferred_timezone: profile?.preferred_timezone || null,
-            email: null,
-          };
-        });
+        // Demo org flow
+        try {
+          const { data: memberRows, error: memberErr } = await supabase
+            .from('organization_members')
+            .select('*')
+            .eq('organization_id', organizationId)
+            .order('created_at', { ascending: true });
 
-        return this.sortMembers(result);
+          if (memberErr) {
+            console.warn('[TeamService] Error querying organization_members, using fallback:', memberErr);
+            const members = this.ensureMembersInitialized(organizationId);
+            return this.sortMembers(members);
+          }
+
+          if (memberRows && memberRows.length > 0) {
+            const userIds = memberRows.map((m) => m.user_id).filter(Boolean);
+
+            const { data: profileRows, error: profileErr } = await supabase
+              .from('profiles')
+              .select('id, full_name, phone, preferred_timezone')
+              .in('id', userIds);
+
+            if (profileErr) {
+              console.warn('[TeamService] Profile fetch warning:', profileErr);
+            }
+
+            const profileMap = new Map<
+              string,
+              { full_name: string | null; phone: string | null; preferred_timezone: string | null }
+            >();
+
+            if (profileRows) {
+              for (const p of profileRows) {
+                profileMap.set(p.id, p);
+              }
+            }
+
+            const result: TeamMember[] = memberRows.map((m) => {
+              const profile = profileMap.get(m.user_id);
+              return {
+                id: m.id,
+                user_id: m.user_id,
+                organization_id: m.organization_id,
+                role: m.role as UserRole,
+                created_at: m.created_at,
+                updated_at: m.updated_at,
+                full_name: profile?.full_name || 'Team Member',
+                phone: profile?.phone || null,
+                preferred_timezone: profile?.preferred_timezone || null,
+                email: null,
+              };
+            });
+
+            return this.sortMembers(result);
+          }
+        } catch (fetchErr) {
+          console.warn('[TeamService] Supabase getTeamMembers network error, using fallback:', fetchErr);
+          const members = this.ensureMembersInitialized(organizationId);
+          return this.sortMembers(members);
+        }
+
+        const members = this.ensureMembersInitialized(organizationId);
+        return this.sortMembers(members);
       }
 
-      return [];
-    }
+      if (isUUID(organizationId) && organizationId !== DEMO_ORGANIZATION_ID) {
+        return [];
+      }
 
-    const members = this.ensureMembersInitialized(organizationId);
-    return this.sortMembers(members);
+      const members = this.ensureMembersInitialized(organizationId);
+      return this.sortMembers(members);
+    })().finally(() => {
+      this.inFlightGetTeamMembers.delete(organizationId);
+    });
+
+    this.inFlightGetTeamMembers.set(organizationId, request);
+    return request;
   }
 
   /**
@@ -499,19 +649,33 @@ class TeamService implements ITeamService {
   }
 
   /**
-   * S5.2: Create and dispatch a new team invitation.
+   * S5.2 & S6.9: Create and dispatch a new team invitation.
    * Generates a cryptographic token, computes SHA-256 hash, and calls the secure
    * create_team_invitation RPC which performs authoritative member & duplicate checks.
+   * Supports operational write access for driver role invitations.
    */
   async createInvitation(
     organizationId: string,
     email: string,
     role: UserRole,
     invitedByUserId?: string,
-    actorRole?: UserRole | null
+    actorRole?: UserRole | null,
+    driverId?: string | null
   ): Promise<{ invitation: TeamInvitation; rawToken: string; inviteUrl: string }> {
-    if (actorRole && actorRole !== 'owner_admin') {
-      throw new Error('Unauthorized: Only Owner/Admins can invite team members.');
+    if (role === 'driver') {
+      if (actorRole && actorRole !== 'owner_admin' && actorRole !== 'dispatcher') {
+        throw new Error('Unauthorized: Operational write access required to invite drivers.');
+      }
+      if (!driverId) {
+        throw new Error('Driver profile selection is required when inviting a driver.');
+      }
+    } else {
+      if (actorRole && actorRole !== 'owner_admin') {
+        throw new Error('Unauthorized: Only Owner/Admins can invite team members.');
+      }
+      if (driverId) {
+        throw new Error('Driver ID cannot be specified for office role invitations.');
+      }
     }
 
     const normalizedEmail = normalizeEmail(email);
@@ -520,9 +684,9 @@ class TeamService implements ITeamService {
       throw new Error('Please provide a valid email address.');
     }
 
-    const validRoles: UserRole[] = ['owner_admin', 'dispatcher', 'staff'];
+    const validRoles: UserRole[] = ['owner_admin', 'dispatcher', 'staff', 'driver'];
     if (!validRoles.includes(role)) {
-      throw new Error(`Invalid role "${role}". Allowed roles: owner_admin, dispatcher, staff.`);
+      throw new Error(`Invalid role "${role}". Allowed roles: owner_admin, dispatcher, staff, driver.`);
     }
 
     // Generate cryptographic token & SHA-256 hash
@@ -543,6 +707,7 @@ class TeamService implements ITeamService {
           p_role: role,
           p_token_hash: tokenHash,
           p_expires_at: expiresAt,
+          p_driver_id: driverId || null,
         }
       );
 
@@ -557,6 +722,8 @@ class TeamService implements ITeamService {
           organization_name: data.organization_name,
           email: data.email,
           role: data.role as UserRole,
+          driver_id: data.driver_id || null,
+          driver_name: data.driver_name || null,
           invited_by_user_id: data.invited_by_user_id,
           invited_by_name: data.invited_by_name,
           expires_at: data.expires_at,
@@ -575,6 +742,10 @@ class TeamService implements ITeamService {
       throw new Error('Unexpected empty response from create_team_invitation RPC.');
     }
 
+    if (isUUID(organizationId) && organizationId !== DEMO_ORGANIZATION_ID) {
+      throw new Error('Database connection is required to create team invitations for this organization.');
+    }
+
     // Local / Demo Mode execution
     const existingMembers = await this.getTeamMembers(organizationId);
     const alreadyMember = existingMembers.some(
@@ -582,6 +753,29 @@ class TeamService implements ITeamService {
     );
     if (alreadyMember) {
       throw new Error(`User with email "${normalizedEmail}" is already an active member of this organization.`);
+    }
+
+    let resolvedDriverName: string | null = null;
+    if (role === 'driver' && driverId) {
+      const DRIVERS_STORAGE_PREFIX = 'dispatchdesk_demo_drivers_';
+      let localDrivers: any[] = [];
+      if (typeof localStorage !== 'undefined') {
+        const raw = localStorage.getItem(`${DRIVERS_STORAGE_PREFIX}${organizationId}`);
+        if (raw) {
+          try {
+            localDrivers = JSON.parse(raw);
+          } catch (e) {
+            localDrivers = [];
+          }
+        }
+      }
+      const matchedDriver = localDrivers.find((d) => d.id === driverId);
+      if (matchedDriver) {
+        if (matchedDriver.user_id) {
+          throw new Error(`Driver profile "${matchedDriver.full_name}" is already linked to a user account.`);
+        }
+        resolvedDriverName = matchedDriver.full_name;
+      }
     }
 
     const localInvitations = this.ensureInvitationsInitialized(organizationId);
@@ -594,12 +788,25 @@ class TeamService implements ITeamService {
       throw new Error(`An active pending invitation already exists for "${normalizedEmail}".`);
     }
 
+    if (role === 'driver' && driverId) {
+      const activeDriverInv = localInvitations.find(
+        (inv) =>
+          inv.driver_id === driverId &&
+          this.computeInvitationStatus(inv) === 'pending'
+      );
+      if (activeDriverInv) {
+        throw new Error('An active pending invitation already exists for this driver profile.');
+      }
+    }
+
     const newInvitation: TeamInvitation = {
       id: `inv-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       organization_id: organizationId,
       organization_name: 'DispatchDesk Logistics (Demo Fleet)',
       email: normalizedEmail,
       role,
+      driver_id: driverId || null,
+      driver_name: resolvedDriverName,
       invited_by_user_id: invitedByUserId || 'usr-alex-1',
       invited_by_name: 'Alex Rivera (Owner/Admin)',
       token_hash: tokenHash,
@@ -662,11 +869,30 @@ class TeamService implements ITeamService {
           }
         }
 
+        // Fetch driver profiles if any
+        const driverIds = data.map((d) => (d as any).driver_id).filter(Boolean) as string[];
+        const driverMap = new Map<string, string>();
+
+        if (driverIds.length > 0) {
+          const { data: driverRows } = await supabase
+            .from('drivers')
+            .select('id, full_name')
+            .in('id', driverIds);
+
+          if (driverRows) {
+            for (const d of driverRows) {
+              if (d.full_name) driverMap.set(d.id, d.full_name);
+            }
+          }
+        }
+
         return data.map((row) => ({
           id: row.id,
           organization_id: row.organization_id,
           email: row.email,
           role: row.role as UserRole,
+          driver_id: (row as any).driver_id || null,
+          driver_name: (row as any).driver_id ? driverMap.get((row as any).driver_id) || null : null,
           invited_by_user_id: row.invited_by_user_id,
           invited_by_name: row.invited_by_user_id ? inviterMap.get(row.invited_by_user_id) || 'Administrator' : null,
           expires_at: row.expires_at,
@@ -677,6 +903,10 @@ class TeamService implements ITeamService {
           status: this.computeInvitationStatus(row),
         }));
       }
+      return [];
+    }
+
+    if (isUUID(organizationId) && organizationId !== DEMO_ORGANIZATION_ID) {
       return [];
     }
 
@@ -691,15 +921,17 @@ class TeamService implements ITeamService {
   }
 
   /**
-   * S5.2: Cancel an active pending invitation (owner_admin only).
+   * S5.2 & S6.9: Cancel an active pending invitation.
+   * Operational write access (owner_admin or dispatcher) can cancel driver invitations.
+   * Office role invitations require owner_admin.
    */
   async cancelInvitation(
     organizationId: string,
     invitationId: string,
     actorRole?: UserRole | null
   ): Promise<void> {
-    if (actorRole && actorRole !== 'owner_admin') {
-      throw new Error('Unauthorized: Only Owner/Admins can cancel team invitations.');
+    if (actorRole && actorRole !== 'owner_admin' && actorRole !== 'dispatcher') {
+      throw new Error('Unauthorized: Operational write access required to cancel invitations.');
     }
 
     if (isSupabaseConfigured && isUUID(organizationId) && isUUID(invitationId)) {
@@ -714,11 +946,19 @@ class TeamService implements ITeamService {
       return;
     }
 
+    if (isUUID(organizationId) && organizationId !== DEMO_ORGANIZATION_ID) {
+      throw new Error('Database connection is required to cancel invitations for this organization.');
+    }
+
     // Local / Demo Mode
     const local = this.ensureInvitationsInitialized(organizationId);
     const idx = local.findIndex((i) => i.id === invitationId);
     if (idx === -1) {
       throw new Error(`Invitation with ID "${invitationId}" not found.`);
+    }
+
+    if (local[idx].role !== 'driver' && actorRole && actorRole !== 'owner_admin') {
+      throw new Error('Unauthorized: Only Owner/Admins can cancel office team invitations.');
     }
 
     if (local[idx].accepted_at) {
@@ -738,8 +978,9 @@ class TeamService implements ITeamService {
   }
 
   /**
-   * S5.2: Look up invitation details by raw URL token.
+   * S5.2 & S6.9: Look up invitation details by raw URL token.
    * Hashes the raw token to find the invitation without exposing table permissions.
+   * Returns linked driver profile information if applicable.
    */
   async getInvitationByToken(rawToken: string): Promise<TeamInvitation | null> {
     if (!rawToken || !rawToken.trim()) return null;
@@ -764,6 +1005,8 @@ class TeamService implements ITeamService {
           organization_name: data.organization_name || 'DispatchDesk Organization',
           email: data.email,
           role: data.role as UserRole,
+          driver_id: data.driver_id || null,
+          driver_name: data.driver_name || null,
           invited_by_user_id: data.invited_by_user_id,
           invited_by_name: data.invited_by_name,
           expires_at: data.expires_at,
@@ -832,12 +1075,19 @@ class TeamService implements ITeamService {
   }
 
   /**
-   * S5.2: Accept invitation and provision organization membership.
+   * S5.2 & S6.9: Accept invitation and provision organization membership.
+   * Atomically binds driver profile if role is 'driver'.
    */
   async acceptInvitation(
     rawToken: string,
     user: { id: string; email?: string; full_name?: string }
-  ): Promise<{ organizationId: string; organizationName: string; role: UserRole }> {
+  ): Promise<{
+    organizationId: string;
+    organizationName: string;
+    role: UserRole;
+    driverId?: string | null;
+    driverName?: string | null;
+  }> {
     if (!rawToken || !rawToken.trim()) {
       throw new Error('Invitation token is required.');
     }
@@ -862,6 +1112,8 @@ class TeamService implements ITeamService {
           organizationId: data.organization_id,
           organizationName: data.organization_name || 'Organization',
           role: data.role as UserRole,
+          driverId: data.driver_id || null,
+          driverName: data.driver_name || null,
         };
       }
       throw new Error('Unexpected response during invitation acceptance.');
@@ -898,6 +1150,41 @@ class TeamService implements ITeamService {
       throw new Error('You are already a member of this organization.');
     }
 
+    // S6.9 Atomic Driver Profile Binding in Demo Mode
+    if (invitation.role === 'driver') {
+      if (!invitation.driver_id) {
+        throw new Error('Driver invitation is missing linked driver profile.');
+      }
+
+      const DRIVERS_STORAGE_PREFIX = 'dispatchdesk_demo_drivers_';
+      let localDrivers: any[] = [];
+      if (typeof localStorage !== 'undefined') {
+        const raw = localStorage.getItem(`${DRIVERS_STORAGE_PREFIX}${orgId}`);
+        if (raw) {
+          try {
+            localDrivers = JSON.parse(raw);
+          } catch (e) {
+            localDrivers = [];
+          }
+        }
+      }
+
+      const driverIdx = localDrivers.findIndex((d) => d.id === invitation.driver_id);
+      if (driverIdx !== -1) {
+        if (localDrivers[driverIdx].user_id) {
+          throw new Error('Target driver profile is already linked to another user account.');
+        }
+        localDrivers[driverIdx].user_id = user.id;
+        if (!localDrivers[driverIdx].email) {
+          localDrivers[driverIdx].email = user.email;
+        }
+        localDrivers[driverIdx].updated_at = new Date().toISOString();
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(`${DRIVERS_STORAGE_PREFIX}${orgId}`, JSON.stringify(localDrivers));
+        }
+      }
+    }
+
     const newMember: TeamMember = {
       id: `mem-${Date.now()}`,
       user_id: user.id,
@@ -927,6 +1214,8 @@ class TeamService implements ITeamService {
       organizationId: orgId,
       organizationName: invitation.organization_name || 'DispatchDesk Logistics (Demo Fleet)',
       role: invitation.role,
+      driverId: invitation.driver_id || null,
+      driverName: invitation.driver_name || null,
     };
   }
 }

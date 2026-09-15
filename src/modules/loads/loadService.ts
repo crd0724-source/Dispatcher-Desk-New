@@ -1,5 +1,15 @@
-import { Load, Client, Broker, Truck, Driver, PipelineStatus, EquipmentType } from '../../types/domain.types.ts';
-import { LoadWithRelations, CreateLoadInput, UpdateLoadInput, LoadFilterCriteria, isValidUsState } from './loadTypes.ts';
+import { Load, Client, Broker, Truck, Driver, PipelineStatus, EquipmentType, TeamMember } from '../../types/domain.types.ts';
+import {
+  LoadWithRelations,
+  CreateLoadInput,
+  UpdateLoadInput,
+  LoadFilterCriteria,
+  BulkAssignDispatcherResult,
+  BulkAssignTeamMemberResult,
+  BulkAssignTeamMembersResult,
+  LoadTeamAssignment,
+  isValidUsState,
+} from './loadTypes.ts';
 import { validateStatusTransition } from '../pipeline/pipelineTypes.ts';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase.ts';
 import { clientService } from '../clients/clientService.ts';
@@ -7,11 +17,14 @@ import { brokerService } from '../brokers/brokerService.ts';
 import { truckService } from '../trucks/truckService.ts';
 import { driverService } from '../drivers/driverService.ts';
 import { activityService } from '../activity/activityService.ts';
+import { teamService } from '../team/teamService.ts';
 
 function isUUID(str?: string | null): boolean {
   if (!str) return false;
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 }
+
+export const DEMO_ORGANIZATION_ID = 'demo-org-1';
 
 // Storage keys
 const LOADS_STORAGE_PREFIX = 'dispatchdesk_demo_loads_';
@@ -19,6 +32,7 @@ const CLIENTS_STORAGE_PREFIX = 'dispatchdesk_demo_clients_';
 const TRUCKS_STORAGE_PREFIX = 'dispatchdesk_demo_trucks_';
 const DRIVERS_STORAGE_PREFIX = 'dispatchdesk_demo_drivers_';
 const BROKERS_STORAGE_PREFIX = 'dispatchdesk_demo_brokers_';
+const LOAD_TEAM_ASSIGNMENTS_STORAGE_PREFIX = 'dispatchdesk_demo_load_team_assignments_';
 
 // Seed Brokers for demo organization (strictly fictional mock entities)
 const SEED_BROKERS: Omit<Broker, 'organization_id'>[] = [
@@ -32,7 +46,6 @@ const SEED_BROKERS: Omit<Broker, 'organization_id'>[] = [
     contact_email: 'dispatch@apex-demo-freight.test',
     payment_terms_days: 30,
     credit_status: 'approved',
-    status: 'active',
     notes: 'Demo carrier tier 1, quick pay approved at 1.5% fee or 30 days standard net.',
     created_at: new Date(Date.now() - 60 * 86400000).toISOString(),
     updated_at: new Date(Date.now() - 5 * 86400000).toISOString(),
@@ -47,7 +60,6 @@ const SEED_BROKERS: Omit<Broker, 'organization_id'>[] = [
     contact_email: 'ops@blueridge-demo.test',
     payment_terms_days: 30,
     credit_status: 'approved',
-    status: 'active',
     notes: 'High volume flatbed and reefer spot freight demo. Requires check call every 4 hours.',
     created_at: new Date(Date.now() - 50 * 86400000).toISOString(),
     updated_at: new Date(Date.now() - 4 * 86400000).toISOString(),
@@ -62,7 +74,6 @@ const SEED_BROKERS: Omit<Broker, 'organization_id'>[] = [
     contact_email: 'loads@horizon-demo.test',
     payment_terms_days: 21,
     credit_status: 'approved',
-    status: 'active',
     notes: 'Automated tracking required via MacroPoint / ELD link. Fast payment turnaround.',
     created_at: new Date(Date.now() - 45 * 86400000).toISOString(),
     updated_at: new Date(Date.now() - 3 * 86400000).toISOString(),
@@ -77,7 +88,6 @@ const SEED_BROKERS: Omit<Broker, 'organization_id'>[] = [
     contact_email: 'agents@keystone-demo.test',
     payment_terms_days: 30,
     credit_status: 'approved',
-    status: 'active',
     notes: 'Pre-vetted heavy haul and reefer broker agent. Strict on on-time delivery.',
     created_at: new Date(Date.now() - 40 * 86400000).toISOString(),
     updated_at: new Date(Date.now() - 2 * 86400000).toISOString(),
@@ -92,7 +102,6 @@ const SEED_BROKERS: Omit<Broker, 'organization_id'>[] = [
     contact_email: 'carrier-settlements@prairiestar-demo.test',
     payment_terms_days: 15,
     credit_status: 'factoring_only',
-    status: 'active',
     notes: 'Requires factoring verification and assignment before booking high-value freight.',
     created_at: new Date(Date.now() - 35 * 86400000).toISOString(),
     updated_at: new Date(Date.now() - 1 * 86400000).toISOString(),
@@ -108,7 +117,7 @@ const SEED_LOADS: Omit<Load, 'organization_id'>[] = [
     broker_id: 'demo-broker-1',
     truck_id: 'demo-truck-101',
     driver_id: 'demo-driver-1',
-    assigned_dispatcher_id: null,
+    assigned_dispatcher_id: 'usr-alex-1',
     pipeline_status: 'booked',
     equipment_type: 'dry_van',
     commodity: 'Packaged Consumer Electronics',
@@ -142,7 +151,7 @@ const SEED_LOADS: Omit<Load, 'organization_id'>[] = [
     broker_id: 'demo-broker-3',
     truck_id: 'demo-truck-102',
     driver_id: 'demo-driver-2',
-    assigned_dispatcher_id: null,
+    assigned_dispatcher_id: 'usr-alex-1',
     pipeline_status: 'in_transit',
     equipment_type: 'reefer',
     commodity: 'Chilled Dairy & Specialty Yogurt (36°F Continuous)',
@@ -176,7 +185,7 @@ const SEED_LOADS: Omit<Load, 'organization_id'>[] = [
     broker_id: 'demo-broker-2',
     truck_id: 'demo-truck-201',
     driver_id: 'demo-driver-3',
-    assigned_dispatcher_id: null,
+    assigned_dispatcher_id: 'usr-sarah-2',
     pipeline_status: 'sourced',
     equipment_type: 'flatbed',
     commodity: 'Fabricated Structural Steel Beams',
@@ -244,7 +253,7 @@ const SEED_LOADS: Omit<Load, 'organization_id'>[] = [
     broker_id: 'demo-broker-5',
     truck_id: 'demo-truck-101',
     driver_id: 'demo-driver-1',
-    assigned_dispatcher_id: null,
+    assigned_dispatcher_id: 'usr-marcus-3',
     pipeline_status: 'paid',
     equipment_type: 'dry_van',
     commodity: 'Automotive Component Racks',
@@ -303,7 +312,13 @@ export interface ILoadService {
   getLoad(organizationId: string, id: string): Promise<LoadWithRelations | null>;
   getLoadById(organizationId: string, id: string): Promise<LoadWithRelations | null>;
   createLoad(organizationId: string, input: CreateLoadInput): Promise<LoadWithRelations>;
-  updateLoad(organizationId: string, id: string, input: UpdateLoadInput): Promise<LoadWithRelations>;
+  updateLoad(
+    organizationId: string,
+    id: string,
+    input: UpdateLoadInput,
+    actorName?: string,
+    actorId?: string
+  ): Promise<LoadWithRelations>;
   deleteLoad(organizationId: string, id: string): Promise<void>;
   updateLoadStatus(organizationId: string, id: string, status: PipelineStatus): Promise<LoadWithRelations>;
   assignDispatchResources(
@@ -313,11 +328,62 @@ export interface ILoadService {
     driverId?: string | null,
     notes?: string
   ): Promise<LoadWithRelations>;
+  assignDispatcher(
+    organizationId: string,
+    loadId: string,
+    dispatcherId: string | null,
+    actorName?: string,
+    actorId?: string
+  ): Promise<LoadWithRelations>;
+  assignLoadToTeamMember(
+    organizationId: string,
+    loadId: string,
+    memberId: string | null,
+    actorName?: string,
+    actorId?: string
+  ): Promise<LoadWithRelations>;
+  assignTeamMembersToLoad(
+    organizationId: string,
+    loadId: string,
+    memberIds: string[],
+    mode?: 'add' | 'replace',
+    actorName?: string,
+    actorId?: string
+  ): Promise<LoadWithRelations>;
+  removeTeamMemberFromLoad(
+    organizationId: string,
+    loadId: string,
+    memberId: string,
+    actorName?: string,
+    actorId?: string
+  ): Promise<LoadWithRelations>;
+  bulkAssignDispatcher(
+    organizationId: string,
+    loadIds: string[],
+    dispatcherId: string | null,
+    actorName?: string,
+    actorId?: string
+  ): Promise<BulkAssignDispatcherResult>;
+  bulkAssignLoadsToTeamMember(
+    organizationId: string,
+    loadIds: string[],
+    memberId: string | null,
+    actorName?: string,
+    actorId?: string
+  ): Promise<BulkAssignTeamMemberResult>;
+  bulkAssignLoadsToTeamMembers(
+    organizationId: string,
+    loadIds: string[],
+    memberIds: string[],
+    mode?: 'add' | 'replace' | 'remove',
+    actorName?: string,
+    actorId?: string
+  ): Promise<BulkAssignTeamMembersResult>;
   getClients(organizationId: string): Promise<Client[]>;
   getBrokers(organizationId: string): Promise<Broker[]>;
   getTrucks(organizationId: string, clientId?: string): Promise<Truck[]>;
   getDrivers(organizationId: string, clientId?: string): Promise<Driver[]>;
-  getDependencies(organizationId: string): Promise<[Truck[], Driver[], Client[], Broker[]]>;
+  getDependencies(organizationId: string): Promise<[Truck[], Driver[], Client[], Broker[], TeamMember[]]>;
   generateNextLoadNumber(organizationId: string): Promise<string>;
 }
 
@@ -334,18 +400,26 @@ class LocalLoadService implements ILoadService {
     brokers: Broker[];
     trucks: Truck[];
     drivers: Driver[];
+    assignments: LoadTeamAssignment[];
   } {
     const loadsKey = `${LOADS_STORAGE_PREFIX}${organizationId}`;
     const clientsKey = `${CLIENTS_STORAGE_PREFIX}${organizationId}`;
     const brokersKey = `${BROKERS_STORAGE_PREFIX}${organizationId}`;
     const trucksKey = `${TRUCKS_STORAGE_PREFIX}${organizationId}`;
     const driversKey = `${DRIVERS_STORAGE_PREFIX}${organizationId}`;
+    const assignmentsKey = `${LOAD_TEAM_ASSIGNMENTS_STORAGE_PREFIX}${organizationId}`;
 
     const clients = loadFromStorage<Client[]>(clientsKey, []);
     const trucks = loadFromStorage<Truck[]>(trucksKey, []);
     const drivers = loadFromStorage<Driver[]>(driversKey, []);
-
     let brokers = loadFromStorage<Broker[]>(brokersKey, []);
+    let loads = loadFromStorage<Load[]>(loadsKey, []);
+    let assignments = loadFromStorage<LoadTeamAssignment[]>(assignmentsKey, []);
+
+    if (isUUID(organizationId) && organizationId !== DEMO_ORGANIZATION_ID) {
+      return { loads: [], clients: [], brokers: [], trucks: [], drivers: [], assignments: [] };
+    }
+
     if (brokers.length === 0) {
       brokers = SEED_BROKERS.map((b) => ({
         ...b,
@@ -354,7 +428,6 @@ class LocalLoadService implements ILoadService {
       saveToStorage(brokersKey, brokers);
     }
 
-    let loads = loadFromStorage<Load[]>(loadsKey, []);
     if (loads.length === 0) {
       loads = SEED_LOADS.map((l) => ({
         ...l,
@@ -363,7 +436,24 @@ class LocalLoadService implements ILoadService {
       saveToStorage(loadsKey, loads);
     }
 
-    return { loads, clients, brokers, trucks, drivers };
+    let hasBackfilled = false;
+    loads.forEach((l) => {
+      if (l.assigned_dispatcher_id && !assignments.some((a) => a.load_id === l.id && a.user_id === l.assigned_dispatcher_id)) {
+        assignments.push({
+          id: `assign-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+          organization_id: organizationId,
+          load_id: l.id,
+          user_id: l.assigned_dispatcher_id,
+          created_at: l.created_at || new Date().toISOString(),
+        });
+        hasBackfilled = true;
+      }
+    });
+    if (hasBackfilled) {
+      saveToStorage(assignmentsKey, assignments);
+    }
+
+    return { loads, clients, brokers, trucks, drivers, assignments };
   }
 
   private joinRelations(
@@ -371,7 +461,9 @@ class LocalLoadService implements ILoadService {
     clients: Client[],
     brokers: Broker[],
     trucks: Truck[],
-    drivers: Driver[]
+    drivers: Driver[],
+    teamMembers: TeamMember[] = [],
+    teamAssignments: LoadTeamAssignment[] = []
   ): LoadWithRelations {
     const client = load.client_id
       ? clients.find((c) => c.id === load.client_id && (!c.organization_id || c.organization_id === load.organization_id)) || null
@@ -387,6 +479,39 @@ class LocalLoadService implements ILoadService {
 
     const driver = load.driver_id
       ? drivers.find((d) => d.id === load.driver_id && (!d.organization_id || d.organization_id === load.organization_id)) || null
+      : null;
+
+    // Find all relational assignments for this load
+    const loadAssignments = teamAssignments.filter((a) => a.load_id === load.id);
+    const assignedTeam: TeamMember[] = [];
+
+    loadAssignments.forEach((a) => {
+      const member = teamMembers.find((m) => m.user_id === a.user_id);
+      if (member && !assignedTeam.some((m) => m.user_id === member.user_id)) {
+        assignedTeam.push(member);
+      }
+    });
+
+    // Fallback: If no relational assignments found yet but load.assigned_dispatcher_id exists, include that member
+    if (assignedTeam.length === 0 && load.assigned_dispatcher_id) {
+      const fallbackMember = teamMembers.find(
+        (m) => m.user_id === load.assigned_dispatcher_id
+      );
+      if (fallbackMember) {
+        assignedTeam.push(fallbackMember);
+      }
+    }
+
+    const primaryAssignee = assignedTeam[0] || null;
+
+    const dispatcherProfile = primaryAssignee
+      ? {
+          id: primaryAssignee.user_id,
+          full_name: primaryAssignee.full_name,
+          phone: primaryAssignee.phone,
+          email: primaryAssignee.email,
+          role: primaryAssignee.role,
+        }
       : null;
 
     return {
@@ -436,32 +561,94 @@ class LocalLoadService implements ILoadService {
             status: driver.status,
           }
         : null,
-      dispatcher_profile: null,
+      dispatcher_profile: dispatcherProfile,
+      assigned_to_profile: dispatcherProfile,
+      assigned_team: assignedTeam,
+      assigned_team_assignments: loadAssignments,
     };
   }
 
   async getLoads(organizationId: string, filters?: LoadFilterCriteria): Promise<LoadWithRelations[]> {
+    // Eagerly kick off dependencies concurrently so in-flight requests coalesce with external callers (e.g. PipelineView)
+    const depPromise = this.getDependencies(organizationId);
     let rawLoads: Load[] = [];
+    let rawAssignments: LoadTeamAssignment[] = [];
 
     if (isSupabaseConfigured && isUUID(organizationId)) {
-      const { data, error } = await supabase
-        .from('loads')
-        .select('*')
-        .eq('organization_id', organizationId)
-        .order('created_at', { ascending: false });
+      if (organizationId !== DEMO_ORGANIZATION_ID) {
+        try {
+          const { data, error } = await supabase
+            .from('loads')
+            .select('*')
+            .eq('organization_id', organizationId)
+            .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error('[LoadService] Supabase getLoads error:', error);
-        throw new Error(error.message || 'Failed to fetch loads from database.');
+          if (error) {
+            console.error('[LoadService] Supabase getLoads query error for real org:', error);
+            rawLoads = [];
+          } else {
+            rawLoads = (data || []) as Load[];
+          }
+        } catch (fetchErr) {
+          console.error('[LoadService] Supabase getLoads network error for real org:', fetchErr);
+          rawLoads = [];
+        }
+      } else {
+        // Demo organization flow
+        try {
+          const { data, error } = await supabase
+            .from('loads')
+            .select('*')
+            .eq('organization_id', organizationId)
+            .order('created_at', { ascending: false });
+
+          if (error) {
+            console.warn('[LoadService] Supabase getLoads query warning, using local fallback:', error);
+            const init = this.ensureInitialized(organizationId);
+            rawLoads = init.loads;
+            rawAssignments = init.assignments;
+          } else {
+            rawLoads = (data || []) as Load[];
+            // If Supabase returned zero records for demo org, backfill with local initialized records for demo continuity
+            if (rawLoads.length === 0) {
+              const init = this.ensureInitialized(organizationId);
+              if (init.loads.length > 0) {
+                rawLoads = init.loads;
+                rawAssignments = init.assignments;
+              }
+            }
+          }
+        } catch (fetchErr) {
+          console.warn('[LoadService] Supabase getLoads network warning, using local fallback:', fetchErr);
+          const init = this.ensureInitialized(organizationId);
+          rawLoads = init.loads;
+          rawAssignments = init.assignments;
+        }
       }
-      rawLoads = (data || []) as Load[];
-    } else {
-      const { loads } = this.ensureInitialized(organizationId);
-      rawLoads = loads;
+
+      // Attempt to fetch load_team_assignments from Supabase if we got loads from Supabase
+      if (rawAssignments.length === 0) {
+        try {
+          const { data: assignData, error: assignError } = await supabase
+            .from('load_team_assignments')
+            .select('*')
+            .eq('organization_id', organizationId);
+
+          if (!assignError && assignData && assignData.length > 0) {
+            rawAssignments = assignData as LoadTeamAssignment[];
+          }
+        } catch (err) {
+          console.warn('[LoadService] Supabase load_team_assignments fetch skipped/failed, using fallback:', err);
+        }
+      }
+    } else if (!isUUID(organizationId) || organizationId === DEMO_ORGANIZATION_ID) {
+      const init = this.ensureInitialized(organizationId);
+      rawLoads = init.loads;
+      rawAssignments = init.assignments;
     }
 
-    const [trucks, drivers, clients, brokers] = await this.getDependencies(organizationId);
-    let result = rawLoads.map((l) => this.joinRelations(l, clients, brokers, trucks, drivers));
+    const [trucks, drivers, clients, brokers, teamMembers] = await depPromise;
+    let result = rawLoads.map((l) => this.joinRelations(l, clients, brokers, trucks, drivers, teamMembers, rawAssignments));
 
     if (filters) {
       if (filters.search && filters.search.trim()) {
@@ -475,6 +662,14 @@ class LocalLoadService implements ILoadService {
           const brokerName = (l.broker?.company_name || '').toLowerCase();
           const truckNum = (l.truck?.truck_number || '').toLowerCase();
           const driverName = (l.driver?.full_name || '').toLowerCase();
+          const assigneeName = (l.dispatcher_profile?.full_name || '').toLowerCase();
+          const assigneeRole = (l.dispatcher_profile?.role || '').toLowerCase();
+          const teamMatches = (l.assigned_team || []).some(
+            (m) =>
+              (m.full_name || '').toLowerCase().includes(query) ||
+              (m.role || '').toLowerCase().includes(query) ||
+              (m.email && m.email.toLowerCase().includes(query))
+          );
 
           return (
             loadNum.includes(query) ||
@@ -484,7 +679,10 @@ class LocalLoadService implements ILoadService {
             clientName.includes(query) ||
             brokerName.includes(query) ||
             truckNum.includes(query) ||
-            driverName.includes(query)
+            driverName.includes(query) ||
+            assigneeName.includes(query) ||
+            assigneeRole.includes(query) ||
+            teamMatches
           );
         });
       }
@@ -495,6 +693,31 @@ class LocalLoadService implements ILoadService {
 
       if (filters.brokerId && filters.brokerId !== 'all') {
         result = result.filter((l) => l.broker_id === filters.brokerId);
+      }
+
+      const assignedFilter = filters.assignedMemberId || filters.dispatcherId;
+      if (assignedFilter && assignedFilter !== 'all') {
+        if (assignedFilter === 'unassigned') {
+          result = result.filter(
+            (l) => (!l.assigned_team || l.assigned_team.length === 0) &&
+                   (!l.assigned_team_assignments || l.assigned_team_assignments.length === 0)
+          );
+        } else if (assignedFilter === 'me') {
+          const targetUserId = filters.currentUserId;
+          if (targetUserId) {
+            result = result.filter(
+              (l) =>
+                (l.assigned_team && l.assigned_team.some((m) => m.user_id === targetUserId)) ||
+                (l.assigned_team_assignments && l.assigned_team_assignments.some((a) => a.user_id === targetUserId))
+            );
+          }
+        } else {
+          result = result.filter(
+            (l) =>
+              (l.assigned_team && l.assigned_team.some((m) => m.user_id === assignedFilter)) ||
+              (l.assigned_team_assignments && l.assigned_team_assignments.some((a) => a.user_id === assignedFilter))
+          );
+        }
       }
 
       if (filters.equipmentType && filters.equipmentType !== 'all') {
@@ -540,33 +763,101 @@ class LocalLoadService implements ILoadService {
 
   async getLoadById(organizationId: string, id: string): Promise<LoadWithRelations | null> {
     let rawLoad: Load | null = null;
+    let rawAssignments: LoadTeamAssignment[] = [];
 
-    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(id)) {
-      const { data, error } = await supabase
-        .from('loads')
-        .select('*')
-        .eq('id', id)
-        .eq('organization_id', organizationId)
-        .maybeSingle();
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      if (organizationId !== DEMO_ORGANIZATION_ID) {
+        if (!isUUID(id)) return null;
+        try {
+          const { data, error } = await supabase
+            .from('loads')
+            .select('*')
+            .eq('id', id)
+            .eq('organization_id', organizationId)
+            .maybeSingle();
 
-      if (error) {
-        console.error('[LoadService] Supabase getLoadById error:', error);
-        throw new Error(error.message || 'Failed to fetch load from database.');
+          if (error) {
+            console.error('[LoadService] Supabase getLoadById error for real org:', error);
+            throw new Error(error.message || 'Failed to fetch load from database.');
+          }
+          if (data) {
+            rawLoad = data as Load;
+            try {
+              const { data: assignData } = await supabase
+                .from('load_team_assignments')
+                .select('*')
+                .eq('load_id', id)
+                .eq('organization_id', organizationId);
+              if (assignData) {
+                rawAssignments = assignData as LoadTeamAssignment[];
+              }
+            } catch (err) {
+              console.warn('[LoadService] Supabase getLoadById assignments fetch error:', err);
+            }
+          }
+        } catch (err) {
+          console.error('[LoadService] Supabase getLoadById network error for real org:', err);
+          throw err;
+        }
+      } else {
+        // Demo org flow
+        try {
+          const { data, error } = await supabase
+            .from('loads')
+            .select('*')
+            .eq('id', id)
+            .eq('organization_id', organizationId)
+            .maybeSingle();
+
+          if (error) {
+            console.warn('[LoadService] Supabase getLoadById warning, using local fallback:', error);
+            const { loads, assignments } = this.ensureInitialized(organizationId);
+            rawLoad = loads.find((l) => l.id === id) || null;
+            rawAssignments = assignments.filter((a) => a.load_id === id);
+          } else if (data) {
+            rawLoad = data as Load;
+            try {
+              const { data: assignData } = await supabase
+                .from('load_team_assignments')
+                .select('*')
+                .eq('load_id', id)
+                .eq('organization_id', organizationId);
+              if (assignData) {
+                rawAssignments = assignData as LoadTeamAssignment[];
+              }
+            } catch (err) {
+              console.warn('[LoadService] Supabase getLoadById assignments fetch error:', err);
+            }
+          } else {
+            const { loads, assignments } = this.ensureInitialized(organizationId);
+            rawLoad = loads.find((l) => l.id === id) || null;
+            rawAssignments = assignments.filter((a) => a.load_id === id);
+          }
+        } catch (err) {
+          console.warn('[LoadService] Supabase getLoadById network warning, using local fallback:', err);
+          const { loads, assignments } = this.ensureInitialized(organizationId);
+          rawLoad = loads.find((l) => l.id === id) || null;
+          rawAssignments = assignments.filter((a) => a.load_id === id);
+        }
       }
-      if (!data) return null;
-      rawLoad = data as Load;
-    } else {
-      const { loads } = this.ensureInitialized(organizationId);
+    } else if (!isUUID(organizationId) || organizationId === DEMO_ORGANIZATION_ID) {
+      const { loads, assignments } = this.ensureInitialized(organizationId);
       rawLoad = loads.find((l) => l.id === id) || null;
+      rawAssignments = assignments.filter((a) => a.load_id === id);
     }
 
     if (!rawLoad) return null;
 
-    const [trucks, drivers, clients, brokers] = await this.getDependencies(organizationId);
-    return this.joinRelations(rawLoad, clients, brokers, trucks, drivers);
+    const [trucks, drivers, clients, brokers, teamMembers] = await this.getDependencies(organizationId);
+    return this.joinRelations(rawLoad, clients, brokers, trucks, drivers, teamMembers, rawAssignments);
   }
 
-  async createLoad(organizationId: string, input: CreateLoadInput): Promise<LoadWithRelations> {
+  async createLoad(
+    organizationId: string,
+    input: CreateLoadInput,
+    actorName: string = 'Dispatcher',
+    actorId: string = 'usr-dispatcher'
+  ): Promise<LoadWithRelations> {
     // 1. Mandatory Validations
     if (!input.load_number || !input.load_number.trim()) {
       throw new Error('Load number is required.');
@@ -594,7 +885,36 @@ class LocalLoadService implements ILoadService {
       }
     }
 
-    const [trucks, drivers, clients, brokers] = await this.getDependencies(organizationId);
+    const [trucks, drivers, clients, brokers, teamMembers] = await this.getDependencies(organizationId);
+
+    // Enforce owner_admin authorization upfront when assigning team members on load creation
+    if (Array.isArray(input.assigned_team_member_ids) && input.assigned_team_member_ids.length > 0) {
+      if (!actorId || !actorId.trim()) {
+        throw new Error('Unauthorized: Valid actor ID is required to assign team members on load creation.');
+      }
+
+      let actorUserId = actorId.trim();
+      if (isSupabaseConfigured && (!actorUserId || !isUUID(actorUserId) || actorUserId === 'usr-dispatcher' || actorUserId === 'usr-admin')) {
+        const { data: authData } = await supabase.auth.getUser().catch(() => ({ data: { user: null } }));
+        if (authData?.user?.id) {
+          actorUserId = authData.user.id;
+        }
+      }
+
+      let actorMember = teamMembers.find(
+        (m) => (actorUserId && m.user_id === actorUserId) || (actorUserId && m.id === actorUserId)
+      );
+
+      if (!actorMember && (!isSupabaseConfigured || !isUUID(organizationId))) {
+        if (actorUserId === 'usr-admin' || actorUserId === 'admin-1' || actorUserId === 'usr-admin-1') {
+          actorMember = teamMembers.find((m) => m.role === 'owner_admin');
+        }
+      }
+
+      if (!actorMember || actorMember.role !== 'owner_admin') {
+        throw new Error('Unauthorized: Only organization owner/admins can manage load team assignments.');
+      }
+    }
 
     // 2. Validate Client / Truck / Driver consistency
     const client = clients.find((c) => c.id === input.client_id);
@@ -721,7 +1041,44 @@ class LocalLoadService implements ILoadService {
           ).catch(() => {});
         }
 
-        return this.joinRelations(createdLoad, clients, brokers, trucks, drivers);
+        const initialMemberIds = new Set<string>();
+        if (Array.isArray(input.assigned_team_member_ids)) {
+          input.assigned_team_member_ids.forEach((uid) => {
+            if (uid && typeof uid === 'string') initialMemberIds.add(uid);
+          });
+        }
+        if (input.assigned_dispatcher_id && typeof input.assigned_dispatcher_id === 'string') {
+          initialMemberIds.add(input.assigned_dispatcher_id);
+        }
+
+        const createdAssignments: LoadTeamAssignment[] = [];
+        if (initialMemberIds.size > 0) {
+          const assignRows = Array.from(initialMemberIds)
+            .filter(isUUID)
+            .map((uId) => ({
+              organization_id: organizationId,
+              load_id: createdLoad.id,
+              user_id: uId,
+              created_by: isUUID(actorId) ? actorId : null,
+            }));
+
+          if (assignRows.length > 0) {
+            const { data: insertedAssignments, error: assignErr } = await supabase
+              .from('load_team_assignments')
+              .insert(assignRows)
+              .select();
+
+            if (assignErr) {
+              console.error('[LoadService] Error inserting load_team_assignments on createLoad:', assignErr);
+              throw new Error(`Failed to insert team assignments: ${assignErr.message}`);
+            }
+            if (insertedAssignments) {
+              createdAssignments.push(...(insertedAssignments as LoadTeamAssignment[]));
+            }
+          }
+        }
+
+        return this.joinRelations(createdLoad, clients, brokers, trucks, drivers, teamMembers, createdAssignments);
       }
       throw new Error('Unexpected empty response while creating load.');
     }
@@ -777,6 +1134,32 @@ class LocalLoadService implements ILoadService {
     const loadsKey = `${LOADS_STORAGE_PREFIX}${organizationId}`;
     saveToStorage(loadsKey, loads);
 
+    // Sync load_team_assignments in local storage
+    const initialMemberIds = new Set<string>();
+    if (Array.isArray(input.assigned_team_member_ids)) {
+      input.assigned_team_member_ids.forEach((uid) => {
+        if (uid && typeof uid === 'string') initialMemberIds.add(uid);
+      });
+    }
+    if (newLoad.assigned_dispatcher_id) {
+      initialMemberIds.add(newLoad.assigned_dispatcher_id);
+    }
+
+    const assignmentsKey = `${LOAD_TEAM_ASSIGNMENTS_STORAGE_PREFIX}${organizationId}`;
+    const assignments = loadFromStorage<LoadTeamAssignment[]>(assignmentsKey, []);
+    initialMemberIds.forEach((uId) => {
+      if (!assignments.some((a) => a.load_id === newLoad.id && a.user_id === uId)) {
+        assignments.push({
+          id: `assign-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+          organization_id: organizationId,
+          load_id: newLoad.id,
+          user_id: uId,
+          created_at: now,
+        });
+      }
+    });
+    saveToStorage(assignmentsKey, assignments);
+
     // Auto-record activity events for initial creation and assignment
     activityService.recordSystemEvent(
       organizationId,
@@ -806,11 +1189,25 @@ class LocalLoadService implements ILoadService {
       ).catch(() => {});
     }
 
-    return this.joinRelations(newLoad, clients, brokers, trucks, drivers);
+    return this.joinRelations(
+      newLoad,
+      clients,
+      brokers,
+      trucks,
+      drivers,
+      teamMembers,
+      assignments.filter((a) => a.load_id === newLoad.id)
+    );
   }
 
-  async updateLoad(organizationId: string, id: string, input: UpdateLoadInput): Promise<LoadWithRelations> {
-    const [trucks, drivers, clients, brokers] = await this.getDependencies(organizationId);
+  async updateLoad(
+    organizationId: string,
+    id: string,
+    input: UpdateLoadInput,
+    actorName: string = 'Dispatcher',
+    actorId: string = 'usr-dispatcher'
+  ): Promise<LoadWithRelations> {
+    const [trucks, drivers, clients, brokers, teamMembers] = await this.getDependencies(organizationId);
 
     // Pickup & Delivery validations
     if (input.origin_state !== undefined && !isValidUsState(input.origin_state)) {
@@ -889,6 +1286,21 @@ class LocalLoadService implements ILoadService {
       const deliveryDt = input.delivery_datetime !== undefined ? input.delivery_datetime : currentLoad.delivery_datetime;
       if (pickupDt && deliveryDt && new Date(deliveryDt).getTime() < new Date(pickupDt).getTime()) {
         throw new Error('Delivery date and time cannot be earlier than pickup date and time.');
+      }
+
+      // Team assignment lifecycle and RBAC validation
+      const isTeamAssignmentChanging =
+        (input.assigned_dispatcher_id !== undefined && (input.assigned_dispatcher_id || null) !== (currentLoad.assigned_dispatcher_id || null)) ||
+        (input.assigned_team_member_ids !== undefined && input.assigned_team_member_ids.length > 0);
+
+      if (isTeamAssignmentChanging) {
+        if (currentLoad.pipeline_status === 'invoiced' || currentLoad.pipeline_status === 'paid') {
+          throw new Error(`Integrity Error: Cannot modify team assignments on an ${currentLoad.pipeline_status.toUpperCase()} load (ID: ${currentLoad.id}, Load Number: ${currentLoad.load_number}). Load must be reopened first.`);
+        }
+        const actorMember = teamMembers.find((m) => (actorId && m.user_id === actorId) || (actorId && m.id === actorId));
+        if (actorMember && actorMember.role !== 'owner_admin') {
+          throw new Error('Unauthorized: Only organization owner/admins can manage load team assignments.');
+        }
       }
 
       // If assignment has changed, route through authoritative assignDispatchResources / assign_load_dispatch RPC
@@ -994,7 +1406,97 @@ class LocalLoadService implements ILoadService {
             ).catch(() => {});
           }
 
-          return this.joinRelations(updatedLoad, clients, brokers, trucks, drivers);
+          // Auto-record dispatcher assignment change
+          if (
+            input.assigned_dispatcher_id !== undefined &&
+            (input.assigned_dispatcher_id || null) !== (currentLoad.assigned_dispatcher_id || null)
+          ) {
+            const prevMember = currentLoad.assigned_dispatcher_id
+              ? teamMembers.find((m) => m.user_id === currentLoad.assigned_dispatcher_id || m.id === currentLoad.assigned_dispatcher_id)
+              : null;
+            const nextMember = input.assigned_dispatcher_id
+              ? teamMembers.find((m) => m.user_id === input.assigned_dispatcher_id || m.id === input.assigned_dispatcher_id)
+              : null;
+
+            activityService
+              .recordDispatcherAssignmentChange(
+                organizationId,
+                id,
+                currentLoad.assigned_dispatcher_id || null,
+                input.assigned_dispatcher_id || null,
+                prevMember?.full_name || null,
+                nextMember?.full_name || null,
+                actorName,
+                actorId
+              )
+              .catch(() => {});
+          }
+
+          // Sync load_team_assignments in Supabase additively (never delete all assignments)
+          if (input.assigned_team_member_ids && input.assigned_team_member_ids.length > 0) {
+            const memberRows = input.assigned_team_member_ids
+              .filter(isUUID)
+              .map((uId) => ({
+                organization_id: organizationId,
+                load_id: id,
+                user_id: uId,
+                created_by: isUUID(actorId) ? actorId : null,
+              }));
+
+            for (const row of memberRows) {
+              await supabase
+                .from('load_team_assignments')
+                .upsert(row, { onConflict: 'load_id,user_id' });
+            }
+          }
+
+          if (input.assigned_dispatcher_id !== undefined) {
+            const newDispatcher = input.assigned_dispatcher_id && isUUID(input.assigned_dispatcher_id)
+              ? input.assigned_dispatcher_id
+              : null;
+            const oldDispatcher = currentLoad.assigned_dispatcher_id && isUUID(currentLoad.assigned_dispatcher_id)
+              ? currentLoad.assigned_dispatcher_id
+              : null;
+
+            if (newDispatcher) {
+              await supabase
+                .from('load_team_assignments')
+                .upsert(
+                  {
+                    organization_id: organizationId,
+                    load_id: id,
+                    user_id: newDispatcher,
+                    created_by: isUUID(actorId) ? actorId : null,
+                  },
+                  { onConflict: 'load_id,user_id' }
+                );
+            } else if (input.assigned_dispatcher_id === null && oldDispatcher) {
+              // Legacy primary dispatcher unassigned: remove only that specific member, keeping all other assignments
+              await supabase
+                .from('load_team_assignments')
+                .delete()
+                .eq('load_id', id)
+                .eq('organization_id', organizationId)
+                .eq('user_id', oldDispatcher);
+            }
+          }
+
+          // Fetch current assignments for this load to populate joinRelations accurately
+          const { data: currentAssignments } = await supabase
+            .from('load_team_assignments')
+            .select('*')
+            .eq('load_id', id)
+            .eq('organization_id', organizationId);
+
+          return this.joinRelations(
+            updatedLoad,
+            clients,
+            brokers,
+            trucks,
+            drivers,
+            teamMembers,
+            (currentAssignments as LoadTeamAssignment[]) || []
+          );
         }
         throw new Error('Unexpected empty response while updating load.');
       }
@@ -1116,6 +1618,21 @@ class LocalLoadService implements ILoadService {
       throw new Error('Delivery date and time cannot be earlier than pickup date and time.');
     }
 
+    // Team assignment lifecycle and RBAC validation in demo mode
+    const isTeamAssignmentChanging =
+      (input.assigned_dispatcher_id !== undefined && (input.assigned_dispatcher_id || null) !== (currentLoad.assigned_dispatcher_id || null)) ||
+      (input.assigned_team_member_ids !== undefined && input.assigned_team_member_ids.length > 0);
+
+    if (isTeamAssignmentChanging) {
+      if (currentLoad.pipeline_status === 'invoiced' || currentLoad.pipeline_status === 'paid') {
+        throw new Error(`Integrity Error: Cannot modify team assignments on an ${currentLoad.pipeline_status.toUpperCase()} load (ID: ${currentLoad.id}, Load Number: ${currentLoad.load_number}). Load must be reopened first.`);
+      }
+      const actorMember = teamMembers.find((m) => (actorId && m.user_id === actorId) || (actorId && m.id === actorId));
+      if (actorMember && actorMember.role !== 'owner_admin') {
+        throw new Error('Unauthorized: Only organization owner/admins can manage load team assignments.');
+      }
+    }
+
     const updatedLoad: Load = {
       ...currentLoad,
       load_number: input.load_number !== undefined ? input.load_number.trim().toUpperCase() : currentLoad.load_number,
@@ -1154,6 +1671,45 @@ class LocalLoadService implements ILoadService {
     const loadsKey = `${LOADS_STORAGE_PREFIX}${organizationId}`;
     saveToStorage(loadsKey, loads);
 
+    // Sync load_team_assignments in local storage additively (never delete all assignments)
+    const assignmentsKey = `${LOAD_TEAM_ASSIGNMENTS_STORAGE_PREFIX}${organizationId}`;
+    let assignments = loadFromStorage<LoadTeamAssignment[]>(assignmentsKey, []);
+
+    if (input.assigned_team_member_ids && input.assigned_team_member_ids.length > 0) {
+      input.assigned_team_member_ids.forEach((uId) => {
+        if (uId && !assignments.some((a) => a.load_id === id && a.user_id === uId)) {
+          assignments.push({
+            id: `assign-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+            organization_id: organizationId,
+            load_id: id,
+            user_id: uId,
+            created_at: new Date().toISOString(),
+          });
+        }
+      });
+    }
+
+    if (input.assigned_dispatcher_id !== undefined) {
+      const newDispatcher = input.assigned_dispatcher_id || null;
+      const oldDispatcher = currentLoad.assigned_dispatcher_id || null;
+
+      if (newDispatcher) {
+        if (!assignments.some((a) => a.load_id === id && a.user_id === newDispatcher)) {
+          assignments.push({
+            id: `assign-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+            organization_id: organizationId,
+            load_id: id,
+            user_id: newDispatcher,
+            created_at: new Date().toISOString(),
+          });
+        }
+      } else if (input.assigned_dispatcher_id === null && oldDispatcher) {
+        // Only remove the unassigned dispatcher, preserving all other team assignments
+        assignments = assignments.filter((a) => !(a.load_id === id && a.user_id === oldDispatcher));
+      }
+    }
+    saveToStorage(assignmentsKey, assignments);
+
     // Auto-record status shift
     if (input.pipeline_status && input.pipeline_status !== currentLoad.pipeline_status) {
       await activityService.recordStatusChange(
@@ -1190,11 +1746,572 @@ class LocalLoadService implements ILoadService {
       ).catch(() => {});
     }
 
-    return this.joinRelations(updatedLoad, clients, brokers, trucks, drivers);
+    // Auto-record dispatcher assignment change in demo mode
+    if (
+      input.assigned_dispatcher_id !== undefined &&
+      (input.assigned_dispatcher_id || null) !== (currentLoad.assigned_dispatcher_id || null)
+    ) {
+      const prevMember = currentLoad.assigned_dispatcher_id
+        ? teamMembers.find((m) => m.user_id === currentLoad.assigned_dispatcher_id || m.id === currentLoad.assigned_dispatcher_id)
+        : null;
+      const nextMember = input.assigned_dispatcher_id
+        ? teamMembers.find((m) => m.user_id === input.assigned_dispatcher_id || m.id === input.assigned_dispatcher_id)
+        : null;
+
+      activityService
+        .recordDispatcherAssignmentChange(
+          organizationId,
+          id,
+          currentLoad.assigned_dispatcher_id || null,
+          input.assigned_dispatcher_id || null,
+          prevMember?.full_name || null,
+          nextMember?.full_name || null,
+          actorName,
+          actorId
+        )
+        .catch(() => {});
+    }
+
+    return this.joinRelations(
+      updatedLoad,
+      clients,
+      brokers,
+      trucks,
+      drivers,
+      teamMembers,
+      assignments.filter((a) => a.load_id === id)
+    );
   }
 
   async updateLoadStatus(organizationId: string, id: string, status: PipelineStatus): Promise<LoadWithRelations> {
     return this.updateLoad(organizationId, id, { pipeline_status: status });
+  }
+
+  async assignLoadToTeamMember(
+    organizationId: string,
+    loadId: string,
+    memberId: string | null,
+    actorName: string = 'Admin',
+    actorId: string = 'usr-admin',
+    mode: 'add' | 'replace' = 'add'
+  ): Promise<LoadWithRelations> {
+    if (!memberId || memberId === 'unassigned') {
+      await this.bulkAssignLoadsToTeamMembers(organizationId, [loadId], [], 'replace', actorName, actorId);
+      const res = await this.getLoadById(organizationId, loadId);
+      if (!res) throw new Error('Load not found');
+      return res;
+    }
+
+    await this.assignTeamMembersToLoad(organizationId, loadId, [memberId], mode, actorName, actorId);
+    const res = await this.getLoadById(organizationId, loadId);
+    if (!res) throw new Error('Load not found');
+    return res;
+  }
+
+  async assignTeamMembersToLoad(
+    organizationId: string,
+    loadId: string,
+    memberIds: string[],
+    mode: 'add' | 'replace' = 'add',
+    actorName: string = 'Admin',
+    actorId: string = 'usr-admin'
+  ): Promise<LoadWithRelations> {
+    await this.bulkAssignLoadsToTeamMembers(organizationId, [loadId], memberIds, mode, actorName, actorId);
+    const updated = await this.getLoadById(organizationId, loadId);
+    if (!updated) {
+      throw new Error(`Load with ID "${loadId}" was not found.`);
+    }
+    return updated;
+  }
+
+  async removeTeamMemberFromLoad(
+    organizationId: string,
+    loadId: string,
+    memberId: string,
+    actorName: string = 'Admin',
+    actorId: string = 'usr-admin'
+  ): Promise<LoadWithRelations> {
+    await this.bulkAssignLoadsToTeamMembers(organizationId, [loadId], [memberId], 'remove', actorName, actorId);
+    const updated = await this.getLoadById(organizationId, loadId);
+    if (!updated) {
+      throw new Error(`Load with ID "${loadId}" was not found.`);
+    }
+    return updated;
+  }
+
+  async assignDispatcher(
+    organizationId: string,
+    loadId: string,
+    dispatcherId: string | null,
+    actorName: string = 'Dispatcher',
+    actorId: string = 'usr-dispatcher'
+  ): Promise<LoadWithRelations> {
+    return this.assignLoadToTeamMember(organizationId, loadId, dispatcherId, actorName, actorId);
+  }
+
+  async bulkAssignLoadsToTeamMembers(
+    organizationId: string,
+    loadIds: string[],
+    memberIds: string[],
+    mode: 'add' | 'replace' | 'remove' = 'add',
+    actorName: string = 'Admin',
+    actorId: string = 'usr-admin'
+  ): Promise<BulkAssignTeamMembersResult> {
+    if (!loadIds || loadIds.length === 0) {
+      return {
+        success: true,
+        updatedLoadsCount: 0,
+        updatedCount: 0,
+        loadIds: [],
+        teamMemberIds: memberIds || [],
+        assignedMemberIds: memberIds || [],
+        mode,
+      };
+    }
+
+    const teamMembers = await teamService.getTeamMembers(organizationId);
+
+    // 1. Enforce owner_admin authorization upfront (Fail Closed)
+    let actorUserId = actorId ? actorId.trim() : '';
+    if (isSupabaseConfigured && (!actorUserId || !isUUID(actorUserId) || actorUserId === 'usr-admin')) {
+      const { data: authData } = await supabase.auth.getUser().catch(() => ({ data: { user: null } }));
+      if (authData?.user?.id) {
+        actorUserId = authData.user.id;
+      }
+    }
+
+    let actorMember = teamMembers.find(
+      (m) => (actorUserId && m.user_id === actorUserId) || (actorUserId && m.id === actorUserId)
+    );
+
+    if (!actorMember && (!isSupabaseConfigured || !isUUID(organizationId))) {
+      if (actorUserId === 'usr-admin' || actorUserId === 'admin-1' || actorUserId === 'usr-admin-1') {
+        actorMember = teamMembers.find((m) => m.role === 'owner_admin');
+      }
+    }
+
+    if (!actorMember || actorMember.role !== 'owner_admin') {
+      throw new Error('Unauthorized: Only organization owner/admins can manage load team assignments.');
+    }
+
+    // 2. Lifecycle check: Invoiced and Paid loads cannot have team assignments modified
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      const validLoadIds = loadIds.filter(isUUID);
+      if (validLoadIds.length > 0) {
+        const { data: targetLoads, error: fetchErr } = await supabase
+          .from('loads')
+          .select('id, load_number, pipeline_status')
+          .in('id', validLoadIds)
+          .eq('organization_id', organizationId);
+
+        if (fetchErr) {
+          throw new Error(`Failed to verify load statuses: ${fetchErr.message}`);
+        }
+
+        const terminalLoad = targetLoads?.find((l) =>
+          l.pipeline_status === 'invoiced' || l.pipeline_status === 'paid'
+        );
+        if (terminalLoad) {
+          throw new Error(
+            `Integrity Error: Cannot modify team assignments on an ${terminalLoad.pipeline_status.toUpperCase()} load (ID: ${terminalLoad.id}, Load Number: ${terminalLoad.load_number || 'N/A'}). Load must be reopened first.`
+          );
+        }
+      }
+    } else {
+      const { loads } = this.ensureInitialized(organizationId);
+      for (const loadId of loadIds) {
+        const targetLoad = loads.find((l) => l.id === loadId);
+        if (targetLoad && (targetLoad.pipeline_status === 'invoiced' || targetLoad.pipeline_status === 'paid')) {
+          throw new Error(
+            `Integrity Error: Cannot modify team assignments on an ${targetLoad.pipeline_status.toUpperCase()} load (ID: ${targetLoad.id}, Load Number: ${targetLoad.load_number || 'N/A'}). Load must be reopened first.`
+          );
+        }
+      }
+    }
+
+    const validTargetMembers: TeamMember[] = [];
+    const targetUserIds: string[] = [];
+
+    for (const mId of memberIds) {
+      if (!mId || mId === 'unassigned') continue;
+      // Resolve member identity strictly to user_id (the authenticated user's UUID)
+      const found = teamMembers.find(
+        (m) =>
+          (m.user_id === mId || m.id === mId) &&
+          (m.role === 'owner_admin' || m.role === 'dispatcher' || m.role === 'staff') &&
+          (m as any).status !== 'inactive'
+      );
+      if (found) {
+        if (!validTargetMembers.some((vm) => vm.user_id === found.user_id)) {
+          validTargetMembers.push(found);
+        }
+        if (!targetUserIds.includes(found.user_id)) {
+          targetUserIds.push(found.user_id);
+        }
+      } else if (isUUID(mId) && !targetUserIds.includes(mId)) {
+        targetUserIds.push(mId);
+      }
+    }
+
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      const validLoadIds = loadIds.filter(isUUID);
+      if (validLoadIds.length > 0) {
+        let rpcSucceeded = false;
+        let rpcData: any = null;
+
+        try {
+          const { data, error } = await supabase.rpc('bulk_assign_load_team_members', {
+            p_organization_id: organizationId,
+            p_load_ids: validLoadIds,
+            p_user_ids: targetUserIds.filter(isUUID),
+            p_mode: mode,
+            p_actor_id: actorUserId && isUUID(actorUserId) ? actorUserId : null,
+          });
+
+          if (!error) {
+            rpcSucceeded = true;
+            rpcData = data;
+          } else {
+            const isMissingFunction =
+              error.code === 'PGRST202' ||
+              error.code === '42883' ||
+              error.message?.includes('could not find the function') ||
+              error.message?.includes('schema cache');
+
+            if (!isMissingFunction) {
+              throw new Error(error.message || 'Database error during team assignment.');
+            }
+            console.warn('[LoadService] bulk_assign_load_team_members RPC not found in schema cache, using direct table fallback:', error.message);
+          }
+        } catch (rpcErr: any) {
+          if (
+            rpcErr.message &&
+            !rpcErr.message.includes('PGRST202') &&
+            !rpcErr.message.includes('42883') &&
+            !rpcErr.message.includes('could not find the function') &&
+            !rpcErr.message.includes('schema cache')
+          ) {
+            throw rpcErr;
+          }
+          console.warn('[LoadService] bulk_assign_load_team_members RPC call threw error, attempting direct table fallback:', rpcErr);
+        }
+
+        if (rpcSucceeded) {
+          const resData = rpcData as any;
+          return {
+            success: true,
+            updatedLoadsCount: resData?.updated_count ?? validLoadIds.length,
+            updatedCount: resData?.updated_count ?? validLoadIds.length,
+            loadIds: resData?.updated_ids ?? validLoadIds,
+            teamMemberIds: targetUserIds,
+            assignedMemberIds: targetUserIds,
+            assignedMembers: validTargetMembers,
+            mode,
+          };
+        }
+
+        // Direct table update fallback for Supabase
+        for (const loadId of validLoadIds) {
+          if (mode === 'replace') {
+            const { error: delErr } = await supabase
+              .from('load_team_assignments')
+              .delete()
+              .eq('load_id', loadId)
+              .eq('organization_id', organizationId);
+
+            if (delErr) {
+              throw new Error(`Failed to clear load team assignments: ${delErr.message}`);
+            }
+
+            if (targetUserIds.length > 0) {
+              const rows = targetUserIds.filter(isUUID).map((uId) => ({
+                organization_id: organizationId,
+                load_id: loadId,
+                user_id: uId,
+                created_by: actorUserId && isUUID(actorUserId) ? actorUserId : null,
+              }));
+              const { error: insErr } = await supabase
+                .from('load_team_assignments')
+                .insert(rows);
+
+              if (insErr) {
+                throw new Error(`Failed to insert team assignments: ${insErr.message}`);
+              }
+            }
+
+            // Sync loads.assigned_dispatcher_id
+            const { error: updateLoadErr } = await supabase
+              .from('loads')
+              .update({
+                assigned_dispatcher_id: targetUserIds[0] && isUUID(targetUserIds[0]) ? targetUserIds[0] : null,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', loadId)
+              .eq('organization_id', organizationId);
+
+            if (updateLoadErr) {
+              throw new Error(`Failed to update load primary dispatcher: ${updateLoadErr.message}`);
+            }
+          } else if (mode === 'add') {
+            for (const uId of targetUserIds.filter(isUUID)) {
+              const { error: upsertErr } = await supabase
+                .from('load_team_assignments')
+                .upsert(
+                  {
+                    organization_id: organizationId,
+                    load_id: loadId,
+                    user_id: uId,
+                    created_by: actorUserId && isUUID(actorUserId) ? actorUserId : null,
+                  },
+                  { onConflict: 'load_id,user_id' }
+                );
+
+              if (upsertErr) {
+                throw new Error(`Failed to assign team member: ${upsertErr.message}`);
+              }
+            }
+
+            // If load has no assigned_dispatcher_id, set to first added member
+            const { data: currentLoadData } = await supabase
+              .from('loads')
+              .select('assigned_dispatcher_id')
+              .eq('id', loadId)
+              .eq('organization_id', organizationId)
+              .single();
+
+            if (currentLoadData && !currentLoadData.assigned_dispatcher_id && targetUserIds.length > 0) {
+              const { error: updateLoadErr } = await supabase
+                .from('loads')
+                .update({
+                  assigned_dispatcher_id: targetUserIds[0],
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', loadId)
+                .eq('organization_id', organizationId);
+
+              if (updateLoadErr) {
+                throw new Error(`Failed to update load primary dispatcher: ${updateLoadErr.message}`);
+              }
+            }
+          } else if (mode === 'remove') {
+            if (targetUserIds.length > 0) {
+              const { error: delErr } = await supabase
+                .from('load_team_assignments')
+                .delete()
+                .eq('load_id', loadId)
+                .eq('organization_id', organizationId)
+                .in('user_id', targetUserIds.filter(isUUID));
+
+              if (delErr) {
+                throw new Error(`Failed to remove team assignment: ${delErr.message}`);
+              }
+
+              // Check if primary dispatcher was removed
+              const { data: loadData } = await supabase
+                .from('loads')
+                .select('assigned_dispatcher_id')
+                .eq('id', loadId)
+                .eq('organization_id', organizationId)
+                .single();
+
+              if (loadData?.assigned_dispatcher_id && targetUserIds.includes(loadData.assigned_dispatcher_id)) {
+                const { data: remainingAssignments } = await supabase
+                  .from('load_team_assignments')
+                  .select('user_id')
+                  .eq('load_id', loadId)
+                  .eq('organization_id', organizationId)
+                  .order('created_at', { ascending: true })
+                  .limit(1);
+
+                const nextDispatcherId = remainingAssignments && remainingAssignments.length > 0
+                  ? remainingAssignments[0].user_id
+                  : null;
+
+                const { error: updateLoadErr } = await supabase
+                  .from('loads')
+                  .update({
+                    assigned_dispatcher_id: nextDispatcherId,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', loadId)
+                  .eq('organization_id', organizationId);
+
+                if (updateLoadErr) {
+                  throw new Error(`Failed to update load primary dispatcher: ${updateLoadErr.message}`);
+                }
+              }
+            }
+          }
+
+          // Record audit log
+          activityService
+            .recordMultiTeamAssignmentChange(
+              organizationId,
+              loadId,
+              targetUserIds,
+              validTargetMembers.map((m) => m.full_name || 'Member'),
+              mode,
+              validLoadIds.length > 1,
+              actorName,
+              actorUserId || actorId
+            )
+            .catch(() => {});
+        }
+
+        return {
+          success: true,
+          updatedLoadsCount: validLoadIds.length,
+          updatedCount: validLoadIds.length,
+          loadIds: validLoadIds,
+          teamMemberIds: targetUserIds,
+          assignedMemberIds: targetUserIds,
+          assignedMembers: validTargetMembers,
+          mode,
+        };
+      }
+    }
+
+    // Local / Demo persistence & synchronization
+    const { loads, assignments } = this.ensureInitialized(organizationId);
+    let updatedCount = 0;
+    const updatedIds: string[] = [];
+    let updatedAssignments = [...assignments];
+
+    for (const loadId of loadIds) {
+      const loadExists = loads.some((l) => l.id === loadId);
+      if (!loadExists) continue;
+
+      updatedCount++;
+      updatedIds.push(loadId);
+
+      if (mode === 'replace') {
+        // Remove all current assignments for this load
+        updatedAssignments = updatedAssignments.filter((a) => a.load_id !== loadId);
+        // Insert new ones
+        targetUserIds.forEach((uId) => {
+          updatedAssignments.push({
+            id: `assign-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+            organization_id: organizationId,
+            load_id: loadId,
+            user_id: uId,
+            created_at: new Date().toISOString(),
+          });
+        });
+      } else if (mode === 'add') {
+        targetUserIds.forEach((uId) => {
+          const alreadyAssigned = updatedAssignments.some(
+            (a) => a.load_id === loadId && a.user_id === uId
+          );
+          if (!alreadyAssigned) {
+            updatedAssignments.push({
+              id: `assign-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+              organization_id: organizationId,
+              load_id: loadId,
+              user_id: uId,
+              created_at: new Date().toISOString(),
+            });
+          }
+        });
+      } else if (mode === 'remove') {
+        updatedAssignments = updatedAssignments.filter(
+          (a) => !(a.load_id === loadId && targetUserIds.includes(a.user_id))
+        );
+      }
+
+      // Sync load's primary assigned_dispatcher_id in loads state
+      const loadAssignmentsForThisLoad = updatedAssignments.filter((a) => a.load_id === loadId);
+      const primaryAssigneeId = loadAssignmentsForThisLoad.length > 0 ? loadAssignmentsForThisLoad[0].user_id : null;
+      const loadIdx = loads.findIndex((l) => l.id === loadId);
+      if (loadIdx >= 0) {
+        loads[loadIdx] = {
+          ...loads[loadIdx],
+          assigned_dispatcher_id: primaryAssigneeId,
+          updated_at: new Date().toISOString(),
+        };
+      }
+
+      // Record audit
+      activityService
+        .recordMultiTeamAssignmentChange(
+          organizationId,
+          loadId,
+          targetUserIds,
+          validTargetMembers.map((m) => m.full_name || 'Member'),
+          mode,
+          loadIds.length > 1,
+          actorName,
+          actorId
+        )
+        .catch(() => {});
+    }
+
+    const assignmentsKey = `${LOAD_TEAM_ASSIGNMENTS_STORAGE_PREFIX}${organizationId}`;
+    saveToStorage(assignmentsKey, updatedAssignments);
+
+    const loadsKey = `${LOADS_STORAGE_PREFIX}${organizationId}`;
+    saveToStorage(loadsKey, loads);
+
+    return {
+      success: true,
+      updatedLoadsCount: updatedCount,
+      updatedCount,
+      loadIds: updatedIds,
+      teamMemberIds: targetUserIds,
+      assignedMemberIds: targetUserIds,
+      assignedMembers: validTargetMembers,
+      mode,
+    };
+  }
+
+  async bulkAssignLoadsToTeamMember(
+    organizationId: string,
+    loadIds: string[],
+    memberId: string | null,
+    actorName: string = 'Admin',
+    actorId: string = 'usr-admin'
+  ): Promise<BulkAssignTeamMemberResult> {
+    if (!loadIds || loadIds.length === 0) {
+      return {
+        success: true,
+        updatedCount: 0,
+        loadIds: [],
+        assignedMemberId: memberId || null,
+        dispatcherId: memberId || null,
+      };
+    }
+
+    const targetMemberIds = memberId && memberId !== 'unassigned' ? [memberId] : [];
+    const res = await this.bulkAssignLoadsToTeamMembers(
+      organizationId,
+      loadIds,
+      targetMemberIds,
+      'replace',
+      actorName,
+      actorId
+    );
+
+    const firstMember = res.assignedMembers && res.assignedMembers[0];
+
+    return {
+      success: res.success,
+      updatedCount: res.updatedCount ?? res.updatedLoadsCount ?? 0,
+      loadIds: res.loadIds,
+      assignedMemberId: firstMember ? (firstMember.user_id || firstMember.id) : null,
+      assignedMemberName: firstMember ? firstMember.full_name : null,
+      assignedMemberRole: firstMember ? firstMember.role : null,
+      dispatcherId: firstMember ? (firstMember.user_id || firstMember.id) : null,
+      dispatcherName: firstMember ? firstMember.full_name : null,
+    };
+  }
+
+  async bulkAssignDispatcher(
+    organizationId: string,
+    loadIds: string[],
+    dispatcherId: string | null,
+    actorName: string = 'Dispatcher',
+    actorId: string = 'usr-dispatcher'
+  ): Promise<BulkAssignDispatcherResult> {
+    return this.bulkAssignLoadsToTeamMember(organizationId, loadIds, dispatcherId, actorName, actorId);
   }
 
   async assignDispatchResources(
@@ -1311,12 +2428,13 @@ class LocalLoadService implements ILoadService {
     return result.sort((a, b) => a.full_name.localeCompare(b.full_name));
   }
 
-  async getDependencies(organizationId: string): Promise<[Truck[], Driver[], Client[], Broker[]]> {
+  async getDependencies(organizationId: string): Promise<[Truck[], Driver[], Client[], Broker[], TeamMember[]]> {
     return Promise.all([
       this.getTrucks(organizationId),
       this.getDrivers(organizationId),
       this.getClients(organizationId),
       this.getBrokers(organizationId),
+      teamService.getTeamMembers(organizationId),
     ]);
   }
 
@@ -1326,26 +2444,26 @@ class LocalLoadService implements ILoadService {
     let maxSeq = 8840;
 
     if (isSupabaseConfigured && isUUID(organizationId)) {
-      const { data, error } = await supabase
-        .from('loads')
-        .select('load_number')
-        .eq('organization_id', organizationId);
+      try {
+        const { data, error } = await supabase
+          .from('loads')
+          .select('load_number')
+          .eq('organization_id', organizationId);
 
-      if (error) {
-        console.error('[LoadService] Supabase generateNextLoadNumber error:', error);
-        throw new Error(error.message || 'Failed to generate load number from database.');
-      }
-      if (data) {
-        data.forEach((l) => {
-          if (l.load_number.startsWith(prefix)) {
-            const numPart = parseInt(l.load_number.replace(prefix, ''), 10);
-            if (!isNaN(numPart) && numPart > maxSeq) {
-              maxSeq = numPart;
+        if (!error && data) {
+          data.forEach((l) => {
+            if (l.load_number.startsWith(prefix)) {
+              const numPart = parseInt(l.load_number.replace(prefix, ''), 10);
+              if (!isNaN(numPart) && numPart > maxSeq) {
+                maxSeq = numPart;
+              }
             }
-          }
-        });
+          });
+          return `${prefix}${maxSeq + 1}`;
+        }
+      } catch (seqErr) {
+        console.warn('[LoadService] Supabase generateNextLoadNumber warning, using local sequence:', seqErr);
       }
-      return `${prefix}${maxSeq + 1}`;
     }
 
     const { loads } = this.ensureInitialized(organizationId);

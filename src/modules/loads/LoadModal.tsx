@@ -6,6 +6,7 @@ import {
   Driver,
   PipelineStatus,
   EquipmentType,
+  TeamMember,
 } from '../../types/domain.types.ts';
 import {
   LoadWithRelations,
@@ -19,6 +20,9 @@ import {
 import { Modal } from '../../components/common/Modal.tsx';
 import { LoadProfitabilityCard } from './LoadProfitabilityCard.tsx';
 import { estimateDriverPay, estimateFuelCost, formatCurrency } from '../../lib/calculations.ts';
+import { extractionService } from '../documents/extractionService.ts';
+import { normalizeEquipmentType } from '../documents/rateConParser.ts';
+import { RateConfirmationExtraction, ExtractedBrokerInfo } from '../documents/extractionTypes.ts';
 import {
   Building2,
   Truck as TruckIcon,
@@ -33,6 +37,10 @@ import {
   Sparkles,
   ArrowRight,
   Calculator,
+  CheckCircle2,
+  RefreshCw,
+  X,
+  Upload,
 } from 'lucide-react';
 
 // Format 24-hour time HH:MM with 12-hour AM/PM label
@@ -141,14 +149,45 @@ export const deriveLoadScheduleFromInputs = (
 interface LoadModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (input: CreateLoadInput | UpdateLoadInput) => Promise<void>;
+  onSave: (input: CreateLoadInput | UpdateLoadInput, rateConFile?: File | null) => Promise<void>;
   initialLoad?: LoadWithRelations | null;
   clients: Client[];
   brokers: Broker[];
   trucks: Truck[];
   drivers: Driver[];
+  teamMembers?: TeamMember[];
   nextLoadNumber?: string;
   isSaving?: boolean;
+}
+
+interface FormSnapshot {
+  loadNumber: string;
+  brokerId: string;
+  pipelineStatus: PipelineStatus;
+  equipmentType: EquipmentType;
+  commodity: string;
+  weightLbs: string;
+  originFacilityName: string;
+  originAddress: string;
+  originCity: string;
+  originState: string;
+  originZip: string;
+  pickupDate: string;
+  pickupTime: string;
+  destFacilityName: string;
+  destAddress: string;
+  destCity: string;
+  destState: string;
+  destZip: string;
+  deliveryDate: string;
+  deliveryTime: string;
+  rate: string;
+  loadedMiles: string;
+  deadheadMiles: string;
+  fuelExpense: string;
+  driverPay: string;
+  otherExpenses: string;
+  specialInstructions: string;
 }
 
 export const LoadModal: React.FC<LoadModalProps> = ({
@@ -160,6 +199,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
   brokers,
   trucks,
   drivers,
+  teamMembers = [],
   nextLoadNumber,
   isSaving = false,
 }) => {
@@ -171,6 +211,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
   const [brokerId, setBrokerId] = useState('');
   const [truckId, setTruckId] = useState('');
   const [driverId, setDriverId] = useState('');
+  const [assignedDispatcherId, setAssignedDispatcherId] = useState('');
   const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus>('sourced');
   const [equipmentType, setEquipmentType] = useState<EquipmentType>('dry_van');
   const [commodity, setCommodity] = useState('');
@@ -207,6 +248,20 @@ export const LoadModal: React.FC<LoadModalProps> = ({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Rate Con PDF Upload & AI Extraction State
+  const [rateConFile, setRateConFile] = useState<File | null>(null);
+  const [isExtracting, setIsExtracting] = useState<boolean>(false);
+  const [extractionResult, setExtractionResult] = useState<RateConfirmationExtraction | null>(null);
+  const [extractionError, setExtractionError] = useState<string | null>(null);
+  const [extractionNotice, setExtractionNotice] = useState<{
+    fileName: string;
+    confidence: number;
+    fieldsCount: number;
+  } | null>(null);
+  const [formSnapshotBeforeExtraction, setFormSnapshotBeforeExtraction] = useState<FormSnapshot | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
   // Reset or populate on open
   useEffect(() => {
     if (!isOpen) return;
@@ -215,12 +270,30 @@ export const LoadModal: React.FC<LoadModalProps> = ({
     setSubmitError(null);
     setIsSubmitting(false);
 
+    // Reset extraction state
+    setRateConFile(null);
+    setIsExtracting(false);
+    setExtractionResult(null);
+    setExtractionError(null);
+    setExtractionNotice(null);
+    setFormSnapshotBeforeExtraction(null);
+    setIsDragOver(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+
     if (initialLoad) {
       setLoadNumber(initialLoad.load_number);
       setClientId(initialLoad.client_id || '');
       setBrokerId(initialLoad.broker_id || '');
       setTruckId(initialLoad.truck_id || '');
       setDriverId(initialLoad.driver_id || '');
+      const rawDispatcherId = initialLoad.assigned_dispatcher_id 
+        || initialLoad.assigned_team?.[0]?.user_id 
+        || initialLoad.assigned_team_assignments?.[0]?.user_id 
+        || '';
+      const matchedMember = teamMembers.find((m) => m.user_id === rawDispatcherId || m.id === rawDispatcherId);
+      setAssignedDispatcherId(matchedMember ? matchedMember.user_id : rawDispatcherId);
       setPipelineStatus(initialLoad.pipeline_status || 'booked');
       setEquipmentType(initialLoad.equipment_type || 'dry_van');
       setCommodity(initialLoad.commodity || '');
@@ -281,6 +354,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
       setEquipmentType('dry_van');
       setCommodity('General Freight / Palletized');
       setWeightLbs('38000');
+      setAssignedDispatcherId('');
 
       setOriginCity('Dallas');
       setOriginState('TX');
@@ -319,6 +393,15 @@ export const LoadModal: React.FC<LoadModalProps> = ({
     if (!clientId) return [];
     return drivers.filter((d) => d.client_id === clientId);
   }, [drivers, clientId]);
+
+  // Active operational team members (Admin, Dispatcher, Staff) for load assignment
+  const activeTeamMembers = useMemo(() => {
+    return teamMembers.filter(
+      (m) =>
+        (m.role === 'owner_admin' || m.role === 'dispatcher' || m.role === 'staff') &&
+        (m as any).status !== 'inactive'
+    );
+  }, [teamMembers]);
 
   // Active broker details for preview
   const selectedBroker = useMemo(() => {
@@ -394,6 +477,416 @@ export const LoadModal: React.FC<LoadModalProps> = ({
     setFuelExpense(String(estimatedFuel));
   };
 
+  // LOAD-001: Sanitize exact currency input for Fuel Expense
+  const handleFuelExpenseChange = (rawInput: string) => {
+    // 1. Check for forbidden '-' BEFORE removing formatting characters.
+    // Rejects negative values like "-100" and range expressions like "380-390" or "380 - 390".
+    if (rawInput.includes('-')) {
+      return;
+    }
+
+    // 2. Remove allowable currency formatting: currency symbols ($€£), commas, and whitespace
+    const cleaned = rawInput.replace(/[$€£,\s]/g, '');
+
+    // 3. Reject multiple decimal points (e.g. "380.50.20")
+    if ((cleaned.match(/\./g) || []).length > 1) {
+      return;
+    }
+
+    // 4. Keep only digits and at most one decimal point with up to 2 decimal places.
+    // Allows empty string "" and intermediate typing state such as "385."
+    if (cleaned !== '' && !/^\d*(\.\d{0,2})?$/.test(cleaned)) {
+      return;
+    }
+
+    setFuelExpense(cleaned);
+  };
+
+  // Reliable Broker Matching from extracted broker info
+  const matchBrokerFromExtraction = (extractedBroker: ExtractedBrokerInfo, brokerList: Broker[]): string | null => {
+    if (!extractedBroker || !brokerList || brokerList.length === 0) return null;
+
+    // 1. Match by MC number if provided
+    if (extractedBroker.mc_number) {
+      const cleanExtracted = extractedBroker.mc_number.replace(/\D/g, '');
+      if (cleanExtracted.length >= 4) {
+        const mcMatch = brokerList.find((b) => {
+          if (!b.mc_number) return false;
+          const cleanB = b.mc_number.replace(/\D/g, '');
+          return cleanB === cleanExtracted;
+        });
+        if (mcMatch) return mcMatch.id;
+      }
+    }
+
+    // 2. Match by DOT number if provided
+    if (extractedBroker.dot_number) {
+      const cleanExtracted = extractedBroker.dot_number.replace(/\D/g, '');
+      if (cleanExtracted.length >= 4) {
+        const dotMatch = brokerList.find((b) => {
+          if (!b.dot_number) return false;
+          const cleanB = b.dot_number.replace(/\D/g, '');
+          return cleanB === cleanExtracted;
+        });
+        if (dotMatch) return dotMatch.id;
+      }
+    }
+
+    // 3. Match by Company Name (sufficiently reliable match)
+    if (extractedBroker.company_name && extractedBroker.company_name.trim().length >= 3) {
+      const target = extractedBroker.company_name.toLowerCase().trim();
+      const exactMatch = brokerList.find((b) => b.company_name.toLowerCase().trim() === target);
+      if (exactMatch) return exactMatch.id;
+
+      // Reliable partial match with minimum length threshold
+      const partialMatch = brokerList.find((b) => {
+        const bName = b.company_name.toLowerCase().trim();
+        return (target.length >= 5 && bName.includes(target)) || (bName.length >= 5 && target.includes(bName));
+      });
+      if (partialMatch) return partialMatch.id;
+    }
+
+    return null;
+  };
+
+  // Handle Rate Con File Selection and AI Extraction
+  const handleRateConFileSelected = async (file: File) => {
+    setExtractionError(null);
+
+    // A. PDF Validation
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    if (!isPdf) {
+      setExtractionError('Please select a valid Rate Confirmation PDF file (.pdf).');
+      return;
+    }
+
+    if (file.size > 15 * 1024 * 1024) {
+      setExtractionError('File size exceeds the 15 MB limit. Please select a smaller PDF.');
+      return;
+    }
+
+    // Capture snapshot of current form state before applying extraction if not already stored
+    if (!formSnapshotBeforeExtraction) {
+      setFormSnapshotBeforeExtraction({
+        loadNumber,
+        brokerId,
+        pipelineStatus,
+        equipmentType,
+        commodity,
+        weightLbs,
+        originFacilityName,
+        originAddress,
+        originCity,
+        originState,
+        originZip,
+        pickupDate,
+        pickupTime,
+        destFacilityName,
+        destAddress,
+        destCity,
+        destState,
+        destZip,
+        deliveryDate,
+        deliveryTime,
+        rate,
+        loadedMiles,
+        deadheadMiles,
+        fuelExpense,
+        driverPay,
+        otherExpenses,
+        specialInstructions,
+      });
+    }
+
+    setIsExtracting(true);
+    setRateConFile(file);
+
+    try {
+      // Call EXISTING P0.2 extraction service
+      const result = await extractionService.extractRateConfirmation({ file });
+      setExtractionResult(result);
+
+      let populatedCount = 0;
+
+      // 1. Load Number
+      const extractedLoadNum =
+        result.load_info?.load_number ||
+        (result as any).load_number ||
+        '';
+      if (extractedLoadNum && extractedLoadNum.trim()) {
+        setLoadNumber(extractedLoadNum.trim().toUpperCase());
+        populatedCount++;
+      }
+
+      // 2. Rate (total carrier compensation)
+      const extractedRate =
+        result.load_info?.total_carrier_compensation ||
+        result.financial_breakdown?.total_carrier_compensation ||
+        result.load_info?.rate ||
+        0;
+      if (extractedRate > 0) {
+        setRate(String(extractedRate));
+        populatedCount++;
+      }
+
+      // 3. Loaded Miles
+      const extractedMiles =
+        result.load_info?.mileage ||
+        (result as any).mileage ||
+        (result.financial_breakdown as any)?.mileage ||
+        0;
+      if (extractedMiles > 0) {
+        setLoadedMiles(String(extractedMiles));
+        populatedCount++;
+      }
+
+      // 4. Equipment Type
+      const rawEquipment = result.load_info?.equipment_type || (result as any).equipment_type;
+      if (rawEquipment) {
+        const normalizedEq = normalizeEquipmentType(rawEquipment);
+        setEquipmentType(normalizedEq);
+        populatedCount++;
+      }
+
+      // 5. Commodity
+      const extractedCommodity = result.load_info?.commodity || (result as any).commodity;
+      if (extractedCommodity && extractedCommodity.trim()) {
+        setCommodity(extractedCommodity.trim());
+        populatedCount++;
+      }
+
+      // 6. Weight
+      const extractedWeight =
+        result.load_info?.weight_lbs ||
+        (result as any).weight_lbs ||
+        (result as any).weight ||
+        0;
+      if (extractedWeight > 0) {
+        setWeightLbs(String(extractedWeight));
+        populatedCount++;
+      }
+
+      // 7. Special Instructions & Reference / PO #
+      const instructionsParts: string[] = [];
+      const refNum = result.load_info?.reference_number || (result as any).reference_number;
+      if (refNum && String(refNum).trim()) {
+        instructionsParts.push(`Broker Ref / PO #: ${String(refNum).trim()}`);
+      }
+      const rawInstructions =
+        result.load_info?.special_instructions ||
+        (result as any).special_instructions;
+      if (rawInstructions && String(rawInstructions).trim()) {
+        instructionsParts.push(String(rawInstructions).trim());
+      }
+      if (instructionsParts.length > 0) {
+        setSpecialInstructions(instructionsParts.join('\n\n'));
+        populatedCount++;
+      }
+
+      // 8. Origin Facility, Address, City, State, Zip, Pickup Datetime
+      const originFac = result.origin?.facility_name || result.stops?.[0]?.facility_name;
+      if (originFac && originFac.trim()) {
+        setOriginFacilityName(originFac.trim());
+        populatedCount++;
+      }
+
+      const originAddr = result.origin?.address || result.stops?.[0]?.address;
+      if (originAddr && originAddr.trim()) {
+        setOriginAddress(originAddr.trim());
+        populatedCount++;
+      }
+
+      const originC = result.origin?.city || result.stops?.[0]?.city;
+      if (originC && originC.trim()) {
+        setOriginCity(originC.trim());
+        populatedCount++;
+      }
+
+      const originS = (result.origin?.state || result.stops?.[0]?.state || '').trim().toUpperCase();
+      if (originS && isValidUsState(originS)) {
+        setOriginState(originS);
+        populatedCount++;
+      }
+
+      const originZ = result.origin?.zip || result.stops?.[0]?.zip;
+      if (originZ && originZ.trim()) {
+        setOriginZip(originZ.trim());
+        populatedCount++;
+      }
+
+      const rawPickup =
+        result.origin?.pickup_datetime ||
+        result.origin?.date_string ||
+        result.stops?.[0]?.datetime_iso ||
+        result.stops?.[0]?.date_string;
+      if (rawPickup) {
+        const parsedPickup = parseDateAndTimeToInputs(rawPickup);
+        if (parsedPickup.date) {
+          setPickupDate(parsedPickup.date);
+          if (parsedPickup.time) {
+            setPickupTime(parsedPickup.time);
+          }
+          populatedCount++;
+        }
+      }
+
+      // 9. Destination Facility, Address, City, State, Zip, Delivery Datetime
+      const destFac = result.destination?.facility_name || result.stops?.[1]?.facility_name;
+      if (destFac && destFac.trim()) {
+        setDestFacilityName(destFac.trim());
+        populatedCount++;
+      }
+
+      const destAddr = result.destination?.address || result.stops?.[1]?.address;
+      if (destAddr && destAddr.trim()) {
+        setDestAddress(destAddr.trim());
+        populatedCount++;
+      }
+
+      const destC = result.destination?.city || result.stops?.[1]?.city;
+      if (destC && destC.trim()) {
+        setDestCity(destC.trim());
+        populatedCount++;
+      }
+
+      const destS = (result.destination?.state || result.stops?.[1]?.state || '').trim().toUpperCase();
+      if (destS && isValidUsState(destS)) {
+        setDestState(destS);
+        populatedCount++;
+      }
+
+      const destZ = result.destination?.zip || result.stops?.[1]?.zip;
+      if (destZ && destZ.trim()) {
+        setDestZip(destZ.trim());
+        populatedCount++;
+      }
+
+      const rawDelivery =
+        result.destination?.delivery_datetime ||
+        result.destination?.date_string ||
+        result.stops?.[1]?.datetime_iso ||
+        result.stops?.[1]?.date_string;
+      if (rawDelivery) {
+        const parsedDelivery = parseDateAndTimeToInputs(rawDelivery);
+        if (parsedDelivery.date) {
+          setDeliveryDate(parsedDelivery.date);
+          if (parsedDelivery.time) {
+            setDeliveryTime(parsedDelivery.time);
+          }
+          populatedCount++;
+        }
+      }
+
+      // 10. Broker Matching (only when reliable; NEVER creates a new broker; leaves unchanged if no match)
+      if (result.broker) {
+        const matchedBrokerId = matchBrokerFromExtraction(result.broker, brokers);
+        if (matchedBrokerId) {
+          setBrokerId(matchedBrokerId);
+          populatedCount++;
+        }
+      }
+
+      // 11. Pipeline status: default to 'booked' when importing a rate con
+      setPipelineStatus('booked');
+
+      // 12. Update estimated fuel expense if miles were extracted
+      if (extractedMiles > 0) {
+        const estimatedFuel = estimateFuelCost(extractedMiles + (parseFloat(deadheadMiles) || 0));
+        setFuelExpense(String(estimatedFuel));
+      }
+
+      // IMPORTANT: Never overwrite or clear clientId. Preserved entirely for explicit dispatcher selection.
+
+      // Success notice with confidence & field count
+      const overallConfidence = result.confidence_scores?.overall || 0;
+      setExtractionNotice({
+        fileName: file.name,
+        confidence: overallConfidence,
+        fieldsCount: populatedCount,
+      });
+
+      // Clear previous validation errors
+      setFormErrors({});
+    } catch (err: any) {
+      console.error('Rate Con extraction error:', err);
+      const msg = err?.message || 'Failed to extract data from Rate Confirmation PDF. Please verify the document or fill fields manually.';
+      setExtractionError(msg);
+      setRateConFile(null);
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  // Clear / Undo Extraction handler
+  const handleClearExtraction = () => {
+    if (formSnapshotBeforeExtraction) {
+      setLoadNumber(formSnapshotBeforeExtraction.loadNumber);
+      setBrokerId(formSnapshotBeforeExtraction.brokerId);
+      setPipelineStatus(formSnapshotBeforeExtraction.pipelineStatus);
+      setEquipmentType(formSnapshotBeforeExtraction.equipmentType);
+      setCommodity(formSnapshotBeforeExtraction.commodity);
+      setWeightLbs(formSnapshotBeforeExtraction.weightLbs);
+      setOriginFacilityName(formSnapshotBeforeExtraction.originFacilityName);
+      setOriginAddress(formSnapshotBeforeExtraction.originAddress);
+      setOriginCity(formSnapshotBeforeExtraction.originCity);
+      setOriginState(formSnapshotBeforeExtraction.originState);
+      setOriginZip(formSnapshotBeforeExtraction.originZip);
+      setPickupDate(formSnapshotBeforeExtraction.pickupDate);
+      setPickupTime(formSnapshotBeforeExtraction.pickupTime);
+      setDestFacilityName(formSnapshotBeforeExtraction.destFacilityName);
+      setDestAddress(formSnapshotBeforeExtraction.destAddress);
+      setDestCity(formSnapshotBeforeExtraction.destCity);
+      setDestState(formSnapshotBeforeExtraction.destState);
+      setDestZip(formSnapshotBeforeExtraction.destZip);
+      setDeliveryDate(formSnapshotBeforeExtraction.deliveryDate);
+      setDeliveryTime(formSnapshotBeforeExtraction.deliveryTime);
+      setRate(formSnapshotBeforeExtraction.rate);
+      setLoadedMiles(formSnapshotBeforeExtraction.loadedMiles);
+      setDeadheadMiles(formSnapshotBeforeExtraction.deadheadMiles);
+      setFuelExpense(formSnapshotBeforeExtraction.fuelExpense);
+      setDriverPay(formSnapshotBeforeExtraction.driverPay);
+      setOtherExpenses(formSnapshotBeforeExtraction.otherExpenses);
+      setSpecialInstructions(formSnapshotBeforeExtraction.specialInstructions);
+    }
+    setRateConFile(null);
+    setExtractionResult(null);
+    setExtractionError(null);
+    setExtractionNotice(null);
+    setFormSnapshotBeforeExtraction(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleRateConFileSelected(file);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      handleRateConFileSelected(file);
+    }
+  };
+
   // Validation before submit
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {};
@@ -456,6 +949,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
       broker_id: brokerId || null,
       truck_id: truckId || null,
       driver_id: driverId || null,
+      assigned_dispatcher_id: assignedDispatcherId || null,
       pipeline_status: pipelineStatus,
       equipment_type: equipmentType,
       commodity: commodity.trim() || null,
@@ -483,7 +977,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
 
     setIsSubmitting(true);
     try {
-      await onSave(payload);
+      await onSave(payload, rateConFile);
     } catch (err: any) {
       console.error('LoadModal save error:', err);
       setSubmitError(err?.message || 'Failed to save load. Please check assignments and try again.');
@@ -508,6 +1002,132 @@ export const LoadModal: React.FC<LoadModalProps> = ({
       maxWidth="3xl"
     >
       <form onSubmit={handleSubmit} className="space-y-6 text-xs text-slate-200">
+        {/* Rate Con PDF Upload & Auto-Fill Section (Book Load AI Extraction) */}
+        <div
+          id="ratecon-pdf-upload-card"
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`p-3.5 rounded-xl border transition-all duration-200 ${
+            isDragOver
+              ? 'bg-indigo-950/50 border-indigo-500 ring-2 ring-indigo-500/30'
+              : 'bg-slate-900/80 border-slate-800/90 hover:border-slate-700/80'
+          }`}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-lg bg-indigo-950/80 border border-indigo-700/50 flex items-center justify-center shrink-0 mt-0.5 text-indigo-400">
+                <FileText className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-slate-100 text-xs">Rate Confirmation PDF</span>
+                  <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-indigo-950/80 border border-indigo-800/60 text-indigo-300 font-medium">
+                    <Sparkles className="w-3 h-3 text-amber-300" />
+                    AI Auto-Fill
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                  Upload a broker rate confirmation PDF to extract load #, gross pay, route, dates, and terms.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+              <input
+                ref={fileInputRef}
+                id="ratecon-pdf-file-input"
+                type="file"
+                accept=".pdf,application/pdf"
+                onChange={handleFileInputChange}
+                className="hidden"
+                disabled={isBusy || isExtracting}
+              />
+
+              {extractionNotice && (
+                <button
+                  id="ratecon-clear-extraction-btn"
+                  type="button"
+                  onClick={handleClearExtraction}
+                  disabled={isBusy || isExtracting}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors cursor-pointer"
+                  title="Undo extraction and restore form fields"
+                >
+                  <X className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Undo / Clear</span>
+                </button>
+              )}
+
+              <button
+                id="ratecon-upload-btn"
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isBusy || isExtracting}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-50 rounded-lg shadow-sm transition-colors cursor-pointer"
+              >
+                {isExtracting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-white" />
+                    <span>Extracting PDF...</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-3.5 h-3.5 text-indigo-200" />
+                    <span>{rateConFile ? 'Replace PDF' : 'Upload Rate Con (PDF)'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Extraction Error Notice */}
+          {extractionError && (
+            <div
+              id="ratecon-extraction-error-banner"
+              className="mt-3 flex items-start gap-2 p-2.5 bg-rose-950/50 border border-rose-800/70 rounded-lg text-rose-200 text-[11px] animate-in fade-in"
+            >
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <span className="font-semibold text-rose-300">Extraction Notice: </span>
+                <span>{extractionError}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Extraction Success Notice */}
+          {extractionNotice && (
+            <div
+              id="ratecon-extraction-success-banner"
+              className="mt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 bg-emerald-950/40 border border-emerald-800/60 rounded-lg text-emerald-200 text-[11px] animate-in fade-in"
+            >
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <div>
+                  <span className="font-semibold text-emerald-300">
+                    Rate Con extracted — review the populated fields before creating the load.
+                  </span>
+                  <span className="text-emerald-400/90 ml-1.5 text-[10px]">
+                    ({extractionNotice.fileName})
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {extractionNotice.confidence > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-900/60 border border-emerald-700/50 text-emerald-300">
+                    {extractionNotice.confidence}% AI Confidence
+                  </span>
+                )}
+                {extractionNotice.fieldsCount > 0 && (
+                  <span className="text-slate-400 text-[10px]">
+                    {extractionNotice.fieldsCount} fields populated
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Error Alert Banner */}
         {submitError && (
           <div
@@ -568,7 +1188,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
             <span>1. Carrier Fleet & Unit Assignment</span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {/* Client Selection */}
             <div>
               <label className="block text-slate-300 font-medium mb-1">
@@ -641,6 +1261,26 @@ export const LoadModal: React.FC<LoadModalProps> = ({
               {clientId && availableDrivers.length === 0 && (
                 <p className="text-amber-400/80 text-[10px] mt-1">No drivers registered for this client</p>
               )}
+            </div>
+
+            {/* Team Member Assignment Selection */}
+            <div>
+              <label className="block text-slate-300 font-medium mb-1">
+                Assigned To
+              </label>
+              <select
+                id="load-dispatcher-select"
+                value={assignedDispatcherId}
+                onChange={(e) => setAssignedDispatcherId(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
+              >
+                <option value="">(No team member / Unassigned)</option>
+                {activeTeamMembers.map((m) => (
+                  <option key={m.user_id} value={m.user_id}>
+                    {m.full_name} — {m.role === 'owner_admin' ? 'Admin' : m.role === 'dispatcher' ? 'Dispatcher' : 'Staff'}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
         </div>
@@ -1092,7 +1732,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                   id="load-rate-input"
                   type="number"
                   min="0"
-                  step="25"
+                  step="0.01"
                   required
                   value={rate}
                   onChange={(e) => setRate(e.target.value)}
@@ -1121,11 +1761,11 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                 <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 font-mono">$</span>
                 <input
                   id="load-fuel-expense-input"
-                  type="number"
-                  min="0"
-                  step="10"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0.00"
                   value={fuelExpense}
-                  onChange={(e) => setFuelExpense(e.target.value)}
+                  onChange={(e) => handleFuelExpenseChange(e.target.value)}
                   className="w-full pl-6 pr-2 py-2 bg-slate-950 border border-slate-700 rounded-lg text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -1152,7 +1792,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                   id="load-driver-pay-input"
                   type="number"
                   min="0"
-                  step="10"
+                  step="0.01"
                   value={driverPay}
                   onChange={(e) => setDriverPay(e.target.value)}
                   className="w-full pl-6 pr-2 py-2 bg-slate-950 border border-slate-700 rounded-lg text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
@@ -1168,7 +1808,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                   id="load-other-expenses-input"
                   type="number"
                   min="0"
-                  step="10"
+                  step="0.01"
                   placeholder="Lumper / Tolls"
                   value={otherExpenses}
                   onChange={(e) => setOtherExpenses(e.target.value)}
@@ -1208,7 +1848,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
         </div>
 
         {/* Footer Actions & Error Banner */}
-        <div className="space-y-3 pt-4 border-t border-slate-800">
+        <div className="sticky bottom-0 -mx-5 -mb-5 sm:-mx-6 sm:-mb-6 px-5 sm:px-6 py-3.5 bg-slate-900/95 border-t border-slate-800 z-10 backdrop-blur-xs space-y-3 shadow-lg">
           {submitError && (
             <div
               id="load-modal-footer-error-banner"

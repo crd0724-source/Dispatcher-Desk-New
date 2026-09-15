@@ -8,14 +8,28 @@ import {
   PipelineStatus,
   EquipmentType,
   ProfitabilityMetrics,
+  TeamMember,
 } from '../../types/domain.types.ts';
+
+export interface LoadTeamAssignment {
+  id: string;
+  organization_id: string;
+  load_id: string;
+  user_id: string;
+  created_at: string;
+  created_by?: string | null;
+  user_profile?: (Pick<Profile, 'id' | 'full_name' | 'phone'> & { email?: string | null; role?: string | null }) | null;
+}
 
 export interface LoadWithRelations extends Load {
   client?: Pick<Client, 'id' | 'company_name' | 'client_type' | 'contact_name' | 'contact_phone' | 'contact_email'> | null;
   broker?: Pick<Broker, 'id' | 'company_name' | 'mc_number' | 'dot_number' | 'contact_name' | 'contact_phone' | 'contact_email' | 'credit_status' | 'payment_terms_days'> | null;
   truck?: Pick<Truck, 'id' | 'truck_number' | 'equipment_type' | 'current_location_city' | 'current_location_state' | 'status' | 'vin'> | null;
   driver?: Pick<Driver, 'id' | 'full_name' | 'phone' | 'email' | 'pay_type' | 'pay_rate' | 'status'> | null;
-  dispatcher_profile?: Pick<Profile, 'id' | 'full_name' | 'phone'> | null;
+  dispatcher_profile?: (Pick<Profile, 'id' | 'full_name' | 'phone'> & { email?: string | null; role?: string | null }) | null;
+  assigned_to_profile?: (Pick<Profile, 'id' | 'full_name' | 'phone'> & { email?: string | null; role?: string | null }) | null;
+  assigned_team?: TeamMember[];
+  assigned_team_assignments?: LoadTeamAssignment[];
 }
 
 export interface CreateLoadInput {
@@ -25,6 +39,7 @@ export interface CreateLoadInput {
   truck_id?: string | null;
   driver_id?: string | null;
   assigned_dispatcher_id?: string | null;
+  assigned_team_member_ids?: string[];
   pipeline_status?: PipelineStatus;
   equipment_type: EquipmentType;
   commodity?: string | null;
@@ -57,6 +72,7 @@ export interface UpdateLoadInput {
   truck_id?: string | null;
   driver_id?: string | null;
   assigned_dispatcher_id?: string | null;
+  assigned_team_member_ids?: string[];
   pipeline_status?: PipelineStatus;
   equipment_type?: EquipmentType;
   commodity?: string | null;
@@ -88,8 +104,37 @@ export interface LoadFilterCriteria {
   brokerId?: string;
   equipmentType?: string;
   status?: string;
+  dispatcherId?: string; // 'all' | 'unassigned' | 'me' | user_id (backward-compatible)
+  assignedMemberId?: string; // 'all' | 'unassigned' | 'me' | user_id
+  currentUserId?: string; // For resolving 'me' in service queries
   dateRange?: 'all' | 'today' | 'upcoming' | 'past';
 }
+
+export interface BulkAssignTeamMembersResult {
+  success: boolean;
+  updatedLoadsCount: number;
+  updatedCount?: number;
+  totalAssignmentsCount?: number;
+  loadIds: string[];
+  teamMemberIds?: string[];
+  assignedMemberIds?: string[];
+  mode: 'add' | 'replace' | 'remove';
+  assignedMembers?: TeamMember[];
+}
+
+export interface BulkAssignTeamMemberResult {
+  success: boolean;
+  updatedCount: number;
+  loadIds: string[];
+  assignedMemberId: string | null;
+  assignedMemberName?: string | null;
+  assignedMemberRole?: string | null;
+  // Backward compatibility fields:
+  dispatcherId?: string | null;
+  dispatcherName?: string | null;
+}
+
+export type BulkAssignDispatcherResult = BulkAssignTeamMemberResult;
 
 export const PIPELINE_STATUS_OPTIONS: {
   value: PipelineStatus;

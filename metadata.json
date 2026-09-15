@@ -1,6 +1,6 @@
 {
-  "name": "DispatchDesk",
-  "description": "Multi-tenant dispatcher operating system for trucking dispatchers and back-office teams managing US/Canada fleets.",
+  "name": "DispatcherDesk",
+  "description": "DispatcherDesk is a cloud-based operations platform for trucking dispatch companies to manage clients, trucks, drivers, loads, documents, scheduling, check calls, profitability and reporting.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -109,9 +109,11 @@ export const ProfitabilityView: React.FC = () => {
       setClients(fetchedClients);
       setBrokers(fetchedBrokers);
 
-      // 2. Fetch load rows, summary, alerts, and entity rollups in parallel
+      // 2. Fetch load profitability exactly ONCE
+      const calculatedRows = await profitabilityService.getLoadProfitability(orgId, filters);
+
+      // 3. Compute secondary datasets using the SAME calculatedRows
       const [
-        calculatedRows,
         calculatedSummary,
         calculatedAlerts,
         calculatedClients,
@@ -120,14 +122,41 @@ export const ProfitabilityView: React.FC = () => {
         calculatedDrivers,
         calculatedLanes,
       ] = await Promise.all([
-        profitabilityService.getLoadProfitability(orgId, filters),
-        profitabilityService.getProfitabilitySummary(orgId, filters),
-        profitabilityService.getOperationalAlerts(orgId, filters),
-        profitabilityService.getClientProfitability(orgId, filters),
-        profitabilityService.getBrokerProfitability(orgId, filters),
-        profitabilityService.getTruckProfitability(orgId, filters),
-        profitabilityService.getDriverProfitability(orgId, filters),
-        profitabilityService.getLaneProfitability(orgId, filters),
+        profitabilityService.getProfitabilitySummary(
+          orgId,
+          filters,
+          calculatedRows
+        ),
+        profitabilityService.getOperationalAlerts(
+          orgId,
+          filters,
+          calculatedRows
+        ),
+        profitabilityService.getClientProfitability(
+          orgId,
+          filters,
+          calculatedRows
+        ),
+        profitabilityService.getBrokerProfitability(
+          orgId,
+          filters,
+          calculatedRows
+        ),
+        profitabilityService.getTruckProfitability(
+          orgId,
+          filters,
+          calculatedRows
+        ),
+        profitabilityService.getDriverProfitability(
+          orgId,
+          filters,
+          calculatedRows
+        ),
+        profitabilityService.getLaneProfitability(
+          orgId,
+          filters,
+          calculatedRows
+        ),
       ]);
 
       setRows(calculatedRows);

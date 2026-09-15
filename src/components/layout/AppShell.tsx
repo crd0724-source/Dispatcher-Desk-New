@@ -1,15 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sidebar, NavModule } from './Sidebar.tsx';
 import { Header } from './Header.tsx';
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import { EmptyState } from '../common/EmptyState.tsx';
 import { Building, Plus } from 'lucide-react';
+import { BillingAlertBanner } from '../../modules/billing/components/BillingAlertBanner.tsx';
+import { subscriptionService } from '../../modules/billing/subscriptionService.ts';
+import { SubscriptionUsageSummary } from '../../types/domain.types.ts';
 
 interface AppShellProps {
   activeModule: NavModule;
   onSelectModule: (module: NavModule) => void;
   children: React.ReactNode;
-  onCreateOrgClick?: () => void;
+  onCreateOrgClick?: (isFirstOrg?: boolean) => void;
   onOpenAuthModal?: () => void;
 }
 
@@ -21,7 +24,17 @@ export const AppShell: React.FC<AppShellProps> = ({
   onOpenAuthModal,
 }) => {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [globalUsage, setGlobalUsage] = useState<SubscriptionUsageSummary | null>(null);
   const { user, activeOrganization, memberships, isLoading } = useAuth();
+
+  useEffect(() => {
+    if (activeOrganization?.id) {
+      subscriptionService
+        .getSubscriptionUsage(activeOrganization.id)
+        .then((u) => setGlobalUsage(u))
+        .catch(() => {});
+    }
+  }, [activeOrganization?.id, activeModule]);
 
   if (isLoading) {
     return (
@@ -47,13 +60,13 @@ export const AppShell: React.FC<AppShellProps> = ({
                 : 'Sign in to access your fleet operations workspace or create a new account to get started.'
             }
             actionLabel={user ? 'Create Dispatch Company' : 'Log In / Sign Up'}
-            onAction={user ? onCreateOrgClick : onOpenAuthModal}
+            onAction={user ? () => onCreateOrgClick?.(true) : onOpenAuthModal}
           />
           {!user && onCreateOrgClick && (
             <div className="text-center">
               <button
                 type="button"
-                onClick={onCreateOrgClick}
+                onClick={() => onCreateOrgClick?.(true)}
                 className="text-xs text-slate-400 hover:text-slate-200 underline cursor-pointer"
               >
                 Or create a local demo workspace
@@ -83,9 +96,16 @@ export const AppShell: React.FC<AppShellProps> = ({
           onToggleSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
           onSelectModule={onSelectModule}
           onOpenAuthModal={onOpenAuthModal}
+          onCreateOrgClick={onCreateOrgClick}
         />
         
-        <main className="flex-1 p-4 sm:p-6 lg:p-7 max-w-[1600px] w-full min-w-0 mx-auto">
+        <main className="flex-1 p-4 sm:p-6 lg:p-7 max-w-[1600px] w-full min-w-0 mx-auto space-y-4">
+          {activeModule !== 'billing' && globalUsage && (
+            <BillingAlertBanner
+              usage={globalUsage}
+              onNavigateToBilling={() => onSelectModule('billing')}
+            />
+          )}
           {children}
         </main>
       </div>

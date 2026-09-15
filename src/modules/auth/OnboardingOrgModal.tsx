@@ -7,9 +7,16 @@ import { SUPPORTED_TIMEZONES } from '../../lib/timezones.ts';
 interface OnboardingOrgModalProps {
   isOpen: boolean;
   onClose: () => void;
+  isFirstOrg?: boolean;
+  onSuccess?: (newOrgId: string, isFirstOrg: boolean) => void;
 }
 
-export const OnboardingOrgModal: React.FC<OnboardingOrgModalProps> = ({ isOpen, onClose }) => {
+export const OnboardingOrgModal: React.FC<OnboardingOrgModalProps> = ({
+  isOpen,
+  onClose,
+  isFirstOrg = false,
+  onSuccess,
+}) => {
   const { createOrganization, isConfigured } = useAuth();
   const [orgName, setOrgName] = useState('');
   const [primaryTimezone, setPrimaryTimezone] = useState('America/Chicago');
@@ -25,6 +32,9 @@ export const OnboardingOrgModal: React.FC<OnboardingOrgModalProps> = ({ isOpen, 
     try {
       const orgId = await createOrganization(orgName.trim(), undefined, primaryTimezone);
       if (orgId) {
+        if (onSuccess) {
+          onSuccess(orgId, isFirstOrg);
+        }
         onClose();
       } else {
         setErrorMessage('Failed to create organization. Please ensure database migration has run.');
@@ -42,8 +52,12 @@ export const OnboardingOrgModal: React.FC<OnboardingOrgModalProps> = ({ isOpen, 
       id="onboarding-org-modal"
       isOpen={isOpen}
       onClose={onClose}
-      title="Create New Dispatch Company"
-      subtitle="Establish an isolated multi-tenant fleet organization"
+      title={isFirstOrg ? 'Create Your Dispatch Organization' : 'Create New Dispatch Company'}
+      subtitle={
+        isFirstOrg
+          ? 'Establish your fleet operations workspace to begin guided setup'
+          : 'Establish an isolated multi-tenant fleet organization'
+      }
       maxWidth="md"
     >
       <form onSubmit={handleSubmit} className="space-y-4 text-xs">

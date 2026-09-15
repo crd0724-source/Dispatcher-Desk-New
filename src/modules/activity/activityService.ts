@@ -5,8 +5,25 @@ import {
   CreateActivityInput,
   ActivityFilterOptions,
 } from './activityTypes.ts';
+import { DEMO_ORGANIZATION_ID } from '../checkcalls/checkCallService.ts';
 
 const ACTIVITY_STORAGE_PREFIX = 'dispatchdesk_demo_activity_';
+
+function isDemoActivity(activity: LoadActivityEvent): boolean {
+  const id = activity.id || '';
+  const loadId = activity.loadId || activity.load_id || '';
+
+  if (
+    id.startsWith('act-1-') ||
+    id.startsWith('act-2-') ||
+    id.startsWith('act-3-') ||
+    loadId.startsWith('demo-load-')
+  ) {
+    return true;
+  }
+
+  return false;
+}
 
 // Initial realistic seed events for demo organization loads
 const SEED_ACTIVITIES: Omit<LoadActivityEvent, 'organizationId' | 'organization_id'>[] = [
@@ -297,7 +314,42 @@ export interface IActivityService {
       newTruckId?: string | null;
       previousDriverId?: string | null;
       newDriverId?: string | null;
+      previousDispatcherId?: string | null;
+      newDispatcherId?: string | null;
+      previousDispatcherName?: string | null;
+      newDispatcherName?: string | null;
     },
+    actorName?: string,
+    actorId?: string
+  ): Promise<LoadActivityEvent>;
+  recordDispatcherAssignmentChange(
+    organizationId: string,
+    loadId: string,
+    previousDispatcherId: string | null | undefined,
+    newDispatcherId: string | null | undefined,
+    previousDispatcherName: string | null | undefined,
+    newDispatcherName: string | null | undefined,
+    actorName?: string,
+    actorId?: string
+  ): Promise<LoadActivityEvent>;
+  recordTeamAssignmentChange(
+    organizationId: string,
+    loadId: string,
+    previousMemberId: string | null | undefined,
+    newMemberId: string | null | undefined,
+    previousMemberName: string | null | undefined,
+    newMemberName: string | null | undefined,
+    memberRole?: string | null,
+    actorName?: string,
+    actorId?: string
+  ): Promise<LoadActivityEvent>;
+  recordMultiTeamAssignmentChange(
+    organizationId: string,
+    loadId: string,
+    addedMembers?: ({ id: string; name: string; role?: string } | string)[],
+    removedMembers?: ({ id: string; name: string; role?: string } | string)[],
+    mode?: 'add' | 'replace' | 'remove',
+    isBulk?: boolean,
     actorName?: string,
     actorId?: string
   ): Promise<LoadActivityEvent>;
@@ -344,21 +396,40 @@ class LocalActivityService implements IActivityService {
   }
 
   private loadFromStorage(organizationId: string): LoadActivityEvent[] {
+    const isDemoOrg = organizationId === DEMO_ORGANIZATION_ID;
     const key = this.getStorageKey(organizationId);
     const raw = localStorage.getItem(key);
+
     if (!raw) {
-      // Seed default activities for demo
-      const seeded: LoadActivityEvent[] = SEED_ACTIVITIES.map((act) => ({
-        ...act,
-        organizationId,
-        organization_id: organizationId,
-      }));
-      localStorage.setItem(key, JSON.stringify(seeded));
-      return seeded;
+      if (isDemoOrg) {
+        // Seed default activities only for demo organization
+        const seeded: LoadActivityEvent[] = SEED_ACTIVITIES.map((act) => ({
+          ...act,
+          organizationId,
+          organization_id: organizationId,
+        }));
+        localStorage.setItem(key, JSON.stringify(seeded));
+        return seeded;
+      }
+      return [];
     }
 
     try {
-      return JSON.parse(raw);
+      const parsed: LoadActivityEvent[] = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+
+      // For non-demo organizations, purge any leaked or legacy demo activities while preserving genuine ones
+      if (!isDemoOrg) {
+        const cleaned = parsed.filter((act) => !isDemoActivity(act));
+        if (cleaned.length !== parsed.length) {
+          localStorage.setItem(key, JSON.stringify(cleaned));
+        }
+        return cleaned;
+      }
+
+      return parsed;
     } catch (e) {
       console.error('Failed to parse activities from localStorage:', e);
       return [];
@@ -509,6 +580,10 @@ class LocalActivityService implements IActivityService {
       newTruckId?: string | null;
       previousDriverId?: string | null;
       newDriverId?: string | null;
+      previousDispatcherId?: string | null;
+      newDispatcherId?: string | null;
+      previousDispatcherName?: string | null;
+      newDispatcherName?: string | null;
     },
     actorName: string = 'Dispatcher',
     actorId: string = 'usr-dispatcher'
@@ -535,7 +610,17 @@ class LocalActivityService implements IActivityService {
       }
     }
 
-    const description = details.length > 0 ? details.join('. ') + '.' : 'Equipment or driver assignment modified.';
+    if (changes.previousDispatcherId !== changes.newDispatcherId) {
+      if (changes.newDispatcherId) {
+        details.push(
+          `Dispatcher assigned to ${changes.newDispatcherName || changes.newDispatcherId} (previously: ${changes.previousDispatcherName || 'None'})`
+        );
+      } else {
+        details.push(`Dispatcher ${changes.previousDispatcherName || ''} unassigned`);
+      }
+    }
+
+    const description = details.length > 0 ? details.join('. ') + '.' : 'Equipment, driver, or dispatcher assignment modified.';
 
     return this.logActivity(organizationId, {
       loadId,
@@ -553,8 +638,157 @@ class LocalActivityService implements IActivityService {
         newDriverId: changes.newDriverId,
         previousDriverName: changes.previousDriverName,
         newDriverName: changes.newDriverName,
+        previousDispatcherId: changes.previousDispatcherId,
+        newDispatcherId: changes.newDispatcherId,
+        previousDispatcherName: changes.previousDispatcherName,
+        newDispatcherName: changes.newDispatcherName,
       },
     });
+  }
+
+  async recordTeamAssignmentChange(
+    organizationId: string,
+    loadId: string,
+    previousMemberId: string | null | undefined,
+    newMemberId: string | null | undefined,
+    previousMemberName: string | null | undefined,
+    newMemberName: string | null | undefined,
+    memberRole?: string | null,
+    actorName: string = 'Admin',
+    actorId: string = 'usr-admin'
+  ): Promise<LoadActivityEvent> {
+    const roleLabel = memberRole === 'owner_admin' ? 'Admin' : memberRole === 'dispatcher' ? 'Dispatcher' : memberRole === 'staff' ? 'Staff' : memberRole || '';
+    let description = '';
+    if (newMemberId) {
+      const roleSuffix = roleLabel ? ` (${roleLabel})` : '';
+      description = `Assigned to team member ${newMemberName || newMemberId}${roleSuffix}${
+        previousMemberName ? ` (previously ${previousMemberName})` : ''
+      } by ${actorName}.`;
+    } else {
+      description = `Team assignment cleared${
+        previousMemberName ? ` (previously ${previousMemberName})` : ''
+      } by ${actorName}.`;
+    }
+
+    return this.logActivity(organizationId, {
+      loadId,
+      type: 'assignment_change',
+      title: newMemberId ? 'Team Member Assigned' : 'Team Member Unassigned',
+      description,
+      actorName,
+      actorId,
+      metadata: {
+        previousMemberId,
+        newMemberId,
+        previousMemberName,
+        newMemberName,
+        memberRole,
+        // Backward-compatible metadata keys
+        previousDispatcherId: previousMemberId,
+        newDispatcherId: newMemberId,
+        previousDispatcherName: previousMemberName,
+        newDispatcherName: newMemberName,
+      },
+    });
+  }
+
+  async recordMultiTeamAssignmentChange(
+    organizationId: string,
+    loadId: string,
+    addedMembers: ({ id: string; name: string; role?: string } | string)[] = [],
+    removedMembersOrNames: ({ id: string; name: string; role?: string } | string)[] = [],
+    mode: 'add' | 'replace' | 'remove' = 'add',
+    isBulk: boolean = false,
+    actorName: string = 'Admin',
+    actorId: string = 'usr-admin'
+  ): Promise<LoadActivityEvent> {
+    const normalizeList = (list: ({ id: string; name: string; role?: string } | string)[]) => {
+      return list.map((item) => {
+        if (typeof item === 'string') {
+          return { id: item, name: item };
+        }
+        return item;
+      });
+    };
+
+    const added = normalizeList(addedMembers);
+    const removed = normalizeList(removedMembersOrNames);
+
+    const formatMembers = (list: { id: string; name: string; role?: string }[]) =>
+      list
+        .map((m) => {
+          const roleLabel =
+            m.role === 'owner_admin'
+              ? 'Admin'
+              : m.role === 'dispatcher'
+              ? 'Dispatcher'
+              : m.role === 'staff'
+              ? 'Staff'
+              : m.role || '';
+          return `${m.name}${roleLabel ? ` (${roleLabel})` : ''}`;
+        })
+        .join(', ');
+
+    let description = '';
+    let title = 'Team Assignment Updated';
+
+    if (mode === 'replace') {
+      title = 'Team Assignments Replaced';
+      description =
+        added.length > 0
+          ? `Team assignments replaced with: ${formatMembers(added)} by ${actorName}${isBulk ? ' (bulk operation)' : ''}.`
+          : `All team assignments cleared by ${actorName}${isBulk ? ' (bulk operation)' : ''}.`;
+    } else if (mode === 'remove') {
+      title = 'Team Members Removed';
+      description =
+        removed.length > 0
+          ? `Removed ${formatMembers(removed)} from load by ${actorName}${isBulk ? ' (bulk operation)' : ''}.`
+          : `Team members removed by ${actorName}${isBulk ? ' (bulk operation)' : ''}.`;
+    } else {
+      title = 'Team Members Added';
+      description =
+        added.length > 0
+          ? `Added ${formatMembers(added)} to load team by ${actorName}${isBulk ? ' (bulk operation)' : ''}.`
+          : `Team assignment updated by ${actorName}${isBulk ? ' (bulk operation)' : ''}.`;
+    }
+
+    return this.logActivity(organizationId, {
+      loadId,
+      type: 'assignment_change',
+      title,
+      description,
+      actorName,
+      actorId,
+      metadata: {
+        mode,
+        isBulk,
+        addedMembers: added,
+        removedMembers: removed,
+      },
+    });
+  }
+
+  async recordDispatcherAssignmentChange(
+    organizationId: string,
+    loadId: string,
+    previousDispatcherId: string | null | undefined,
+    newDispatcherId: string | null | undefined,
+    previousDispatcherName: string | null | undefined,
+    newDispatcherName: string | null | undefined,
+    actorName: string = 'Dispatcher',
+    actorId: string = 'usr-dispatcher'
+  ): Promise<LoadActivityEvent> {
+    return this.recordTeamAssignmentChange(
+      organizationId,
+      loadId,
+      previousDispatcherId,
+      newDispatcherId,
+      previousDispatcherName,
+      newDispatcherName,
+      'dispatcher',
+      actorName,
+      actorId
+    );
   }
 
   async recordDocumentEvent(

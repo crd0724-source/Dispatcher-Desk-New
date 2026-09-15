@@ -28,6 +28,8 @@ import { clientService } from '../clients/clientService.ts';
 import { truckService } from '../trucks/truckService.ts';
 import { driverService } from '../drivers/driverService.ts';
 import { activityService } from '../activity/activityService.ts';
+import { teamService } from '../team/teamService.ts';
+import { workloadService } from '../workload/workloadService.ts';
 import { deriveLoadScheduleFromInputs, parseDateAndTimeToInputs, constructIsoDatetime } from './LoadModal.tsx';
 
 function assert(condition: boolean, message: string) {
@@ -335,11 +337,11 @@ async function runTests() {
   }
   assert(scheduleConflictCaught, 'Attempting to assign truck with conflicting schedule was correctly caught');
 
-  // 7b: Dispatcher adjusts the UI selectors to non-conflicting schedule (Sep 10 02:30 -> Sep 11 13:00)
+  // 7b: Dispatcher adjusts the UI selectors to non-conflicting schedule (Sep 20 02:30 -> Sep 21 13:00)
   const activeUiSelectors = {
-    pickupDate: '2026-09-10',
+    pickupDate: '2026-09-20',
     pickupTime: '02:30',
-    deliveryDate: '2026-09-11',
+    deliveryDate: '2026-09-21',
     deliveryTime: '13:00',
   };
 
@@ -350,10 +352,10 @@ async function runTests() {
   assert(derivedSchedule.delivery_datetime !== null, 'Derived delivery datetime is not null');
 
   // Verify that the derived payload contains the exact expected dates/times and NO stale Sep 1 - Sep 4 datetime
-  const expectedPickupIso = new Date(2026, 8, 10, 2, 30, 0, 0).toISOString();
-  const expectedDeliveryIso = new Date(2026, 8, 11, 13, 0, 0, 0).toISOString();
-  assert(derivedSchedule.pickup_datetime === expectedPickupIso, `Pickup datetime payload (${derivedSchedule.pickup_datetime}) matches active UI selector (Sep 10 02:30)`);
-  assert(derivedSchedule.delivery_datetime === expectedDeliveryIso, `Delivery datetime payload (${derivedSchedule.delivery_datetime}) matches active UI selector (Sep 11 13:00)`);
+  const expectedPickupIso = new Date(2026, 8, 20, 2, 30, 0, 0).toISOString();
+  const expectedDeliveryIso = new Date(2026, 8, 21, 13, 0, 0, 0).toISOString();
+  assert(derivedSchedule.pickup_datetime === expectedPickupIso, `Pickup datetime payload (${derivedSchedule.pickup_datetime}) matches active UI selector (Sep 20 02:30)`);
+  assert(derivedSchedule.delivery_datetime === expectedDeliveryIso, `Delivery datetime payload (${derivedSchedule.delivery_datetime}) matches active UI selector (Sep 21 13:00)`);
   assert(derivedSchedule.pickup_datetime !== loadToReschedule.pickup_datetime, 'Submitted pickup datetime is NOT stale Sep 1');
   assert(derivedSchedule.delivery_datetime !== loadToReschedule.delivery_datetime, 'Submitted delivery datetime is NOT stale Sep 4');
 
@@ -366,9 +368,201 @@ async function runTests() {
   });
 
   assert(successfullyUpdatedLoad.truck_id === targetTruck1.id, 'Truck successfully assigned after schedule update');
-  assert(successfullyUpdatedLoad.pickup_datetime === expectedPickupIso, 'Load pickup_datetime persisted as Sep 10 02:30');
-  assert(successfullyUpdatedLoad.delivery_datetime === expectedDeliveryIso, 'Load delivery_datetime persisted as Sep 11 13:00');
+  assert(successfullyUpdatedLoad.pickup_datetime === expectedPickupIso, 'Load pickup_datetime persisted as Sep 20 02:30');
+  assert(successfullyUpdatedLoad.delivery_datetime === expectedDeliveryIso, 'Load delivery_datetime persisted as Sep 21 13:00');
   assert(successfullyUpdatedLoad.pipeline_status === 'booked', 'Load status updated to booked');
+
+  // -------------------------------------------------------------
+  // TEST 8: Assign to Team Member (Admin, Dispatcher, Staff) & Bulk Assignment
+  // -------------------------------------------------------------
+  console.log('\n--- TEST 8: Team Member Assignment (Admin, Dispatcher, Staff) & Bulk Assignment ---');
+
+  const teamMembers = await teamService.getTeamMembers(testOrgId);
+  const staffMember = teamMembers.find((m) => m.role === 'staff') || {
+    id: 'staff-user-1',
+    user_id: 'usr-staff-1',
+    organization_id: testOrgId,
+    full_name: 'Sarah Jones',
+    email: 'sarah.jones@dispatcherdesk.com',
+    role: 'staff' as const,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  // Add staff member to demo storage if not present
+  if (!teamMembers.some((m) => m.user_id === staffMember.user_id || m.id === staffMember.id)) {
+    const membersKey = `dispatchdesk_demo_team_members_${testOrgId}`;
+    const curMembers = await teamService.getTeamMembers(testOrgId);
+    curMembers.push(staffMember as any);
+    localStorage.setItem(membersKey, JSON.stringify(curMembers));
+  }
+
+  // 8a: Single load assignment to Staff member
+  const singleAssigned = await loadService.assignLoadToTeamMember(
+    testOrgId,
+    loadId,
+    staffMember.user_id || staffMember.id,
+    'Admin User',
+    'admin-1'
+  );
+  assert(singleAssigned.assigned_dispatcher_id === (staffMember.user_id || staffMember.id), 'Staff member successfully assigned as load assignee');
+  assert(singleAssigned.dispatcher_profile?.full_name === staffMember.full_name, 'Staff member profile populated in load relations');
+
+  // 8b: Bulk assign 5 loads to Staff member
+  const bulkTestLoads = [];
+  for (let i = 1; i <= 5; i++) {
+    const l = await loadService.createLoad(testOrgId, {
+      load_number: `LD-BULK-${i}-${Date.now().toString().slice(-4)}`,
+      client_id: targetClient.id,
+      origin_city: 'Dallas',
+      origin_state: 'TX',
+      dest_city: 'Chicago',
+      dest_state: 'IL',
+      rate: 2800,
+      loaded_miles: 920,
+      equipment_type: 'dry_van',
+      pipeline_status: 'booked',
+    });
+    bulkTestLoads.push(l);
+  }
+
+  const bulkLoadIds = bulkTestLoads.map((l) => l.id);
+  const bulkResult = await loadService.bulkAssignLoadsToTeamMember(
+    testOrgId,
+    bulkLoadIds,
+    staffMember.user_id || staffMember.id,
+    'Admin User',
+    'admin-1'
+  );
+
+  console.log('Bulk result:', bulkResult, 'Expected ID:', staffMember.user_id || staffMember.id);
+  assert(bulkResult.updatedCount === 5, 'Bulk assign updated exactly 5 loads');
+  assert(bulkResult.assignedMemberId === (staffMember.user_id || staffMember.id), `Bulk assign assigned to correct staff ID (got ${bulkResult.assignedMemberId})`);
+
+  // Verify loads retrieved have the assigned staff member
+  const retrievedLoads = await loadService.getLoads(testOrgId, {
+    assignedMemberId: staffMember.user_id || staffMember.id,
+  });
+  const matchingBulk = retrievedLoads.filter((l) => bulkLoadIds.includes(l.id));
+  assert(matchingBulk.length === 5, 'All 5 loads successfully filtered by assigned staff member');
+
+  console.log('\n--- TEST 9: Concrete S64 + Rahul Team Assignment in load_team_assignments ---');
+  // 1. Seed Rahul as a member
+  const rahulTargetId = 'usr-rahul-concrete';
+  const rahulMember = {
+    id: 'member-rahul-concrete',
+    user_id: rahulTargetId,
+    organization_id: testOrgId,
+    full_name: 'Rahul Sharma',
+    email: 'rahul.dispatcher@dispatchdesk.demo',
+    role: 'dispatcher' as const,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  const membersKey = `dispatchdesk_demo_team_members_${testOrgId}`;
+  const curMembers = await teamService.getTeamMembers(testOrgId);
+  curMembers.push(rahulMember as any);
+  localStorage.setItem(membersKey, JSON.stringify(curMembers));
+
+  // 2. Create Load S64
+  const loadS64 = await loadService.createLoad(testOrgId, {
+    load_number: 'S64',
+    client_id: targetClient.id,
+    origin_city: 'Indianapolis',
+    origin_state: 'IN',
+    dest_city: 'Columbus',
+    dest_state: 'OH',
+    rate: 1950,
+    loaded_miles: 175,
+    pipeline_status: 'sourced',
+    equipment_type: 'dry_van',
+  });
+  assert(loadS64.load_number === 'S64', 'Load S64 created');
+
+  // 3. Assign Rahul to Load S64
+  await loadService.assignLoadToTeamMember(testOrgId, loadS64.id, rahulTargetId, 'Admin Alex', 'usr-admin-1');
+
+  // 4. Verify physical row exists in load_team_assignments table/storage
+  const assignmentsKey = `dispatchdesk_demo_load_team_assignments_${testOrgId}`;
+  const storedAssignments: any[] = JSON.parse(localStorage.getItem(assignmentsKey) || '[]');
+  const concreteRow = storedAssignments.find((a) => a.load_id === loadS64.id && a.user_id === rahulTargetId);
+
+  assert(Boolean(concreteRow), 'Real row exists in load_team_assignments for Load S64 and Rahul');
+  assert(concreteRow.load_id === loadS64.id, 'load_team_assignments row has correct load_id');
+  assert(concreteRow.user_id === rahulTargetId, 'load_team_assignments row has correct user_id');
+  assert(concreteRow.organization_id === testOrgId, 'load_team_assignments row has correct organization_id');
+
+  // 5. Verify joined relations on load
+  const reloadedS64 = await loadService.getLoadById(testOrgId, loadS64.id);
+  assert(Boolean(reloadedS64?.assigned_team?.some((m) => m.user_id === rahulTargetId)), 'Rahul is present in reloaded Load S64 assigned_team relation');
+  assert(reloadedS64?.assigned_dispatcher_id === rahulTargetId, 'Primary assigned_dispatcher_id correctly reflects Rahul');
+
+  // 6. Verify Team Workload Overview accurately reflects Rahul's assignment
+  const initialWorkload = await workloadService.getWorkloadOverview(testOrgId);
+  const rahulSummary = initialWorkload.summaries.find((s) => s.member.user_id === rahulTargetId);
+  assert(Boolean(rahulSummary), 'Rahul is listed in workload overview summaries');
+  assert(rahulSummary?.activeLoadsCount === 1, 'Rahul shows exactly 1 active load in workload overview');
+  assert(Boolean(rahulSummary?.assignedLoads.some((l) => l.id === loadS64.id)), 'Rahul assignedLoads contains S64');
+
+  // 7. Multi-Assign S64 to Rahul + Amit + Manoj
+  const amitTargetId = 'usr-amit-dispatcher';
+  const manojTargetId = 'usr-manoj-dispatcher';
+
+  await loadService.bulkAssignLoadsToTeamMembers(
+    testOrgId,
+    [loadS64.id],
+    [rahulTargetId, amitTargetId, manojTargetId],
+    'replace',
+    'Admin Alex',
+    'usr-admin-1'
+  );
+
+  const multiAssignedS64 = await loadService.getLoadById(testOrgId, loadS64.id);
+  assert(multiAssignedS64?.assigned_team?.length === 3, 'Load S64 now has 3 team members assigned');
+  assert(Boolean(multiAssignedS64?.assigned_team?.some((m) => m.user_id === rahulTargetId)), 'Rahul is assigned to S64');
+  assert(Boolean(multiAssignedS64?.assigned_team?.some((m) => m.user_id === amitTargetId)), 'Amit is assigned to S64');
+  assert(Boolean(multiAssignedS64?.assigned_team?.some((m) => m.user_id === manojTargetId)), 'Manoj is assigned to S64');
+
+  // Verify Workload Metrics with Many-to-Many assignments:
+  // - Total Unique Active Loads counts S64 once
+  // - Total Active Assignments reflects each individual assignment
+  // - Rahul, Amit, Manoj each show 1 active load
+  const multiWorkload = await workloadService.getWorkloadOverview(testOrgId);
+  const rahulMulti = multiWorkload.summaries.find((s) => s.member.user_id === rahulTargetId);
+  const amitMulti = multiWorkload.summaries.find((s) => s.member.user_id === amitTargetId);
+  const manojMulti = multiWorkload.summaries.find((s) => s.member.user_id === manojTargetId);
+
+  assert(rahulMulti?.activeLoadsCount === 1, 'Rahul has 1 active load');
+  assert(amitMulti?.activeLoadsCount === 1, 'Amit has 1 active load');
+  assert(manojMulti?.activeLoadsCount === 1, 'Manoj has 1 active load');
+  assert(
+    multiWorkload.stats.totalActiveAssignmentsCount >= 3,
+    'totalActiveAssignmentsCount correctly includes all 3 assignments'
+  );
+
+  // 8. Remove Amit from Load S64
+  await loadService.removeTeamMemberFromLoad(
+    testOrgId,
+    loadS64.id,
+    amitTargetId,
+    'Admin Alex',
+    'usr-admin-1'
+  );
+
+  const postRemoveS64 = await loadService.getLoadById(testOrgId, loadS64.id);
+  assert(postRemoveS64?.assigned_team?.length === 2, 'Load S64 now has 2 team members after Amit removal');
+  assert(!postRemoveS64?.assigned_team?.some((m) => m.user_id === amitTargetId), 'Amit successfully removed from S64');
+  assert(Boolean(postRemoveS64?.assigned_team?.some((m) => m.user_id === rahulTargetId)), 'Rahul remains on S64');
+  assert(Boolean(postRemoveS64?.assigned_team?.some((m) => m.user_id === manojTargetId)), 'Manoj remains on S64');
+
+  const postRemoveWorkload = await workloadService.getWorkloadOverview(testOrgId);
+  const amitPost = postRemoveWorkload.summaries.find((s) => s.member.user_id === amitTargetId);
+  const rahulPost = postRemoveWorkload.summaries.find((s) => s.member.user_id === rahulTargetId);
+  const manojPost = postRemoveWorkload.summaries.find((s) => s.member.user_id === manojTargetId);
+
+  assert(amitPost?.activeLoadsCount === 0, 'Amit active load count decreased to 0');
+  assert(rahulPost?.activeLoadsCount === 1, 'Rahul active load count remains 1');
+  assert(manojPost?.activeLoadsCount === 1, 'Manoj active load count remains 1');
 
   console.log('\n===============================================================');
   console.log('✅ ALL S6.4 DISPATCH ASSIGNMENT INTEGRATION TESTS PASSED');

@@ -6,12 +6,12 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[];
 
-export type UserRole = 'owner_admin' | 'dispatcher' | 'staff';
+export type UserRole = 'owner_admin' | 'dispatcher' | 'staff' | 'driver';
 export type ClientType = 'owner_operator' | 'fleet';
 export type CreditStatus = 'approved' | 'caution' | 'blocked' | 'factoring_only';
 export type EquipmentType = 'dry_van' | 'reefer' | 'flatbed' | 'step_deck' | 'power_only' | 'box_truck' | 'hotshot';
 export type TruckStatus = 'active' | 'maintenance' | 'inactive';
-export type DriverStatus = 'available' | 'on_load' | 'off_duty';
+export type DriverStatus = 'available' | 'on_load' | 'off_duty' | 'inactive';
 export type DriverPayType = 'percentage_gross' | 'per_mile' | 'flat_rate';
 export type PipelineStatus = 'sourced' | 'negotiating' | 'booked' | 'in_transit' | 'delivered' | 'invoiced' | 'paid';
 export type DocumentType = 'rate_confirmation' | 'bol' | 'pod' | 'invoice' | 'other';
@@ -24,6 +24,9 @@ export type NoteType =
   | 'rate_negotiation'
   | 'assignment_change'
   | 'status_change';
+
+export type PlanType = 'starter' | 'growth' | 'agency' | 'enterprise' | 'trial' | 'starter_fleet' | 'growth_agency';
+export type BillingState = 'trialing' | 'trial_expired' | 'subscription_pending' | 'active' | 'past_due' | 'suspended' | 'canceled';
 
 export type Database = {
   public: {
@@ -182,7 +185,6 @@ export type Database = {
           payment_terms_days: number;
           credit_status: CreditStatus;
           notes: string | null;
-          status: 'active' | 'inactive';
           created_at: string;
           updated_at: string;
         };
@@ -198,7 +200,6 @@ export type Database = {
           payment_terms_days?: number;
           credit_status?: CreditStatus;
           notes?: string | null;
-          status?: 'active' | 'inactive';
           created_at?: string;
           updated_at?: string;
         };
@@ -214,7 +215,6 @@ export type Database = {
           payment_terms_days?: number;
           credit_status?: CreditStatus;
           notes?: string | null;
-          status?: 'active' | 'inactive';
           created_at?: string;
           updated_at?: string;
         };
@@ -298,6 +298,7 @@ export type Database = {
           notes: string | null;
           created_at: string;
           updated_at: string;
+          user_id?: string | null;
         };
         Insert: {
           id?: string;
@@ -313,6 +314,7 @@ export type Database = {
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
+          user_id?: string | null;
         };
         Update: {
           id?: string;
@@ -328,6 +330,7 @@ export type Database = {
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
+          user_id?: string | null;
         };
         Relationships: [];
       };
@@ -526,6 +529,7 @@ export type Database = {
           organization_id: string;
           email: string;
           role: UserRole;
+          driver_id: string | null;
           invited_by_user_id: string | null;
           token_hash: string;
           expires_at: string;
@@ -539,6 +543,7 @@ export type Database = {
           organization_id: string;
           email: string;
           role: UserRole;
+          driver_id?: string | null;
           invited_by_user_id?: string | null;
           token_hash: string;
           expires_at: string;
@@ -552,6 +557,7 @@ export type Database = {
           organization_id?: string;
           email?: string;
           role?: UserRole;
+          driver_id?: string | null;
           invited_by_user_id?: string | null;
           token_hash?: string;
           expires_at?: string;
@@ -566,6 +572,427 @@ export type Database = {
             columns: ["organization_id"];
             isOneToOne: false;
             referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      load_team_assignments: {
+        Row: {
+          id: string;
+          organization_id: string;
+          load_id: string;
+          user_id: string;
+          created_at: string;
+          created_by: string | null;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          load_id: string;
+          user_id: string;
+          created_at?: string;
+          created_by?: string | null;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          load_id?: string;
+          user_id?: string;
+          created_at?: string;
+          created_by?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "load_team_assignments_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "load_team_assignments_load_id_fkey";
+            columns: ["load_id"];
+            isOneToOne: false;
+            referencedRelation: "loads";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      subscriptions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          plan: PlanType;
+          billing_state: BillingState;
+          trial_starts_at: string;
+          trial_ends_at: string;
+          current_period_start: string;
+          current_period_end: string;
+          razorpay_customer_id: string | null;
+          razorpay_subscription_id: string | null;
+          custom_amt_capacity: number | null;
+          last_provider_event_at?: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          plan?: PlanType;
+          billing_state?: BillingState;
+          trial_starts_at?: string;
+          trial_ends_at?: string;
+          current_period_start?: string;
+          current_period_end?: string;
+          razorpay_customer_id?: string | null;
+          razorpay_subscription_id?: string | null;
+          custom_amt_capacity?: number | null;
+          last_provider_event_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          plan?: PlanType;
+          billing_state?: BillingState;
+          trial_starts_at?: string;
+          trial_ends_at?: string;
+          current_period_start?: string;
+          current_period_end?: string;
+          razorpay_customer_id?: string | null;
+          razorpay_subscription_id?: string | null;
+          custom_amt_capacity?: number | null;
+          last_provider_event_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "subscriptions_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: true;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      truck_activation_history: {
+        Row: {
+          id: string;
+          organization_id: string;
+          truck_id: string;
+          first_qualifying_load_id: string;
+          activated_at: string;
+          billing_period_key: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          truck_id: string;
+          first_qualifying_load_id: string;
+          activated_at?: string;
+          billing_period_key?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          truck_id?: string;
+          first_qualifying_load_id?: string;
+          activated_at?: string;
+          billing_period_key?: string;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "fk_truck_activation_org";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "fk_truck_activation_truck";
+            columns: ["organization_id", "truck_id"];
+            isOneToOne: false;
+            referencedRelation: "trucks";
+            referencedColumns: ["organization_id", "id"];
+          },
+          {
+            foreignKeyName: "fk_truck_activation_load";
+            columns: ["organization_id", "first_qualifying_load_id"];
+            isOneToOne: false;
+            referencedRelation: "loads";
+            referencedColumns: ["organization_id", "id"];
+          }
+        ];
+      };
+      billing_webhook_events: {
+        Row: {
+          id: string;
+          provider: string;
+          provider_event_id: string;
+          event_type: string;
+          payload: Json;
+          status: 'pending' | 'processing' | 'processed' | 'failed' | 'ignored';
+          error_message: string | null;
+          retry_count: number;
+          organization_id: string | null;
+          subscription_id: string | null;
+          provider_event_created_at: string | null;
+          received_at: string;
+          processed_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          provider?: string;
+          provider_event_id: string;
+          event_type: string;
+          payload: Json;
+          status?: 'pending' | 'processing' | 'processed' | 'failed' | 'ignored';
+          error_message?: string | null;
+          retry_count?: number;
+          organization_id?: string | null;
+          subscription_id?: string | null;
+          provider_event_created_at?: string | null;
+          received_at?: string;
+          processed_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          provider?: string;
+          provider_event_id?: string;
+          event_type?: string;
+          payload?: Json;
+          status?: 'pending' | 'processing' | 'processed' | 'failed' | 'ignored';
+          error_message?: string | null;
+          retry_count?: number;
+          organization_id?: string | null;
+          subscription_id?: string | null;
+          provider_event_created_at?: string | null;
+          received_at?: string;
+          processed_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "billing_webhook_events_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "billing_webhook_events_subscription_id_fkey";
+            columns: ["subscription_id"];
+            isOneToOne: false;
+            referencedRelation: "subscriptions";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      billing_payment_transactions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          subscription_id: string;
+          provider: string;
+          provider_payment_id: string | null;
+          provider_order_id: string | null;
+          provider_invoice_id: string | null;
+          amount_cents: number;
+          currency: string;
+          status: 'created' | 'authorized' | 'captured' | 'failed' | 'refunded';
+          billing_period_start: string | null;
+          billing_period_end: string | null;
+          error_code: string | null;
+          error_description: string | null;
+          raw_response: Json | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          subscription_id: string;
+          provider?: string;
+          provider_payment_id?: string | null;
+          provider_order_id?: string | null;
+          provider_invoice_id?: string | null;
+          amount_cents: number;
+          currency?: string;
+          status: 'created' | 'authorized' | 'captured' | 'failed' | 'refunded';
+          billing_period_start?: string | null;
+          billing_period_end?: string | null;
+          error_code?: string | null;
+          error_description?: string | null;
+          raw_response?: Json | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          subscription_id?: string;
+          provider?: string;
+          provider_payment_id?: string | null;
+          provider_order_id?: string | null;
+          provider_invoice_id?: string | null;
+          amount_cents?: number;
+          currency?: string;
+          status?: 'created' | 'authorized' | 'captured' | 'failed' | 'refunded';
+          billing_period_start?: string | null;
+          billing_period_end?: string | null;
+          error_code?: string | null;
+          error_description?: string | null;
+          raw_response?: Json | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "billing_payment_transactions_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "billing_payment_transactions_subscription_id_fkey";
+            columns: ["subscription_id"];
+            isOneToOne: false;
+            referencedRelation: "subscriptions";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      conversations: {
+        Row: {
+          id: string;
+          organization_id: string;
+          driver_id: string;
+          type: string;
+          load_id: string | null;
+          status: string;
+          created_at: string;
+          updated_at: string;
+          resolved_at: string | null;
+          deleted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          driver_id: string;
+          type: string;
+          load_id?: string | null;
+          status?: string;
+          created_at?: string;
+          updated_at?: string;
+          resolved_at?: string | null;
+          deleted_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          driver_id?: string;
+          type?: string;
+          load_id?: string | null;
+          status?: string;
+          created_at?: string;
+          updated_at?: string;
+          resolved_at?: string | null;
+          deleted_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "conversations_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "fk_conversations_driver";
+            columns: ["organization_id", "driver_id"];
+            isOneToOne: false;
+            referencedRelation: "drivers";
+            referencedColumns: ["organization_id", "id"];
+          },
+          {
+            foreignKeyName: "fk_conversations_load";
+            columns: ["load_id"];
+            isOneToOne: false;
+            referencedRelation: "loads";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      conversation_messages: {
+        Row: {
+          id: string;
+          organization_id: string;
+          conversation_id: string;
+          sender_id: string;
+          message_type: string;
+          channel: string;
+          content: string | null;
+          created_at: string;
+          updated_at: string;
+          read_at: string | null;
+          acknowledged_at: string | null;
+          attachment_id: string | null;
+          context: Json | null;
+          client_message_id: string;
+          deleted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          conversation_id: string;
+          sender_id: string;
+          message_type: string;
+          channel: string;
+          content?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          read_at?: string | null;
+          acknowledged_at?: string | null;
+          attachment_id?: string | null;
+          context?: Json | null;
+          client_message_id: string;
+          deleted_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          conversation_id?: string;
+          sender_id?: string;
+          message_type?: string;
+          channel?: string;
+          content?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          read_at?: string | null;
+          acknowledged_at?: string | null;
+          attachment_id?: string | null;
+          context?: Json | null;
+          client_message_id?: string;
+          deleted_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "conversation_messages_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "conversation_messages_conversation_id_fkey";
+            columns: ["conversation_id"];
+            isOneToOne: false;
+            referencedRelation: "conversations";
             referencedColumns: ["id"];
           }
         ];
@@ -600,6 +1027,7 @@ export type Database = {
           p_role: string;
           p_token_hash: string;
           p_expires_at?: string | null;
+          p_driver_id?: string | null;
         };
         Returns: Json;
       };
@@ -652,6 +1080,110 @@ export type Database = {
           p_truck_id?: string | null;
           p_driver_id?: string | null;
           p_notes?: string | null;
+        };
+        Returns: Json;
+      };
+      bulk_assign_load_team_members: {
+        Args: {
+          p_organization_id: string;
+          p_load_ids: string[];
+          p_user_ids: string[];
+          p_mode?: string;
+          p_actor_id?: string | null;
+        };
+        Returns: Json;
+      };
+      get_team_workload_overview: {
+        Args: {
+          p_organization_id: string;
+        };
+        Returns: Json;
+      };
+      can_access_freight_document: {
+        Args: {
+          p_bucket_id: string;
+          p_object_name: string;
+        };
+        Returns: boolean;
+      };
+      get_current_driver_id: {
+        Args: {
+          p_organization_id: string;
+        };
+        Returns: string;
+      };
+      get_driver_load_documents: {
+        Args: {
+          p_organization_id: string;
+          p_load_id: string;
+        };
+        Returns: {
+          id: string;
+          organization_id: string;
+          load_id: string | null;
+          doc_type: string;
+          doc_status: string;
+          file_path: string | null;
+          file_name: string | null;
+          file_size_bytes: number | null;
+          mime_type: string | null;
+          uploaded_by: string | null;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        }[];
+      };
+      accept_driver_invitation: {
+        Args: {
+          p_token_hash: string;
+        };
+        Returns: Json;
+      };
+      verify_driver_load_access: {
+        Args: {
+          p_load_id: string;
+        };
+        Returns: Json;
+      };
+      admin_unlink_driver_identity: {
+        Args: {
+          p_driver_id: string;
+        };
+        Returns: Json;
+      };
+      get_organization_subscription_usage: {
+        Args: {
+          p_organization_id: string;
+        };
+        Returns: Json;
+      };
+      get_plan_amt_capacity: {
+        Args: {
+          p_plan: string;
+          p_custom_amt_capacity?: number | null;
+        };
+        Returns: number;
+      };
+      apply_subscription_payment_transition: {
+        Args: {
+          p_organization_id: string;
+          p_provider?: string;
+          p_provider_event_id?: string | null;
+          p_provider_event_timestamp?: string | null;
+          p_new_billing_state?: string | null;
+          p_plan?: string | null;
+          p_current_period_start?: string | null;
+          p_current_period_end?: string | null;
+          p_razorpay_customer_id?: string | null;
+          p_razorpay_subscription_id?: string | null;
+          p_payment_id?: string | null;
+          p_invoice_id?: string | null;
+          p_order_id?: string | null;
+          p_amount_cents?: number | null;
+          p_currency?: string | null;
+          p_payment_status?: string | null;
+          p_error_code?: string | null;
+          p_error_description?: string | null;
         };
         Returns: Json;
       };

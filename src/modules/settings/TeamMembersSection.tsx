@@ -153,7 +153,7 @@ export const TeamMembersSection: React.FC = () => {
   };
 
   const handleResendInvite = async (inv: TeamInvitation) => {
-    if (!orgId || !isOwnerAdmin || resendingInviteId) return;
+    if (!orgId || !isOwnerAdmin || resendingInviteId || inv.role === 'driver') return;
 
     setActionError(null);
     setActionSuccess(null);
@@ -171,7 +171,8 @@ export const TeamMembersSection: React.FC = () => {
         inv.email,
         inv.role,
         user?.id,
-        userRole
+        userRole,
+        inv.driver_id || null
       );
 
       // Update state: replace previous invitation record with fresh one
@@ -213,6 +214,8 @@ export const TeamMembersSection: React.FC = () => {
         return 'Dispatcher';
       case 'staff':
         return 'Staff';
+      case 'driver':
+        return 'Driver';
       default:
         return role;
     }
@@ -268,7 +271,7 @@ export const TeamMembersSection: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2 self-start sm:self-auto">
-            {isOwnerAdmin && (
+            {(isOwnerAdmin || userRole === 'dispatcher') && (
               <button
                 id="btn-open-invite-modal"
                 type="button"
@@ -276,7 +279,7 @@ export const TeamMembersSection: React.FC = () => {
                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm transition cursor-pointer"
               >
                 <UserPlus className="w-3.5 h-3.5" />
-                Invite Member
+                {userRole === 'dispatcher' ? 'Invite Driver' : 'Invite Member'}
               </button>
             )}
             <button
@@ -546,6 +549,11 @@ export const TeamMembersSection: React.FC = () => {
                       {/* Role */}
                       <td className="px-4 py-3.5">
                         <StatusBadge status={inv.role} type="role" size="sm" />
+                        {inv.role === 'driver' && inv.driver_name && (
+                          <div className="text-[11px] text-indigo-400 mt-0.5 font-medium">
+                            Linked: {inv.driver_name}
+                          </div>
+                        )}
                       </td>
 
                       {/* Invited By */}
@@ -595,43 +603,53 @@ export const TeamMembersSection: React.FC = () => {
                       {/* Actions */}
                       <td className="px-4 py-3.5 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-2">
-                          {isOwnerAdmin && isPending && (
+                          {isPending && (
                             <>
-                              <button
-                                id={`btn-resend-invite-${inv.id}`}
-                                type="button"
-                                onClick={() => handleResendInvite(inv)}
-                                disabled={resendingInviteId === inv.id}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium text-indigo-300 hover:text-white bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-800/40 transition cursor-pointer disabled:opacity-50"
-                                title="Generate a fresh cryptographic invitation link"
-                              >
-                                {resendingInviteId === inv.id ? (
-                                  <>
-                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                                    <span>Generating...</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <RefreshCw className="w-3.5 h-3.5" />
-                                    <span>Resend</span>
-                                  </>
-                                )}
-                              </button>
+                              {inv.role !== 'driver' && isOwnerAdmin && (
+                                <button
+                                  id={`btn-resend-invite-${inv.id}`}
+                                  type="button"
+                                  onClick={() => handleResendInvite(inv)}
+                                  disabled={resendingInviteId === inv.id}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium text-indigo-300 hover:text-white bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-800/40 transition cursor-pointer disabled:opacity-50"
+                                  title="Generate a fresh cryptographic invitation link"
+                                >
+                                  {resendingInviteId === inv.id ? (
+                                    <>
+                                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                      <span>Generating...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <RefreshCw className="w-3.5 h-3.5" />
+                                      <span>Resend</span>
+                                    </>
+                                  )}
+                                </button>
+                              )}
 
-                              <button
-                                id={`btn-cancel-invite-${inv.id}`}
-                                type="button"
-                                onClick={() => setInvitationToCancel(inv)}
-                                disabled={resendingInviteId === inv.id}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-rose-300 hover:text-rose-100 bg-rose-950/30 hover:bg-rose-900/50 border border-rose-800/40 transition cursor-pointer disabled:opacity-50"
-                              >
-                                <XCircle className="w-3.5 h-3.5" />
-                                <span>Cancel</span>
-                              </button>
+                              {inv.role === 'driver' && (
+                                <span className="text-[11px] text-slate-400 font-medium px-1">
+                                  Phone OTP Only
+                                </span>
+                              )}
+
+                              {(isOwnerAdmin || (userRole === 'dispatcher' && inv.role === 'driver')) && (
+                                <button
+                                  id={`btn-cancel-invite-${inv.id}`}
+                                  type="button"
+                                  onClick={() => setInvitationToCancel(inv)}
+                                  disabled={resendingInviteId === inv.id}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-rose-300 hover:text-rose-100 bg-rose-950/30 hover:bg-rose-900/50 border border-rose-800/40 transition cursor-pointer disabled:opacity-50"
+                                >
+                                  <XCircle className="w-3.5 h-3.5" />
+                                  <span>Cancel</span>
+                                </button>
+                              )}
                             </>
                           )}
 
-                          {isOwnerAdmin && (inv.status === 'expired' || inv.status === 'cancelled') && (
+                          {isOwnerAdmin && inv.role !== 'driver' && (inv.status === 'expired' || inv.status === 'cancelled') && (
                             <button
                               id={`btn-reinvite-${inv.id}`}
                               type="button"

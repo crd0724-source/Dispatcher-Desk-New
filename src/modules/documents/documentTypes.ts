@@ -52,7 +52,7 @@ export interface FreightDocument extends DatabaseDocument {
 
 // Input for creating a new document metadata record
 export interface CreateDocumentInput {
-  load_id: string;
+  load_id: string | null;
   doc_type: DocumentType;
   doc_status?: DocumentStatus;
   file_name: string;

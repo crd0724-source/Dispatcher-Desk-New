@@ -10,6 +10,7 @@ import {
   Client,
   Broker,
   PipelineStatus,
+  TeamMember,
 } from '../../types/domain.types.ts';
 import { StatusBadge } from '../../components/common/StatusBadge.tsx';
 import { EmptyState } from '../../components/common/EmptyState.tsx';
@@ -32,12 +33,17 @@ import {
   ShieldCheck,
   Calendar,
   AlertCircle,
+  Users,
+  UserCheck,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 
 interface LoadListProps {
   loads: LoadWithRelations[];
   clients: Client[];
   brokers: Broker[];
+  teamMembers?: TeamMember[];
   isLoading: boolean;
   error: string | null;
   filters: LoadFilterCriteria;
@@ -48,14 +54,22 @@ interface LoadListProps {
   onEditLoad: (load: LoadWithRelations) => void;
   onDeleteLoad?: (load: LoadWithRelations) => void;
   onStatusChange?: (loadId: string, status: PipelineStatus) => Promise<void>;
+  selectedLoadIds?: string[];
+  onSelectLoad?: (loadId: string, selected: boolean) => void;
+  onSelectAll?: (selected: boolean) => void;
+  onBulkAssignClick?: () => void;
   canEdit: boolean;
   canDelete: boolean;
+  trucksCount?: number;
+  driversCount?: number;
+  onNavigate?: (module: any) => void;
 }
 
 export const LoadList: React.FC<LoadListProps> = ({
   loads,
   clients,
   brokers,
+  teamMembers = [],
   isLoading,
   error,
   filters,
@@ -66,8 +80,15 @@ export const LoadList: React.FC<LoadListProps> = ({
   onEditLoad,
   onDeleteLoad,
   onStatusChange,
+  selectedLoadIds = [],
+  onSelectLoad,
+  onSelectAll,
+  onBulkAssignClick,
   canEdit,
   canDelete,
+  trucksCount,
+  driversCount,
+  onNavigate,
 }) => {
   const { operationalTimezone } = useTimezone();
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
@@ -82,6 +103,25 @@ export const LoadList: React.FC<LoadListProps> = ({
     }
   };
 
+  const isAllSelected =
+    loads.length > 0 && loads.every((l) => selectedLoadIds.includes(l.id));
+  const isPartiallySelected =
+    selectedLoadIds.length > 0 && !isAllSelected;
+
+  // Filter operational team members for the filter dropdown (Admin, Dispatcher, Staff)
+  const activeTeamMembers = teamMembers.filter(
+    (m) =>
+      (m.role === 'owner_admin' || m.role === 'dispatcher' || m.role === 'staff') &&
+      (m as any).status !== 'inactive'
+  );
+
+  const getRoleLabel = (role?: string | null) => {
+    if (role === 'owner_admin') return 'Admin';
+    if (role === 'dispatcher') return 'Dispatcher';
+    if (role === 'staff') return 'Staff';
+    return role ? role.charAt(0).toUpperCase() + role.slice(1) : 'Staff';
+  };
+
   return (
     <div id="load-list-container" className="space-y-4">
       {/* Search & Comprehensive Filters Bar */}
@@ -93,7 +133,7 @@ export const LoadList: React.FC<LoadListProps> = ({
             <input
               id="loads-search-input"
               type="text"
-              placeholder="Search Load #, origin, dest, commodity, carrier, broker, driver..."
+              placeholder="Search Load #, origin, dest, commodity, carrier, broker, dispatcher, driver..."
               value={filters.search || ''}
               onChange={(e) => onFilterChange({ ...filters, search: e.target.value })}
               className="w-full pl-10 pr-16 py-2 text-xs bg-slate-950/80 border border-slate-800 rounded-lg text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 transition-colors font-sans"
@@ -138,7 +178,7 @@ export const LoadList: React.FC<LoadListProps> = ({
         </div>
 
         {/* Dropdown Filters Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 pt-2.5 border-t border-slate-800/70 text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 pt-2.5 border-t border-slate-800/70 text-xs">
           {/* Status Filter */}
           <div>
             <select
@@ -153,6 +193,27 @@ export const LoadList: React.FC<LoadListProps> = ({
                   {s.label}
                 </option>
               ))}
+            </select>
+          </div>
+
+          {/* Assigned To Filter */}
+          <div>
+            <select
+              id="filter-dispatcher-select"
+              value={filters.dispatcherId || 'all'}
+              onChange={(e) => onFilterChange({ ...filters, dispatcherId: e.target.value })}
+              className="w-full px-2.5 py-1.5 bg-slate-950/80 border border-slate-800 rounded-lg text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer font-medium"
+            >
+              <option value="all">Assigned: All</option>
+              <option value="me">My Loads (Assigned to Me)</option>
+              <option value="unassigned">⚠️ Unassigned Loads</option>
+              <optgroup label="Operational Team" className="bg-slate-900 text-slate-300">
+                {activeTeamMembers.map((m) => (
+                  <option key={m.user_id || m.id} value={m.user_id || m.id}>
+                    {m.full_name} — {getRoleLabel(m.role)}
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </div>
 
@@ -224,6 +285,53 @@ export const LoadList: React.FC<LoadListProps> = ({
         </div>
       </div>
 
+      {/* Bulk Action Toolbar */}
+      {selectedLoadIds.length > 0 && (
+        <div
+          id="loads-bulk-action-bar"
+          className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3 sm:p-3.5 bg-slate-900 border border-indigo-500/40 rounded-xl text-slate-200 animate-in fade-in slide-in-from-top-2 duration-200 shadow-lg"
+        >
+          <div className="flex items-center gap-3">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-white text-xs font-bold font-mono shadow-xs shrink-0">
+              {selectedLoadIds.length}
+            </span>
+            <div>
+              <span className="text-xs font-bold text-slate-100">
+                {selectedLoadIds.length} {selectedLoadIds.length === 1 ? 'load selected' : 'loads selected'}
+              </span>
+              <p className="text-[11px] text-slate-400 hidden sm:block">
+                Ready for multi-load team assignment or fleet operations
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            {canEdit && onBulkAssignClick && (
+              <button
+                id="btn-bulk-assign-dispatcher"
+                type="button"
+                onClick={onBulkAssignClick}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg shadow-sm transition-colors cursor-pointer"
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Assign to Team ({selectedLoadIds.length})</span>
+              </button>
+            )}
+
+            {onSelectAll && (
+              <button
+                id="btn-clear-load-selection"
+                type="button"
+                onClick={() => onSelectAll(false)}
+                className="px-3 py-2 text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+              >
+                Clear Selection
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Error Alert */}
       {error && (
         <div className="p-4 rounded-xl bg-rose-950/40 border border-rose-800/60 text-rose-300 text-xs flex items-center gap-3">
@@ -254,18 +362,47 @@ export const LoadList: React.FC<LoadListProps> = ({
       {/* Empty State */}
       {!isLoading && !error && loads.length === 0 && (
         <div className="p-8 bg-slate-900 border border-slate-800 rounded-xl">
-          <EmptyState
-            id="empty-loads-state"
-            title="No Loads Found"
-            description={
-              filters.search || filters.clientId !== 'all' || filters.status !== 'all'
-                ? 'No loads matched your active search and filter criteria. Try resetting filters.'
-                : 'Start dispatching by booking your first carrier freight load.'
-            }
-            icon={PackageCheck}
-            actionLabel={canEdit ? 'Create First Load' : undefined}
-            onAction={canEdit ? onAddLoad : undefined}
-          />
+          {filters.search || filters.clientId !== 'all' || filters.status !== 'all' || filters.dispatcherId !== 'all' ? (
+            <EmptyState
+              id="empty-loads-state"
+              title="No Loads Found"
+              description="No loads matched your active search and filter criteria. Try resetting filters."
+              icon={PackageCheck}
+              actionLabel={canEdit ? 'Create First Load' : undefined}
+              onAction={canEdit ? onAddLoad : undefined}
+            />
+          ) : clients.length === 0 ? (
+            <EmptyState
+              id="empty-loads-no-clients"
+              title="Add your first client"
+              description="Every load must be associated with a carrier client."
+              icon={Building2}
+              actionLabel={canEdit && onNavigate ? 'Add Client' : undefined}
+              onAction={() => onNavigate?.('clients')}
+            />
+          ) : (trucksCount !== undefined && trucksCount === 0) || (driversCount !== undefined && driversCount === 0) ? (
+            <EmptyState
+              id="empty-loads-missing-fleet"
+              title="Complete fleet setup first"
+              description={
+                trucksCount === 0
+                  ? "Power units must be registered for your carrier client before creating dispatch loads."
+                  : "Drivers must be registered and assigned to your carrier client before creating dispatch loads."
+              }
+              icon={trucksCount === 0 ? TruckIcon : UserCheck}
+              actionLabel={canEdit && onNavigate ? (trucksCount === 0 ? 'Add Truck' : 'Add Driver') : undefined}
+              onAction={() => onNavigate?.(trucksCount === 0 ? 'trucks' : 'drivers')}
+            />
+          ) : (
+            <EmptyState
+              id="empty-loads-state"
+              title="No Loads Found"
+              description="Start dispatching by booking your first carrier freight load."
+              icon={PackageCheck}
+              actionLabel={canEdit ? 'Create First Load' : undefined}
+              onAction={canEdit ? onAddLoad : undefined}
+            />
+          )}
         </div>
       )}
 
@@ -276,12 +413,27 @@ export const LoadList: React.FC<LoadListProps> = ({
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="bg-slate-950/95 text-slate-400 font-bold uppercase tracking-wider border-b border-slate-800 text-[10px]">
                 <tr>
+                  {/* Select All Checkbox */}
+                  <th className="w-10 px-3 py-3.5 text-center">
+                    <input
+                      id="select-all-loads-checkbox"
+                      type="checkbox"
+                      checked={isAllSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = isPartiallySelected;
+                      }}
+                      onChange={(e) => onSelectAll?.(e.target.checked)}
+                      aria-label="Select all displayed loads"
+                      className="rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500/20 focus:ring-1 cursor-pointer h-4 w-4"
+                    />
+                  </th>
                   <th className="px-4 py-3.5">Load #</th>
                   <th className="px-4 py-3.5">Carrier / Fleet</th>
                   <th className="px-4 py-3.5">Broker / Shipper</th>
                   <th className="px-4 py-3.5">Route (Origin → Destination)</th>
                   <th className="px-3 py-3.5 text-center">Unit</th>
                   <th className="px-4 py-3.5">Driver</th>
+                  <th className="px-4 py-3.5">Assigned To</th>
                   <th className="px-4 py-3.5">Pickup</th>
                   <th className="px-4 py-3.5">Delivery</th>
                   <th className="px-4 py-3.5 text-right font-mono">Rate</th>
@@ -301,13 +453,34 @@ export const LoadList: React.FC<LoadListProps> = ({
                     driverPay: load.driver_pay,
                     otherExpenses: load.other_expenses,
                   });
+                  const isSelected = selectedLoadIds.includes(load.id);
 
                   return (
                     <tr
                       key={load.id}
-                      className="hover:bg-slate-800/50 transition-colors group cursor-pointer"
+                      id={`load-row-${load.id}`}
+                      className={`transition-colors group cursor-pointer ${
+                        isSelected
+                          ? 'bg-indigo-950/40 hover:bg-indigo-950/60'
+                          : 'hover:bg-slate-800/50'
+                      }`}
                       onClick={() => onViewLoad(load)}
                     >
+                      {/* Row Checkbox */}
+                      <td
+                        className="w-10 px-3 py-3.5 text-center"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <input
+                          id={`select-load-checkbox-${load.id}`}
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => onSelectLoad?.(load.id, e.target.checked)}
+                          aria-label={`Select load ${load.load_number}`}
+                          className="rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500/20 focus:ring-1 cursor-pointer h-4 w-4"
+                        />
+                      </td>
+
                       {/* Load # */}
                       <td className="px-4 py-3.5 font-mono font-bold text-slate-100 whitespace-nowrap">
                         <div className="flex items-center gap-1.5">
@@ -381,6 +554,76 @@ export const LoadList: React.FC<LoadListProps> = ({
                           </div>
                         ) : (
                           <span className="text-slate-500">—</span>
+                        )}
+                      </td>
+
+                      {/* Assigned To (Operational Team) */}
+                      <td className="px-4 py-3.5 text-slate-300 whitespace-nowrap">
+                        {load.assigned_team && load.assigned_team.length > 0 ? (
+                          load.assigned_team.length === 1 ? (
+                            <div
+                              className="flex items-center gap-2"
+                              title={`${load.assigned_team[0].full_name} (${getRoleLabel(load.assigned_team[0].role)}) • ${load.assigned_team[0].email || ''}`}
+                            >
+                              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-950 text-indigo-300 border border-indigo-800/60 text-[10px] font-bold shrink-0">
+                                {(load.assigned_team[0].full_name || 'U').charAt(0).toUpperCase()}
+                              </div>
+                              <div className="truncate max-w-[120px]">
+                                <span className="font-semibold text-slate-200 text-xs block truncate">
+                                  {load.assigned_team[0].full_name}
+                                </span>
+                                <span className="text-[10px] text-indigo-300/90 block font-medium">
+                                  {getRoleLabel(load.assigned_team[0].role)}
+                                </span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div
+                              className="flex items-center gap-1.5"
+                              title={load.assigned_team.map((m) => `${m.full_name} (${getRoleLabel(m.role)})`).join(' • ')}
+                            >
+                              <div className="flex -space-x-1.5 overflow-hidden shrink-0">
+                                {load.assigned_team.slice(0, 3).map((m, idx) => (
+                                  <div
+                                    key={m.user_id || m.id || idx}
+                                    className="inline-block h-6 w-6 rounded-full ring-2 ring-slate-900 bg-indigo-950 text-indigo-300 border border-indigo-700/60 text-[10px] font-bold text-center leading-5"
+                                  >
+                                    {(m.full_name || 'U').charAt(0).toUpperCase()}
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="truncate max-w-[130px]">
+                                <span className="font-semibold text-slate-200 text-xs block truncate">
+                                  {load.assigned_team[0].full_name}
+                                </span>
+                                <span className="inline-flex items-center gap-1 text-[10px] text-indigo-300 font-medium">
+                                  +{load.assigned_team.length - 1} more
+                                </span>
+                              </div>
+                            </div>
+                          )
+                        ) : load.dispatcher_profile ? (
+                          <div
+                            className="flex items-center gap-2"
+                            title={`${load.dispatcher_profile.full_name} (${getRoleLabel(load.dispatcher_profile.role)}) • ${load.dispatcher_profile.email || ''}`}
+                          >
+                            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-950 text-indigo-300 border border-indigo-800/60 text-[10px] font-bold shrink-0">
+                              {(load.dispatcher_profile.full_name || 'U').charAt(0).toUpperCase()}
+                            </div>
+                            <div className="truncate max-w-[120px]">
+                              <span className="font-semibold text-slate-200 text-xs block truncate">
+                                {load.dispatcher_profile.full_name}
+                              </span>
+                              <span className="text-[10px] text-indigo-300/90 block font-medium">
+                                {getRoleLabel(load.dispatcher_profile.role)}
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 bg-slate-800/60 px-2 py-0.5 rounded border border-slate-700/60">
+                            <UserCheck className="w-3 h-3 text-slate-500" />
+                            Unassigned
+                          </span>
                         )}
                       </td>
 
@@ -493,6 +736,11 @@ export const LoadList: React.FC<LoadListProps> = ({
           <div className="px-4 py-3 bg-slate-950/80 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
             <span>
               Showing <strong className="text-slate-200">{loads.length}</strong> active dispatch {loads.length === 1 ? 'load' : 'loads'}
+              {selectedLoadIds.length > 0 && (
+                <span className="ml-2 text-indigo-400 font-semibold">
+                  ({selectedLoadIds.length} selected)
+                </span>
+              )}
             </span>
             <span className="text-[11px] font-mono text-slate-400">
               Operational Timezone: {operationalTimezone}

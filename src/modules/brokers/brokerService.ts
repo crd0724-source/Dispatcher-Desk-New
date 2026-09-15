@@ -5,9 +5,12 @@ function isUUID(str?: string | null): boolean {
   if (!str) return false;
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 }
+
+export const DEMO_ORGANIZATION_ID = 'demo-org-1';
 import {
   BrokerWithPerformance,
   BrokerPerformanceMetrics,
+  BrokerStatus,
   CreateBrokerInput,
   UpdateBrokerInput,
   BrokerFilterCriteria,
@@ -19,7 +22,7 @@ const BROKERS_STORAGE_PREFIX = 'dispatchdesk_demo_brokers_';
 const LOADS_STORAGE_PREFIX = 'dispatchdesk_demo_loads_';
 
 // Seed Brokers for demo organizations (strictly fictional mock entities)
-const SEED_BROKERS: Omit<Broker, 'organization_id'>[] = [
+const SEED_BROKERS: (Omit<Broker, 'organization_id'> & { status?: BrokerStatus })[] = [
   {
     id: 'demo-broker-1',
     company_name: 'Apex Freight Logistics [Demo]',
@@ -142,14 +145,29 @@ const SEED_BROKERS: Omit<Broker, 'organization_id'>[] = [
   },
 ];
 
+function serializeBrokerFilters(filters?: BrokerFilterCriteria): string {
+  if (!filters) return '';
+  const parts: string[] = [];
+  if (filters.search !== undefined) parts.push(`search:${filters.search.trim().toLowerCase()}`);
+  if (filters.creditStatus !== undefined) parts.push(`credit:${filters.creditStatus}`);
+  if (filters.status !== undefined) parts.push(`status:${filters.status}`);
+  if (filters.sortBy !== undefined) parts.push(`sort:${filters.sortBy}`);
+  return parts.join('|');
+}
+
 class BrokerService {
+  private inFlightListBrokers = new Map<string, Promise<BrokerWithPerformance[]>>();
+
   /**
    * Helper to load raw brokers from localStorage or seed initial data
    */
-  private getRawBrokers(orgId: string): Broker[] {
+  private getRawBrokers(orgId: string): (Broker & { status?: BrokerStatus })[] {
     const key = `${BROKERS_STORAGE_PREFIX}${orgId}`;
     const data = localStorage.getItem(key);
     if (!data) {
+      if (isUUID(orgId) && orgId !== DEMO_ORGANIZATION_ID) {
+        return [];
+      }
       const seeded = SEED_BROKERS.map((b) => ({
         ...b,
         organization_id: orgId,
@@ -162,7 +180,8 @@ class BrokerService {
       // Ensure all records belong strictly to orgId and have a status field
       return (Array.isArray(parsed) ? parsed : [])
         .filter((b: Broker) => !b.organization_id || b.organization_id === orgId)
-        .map((b: Broker) => ({
+        .filter((b: Broker) => !(isUUID(orgId) && orgId !== DEMO_ORGANIZATION_ID && typeof b.id === 'string' && b.id.startsWith('demo-broker-')))
+        .map((b: Broker & { status?: BrokerStatus }) => ({
           ...b,
           organization_id: orgId,
           status: b.status || 'active',
@@ -175,7 +194,7 @@ class BrokerService {
   /**
    * Helper to save raw brokers
    */
-  private saveRawBrokers(orgId: string, brokers: Broker[]): void {
+  private saveRawBrokers(orgId: string, brokers: (Broker & { status?: BrokerStatus })[]): void {
     const key = `${BROKERS_STORAGE_PREFIX}${orgId}`;
     // Force tenant organization_id on all persisted records
     const sanitized = brokers.map((b) => ({
@@ -240,130 +259,198 @@ class BrokerService {
   /**
    * List all brokers for an organization with optional filtering & sorting
    */
-  async listBrokers(orgId: string, filters?: BrokerFilterCriteria): Promise<BrokerWithPerformance[]> {
-    let brokers: Broker[] = [];
+  listBrokers(orgId: string, filters?: BrokerFilterCriteria): Promise<BrokerWithPerformance[]> {
+    if (!orgId) return Promise.resolve([]);
 
-    if (isSupabaseConfigured && isUUID(orgId)) {
-      const { data, error } = await supabase
-        .from('brokers')
-        .select('*')
-        .eq('organization_id', orgId)
-        .order('company_name', { ascending: true });
-      if (error) {
-        console.error('[BrokerService] Supabase listBrokers error:', error);
-        throw new Error(error.message || 'Failed to fetch brokers from database.');
-      }
-      brokers = (data || []) as Broker[];
-    } else if (isSupabaseConfigured) {
-      try {
-        const { data, error } = await supabase
-          .from('brokers')
-          .select('*')
-          .eq('organization_id', orgId)
-          .order('company_name', { ascending: true });
-        if (!error && data) {
-          brokers = data as Broker[];
+    const key = `${orgId}::${serializeBrokerFilters(filters)}`;
+    const inFlight = this.inFlightListBrokers.get(key);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const request = (async () => {
+      let brokers: Broker[] = [];
+
+      if (isSupabaseConfigured && isUUID(orgId)) {
+        if (orgId !== DEMO_ORGANIZATION_ID) {
+          try {
+            const { data, error } = await supabase
+              .from('brokers')
+              .select('*')
+              .eq('organization_id', orgId)
+              .order('company_name', { ascending: true });
+            if (error) {
+              console.error('[BrokerService] Supabase listBrokers error for real org:', error);
+              brokers = [];
+            } else {
+              brokers = (data || []) as Broker[];
+            }
+          } catch (fetchErr) {
+            console.error('[BrokerService] Supabase listBrokers network error for real org:', fetchErr);
+            brokers = [];
+          }
+        } else {
+          // Demo org flow
+          try {
+            const { data, error } = await supabase
+              .from('brokers')
+              .select('*')
+              .eq('organization_id', orgId)
+              .order('company_name', { ascending: true });
+            if (error) {
+              console.warn('[BrokerService] Supabase listBrokers error, using fallback:', error);
+              brokers = this.getRawBrokers(orgId);
+            } else {
+              brokers = (data || []) as Broker[];
+              if (brokers.length === 0) {
+                brokers = this.getRawBrokers(orgId);
+              }
+            }
+          } catch (fetchErr) {
+            console.warn('[BrokerService] Supabase listBrokers network error, using fallback:', fetchErr);
+            brokers = this.getRawBrokers(orgId);
+          }
         }
-      } catch (err) {
-        console.warn('Supabase listBrokers failed, falling back to local storage:', err);
-      }
-    }
-
-    if (brokers.length === 0 && !isUUID(orgId)) {
-      // Artificial small delay for UI smoothness when fallback
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      brokers = this.getRawBrokers(orgId);
-    }
-
-    if (filters) {
-      // Search filter
-      if (filters.search && filters.search.trim()) {
-        const query = filters.search.toLowerCase().trim();
-        brokers = brokers.filter((b) => {
-          const company = (b.company_name || '').toLowerCase();
-          const mc = (b.mc_number || '').toLowerCase();
-          const dot = (b.dot_number || '').toLowerCase();
-          const contact = (b.contact_name || '').toLowerCase();
-          const email = (b.contact_email || '').toLowerCase();
-          const phone = (b.contact_phone || '').toLowerCase();
-          const notes = (b.notes || '').toLowerCase();
-
-          return (
-            company.includes(query) ||
-            mc.includes(query) ||
-            dot.includes(query) ||
-            contact.includes(query) ||
-            email.includes(query) ||
-            phone.includes(query) ||
-            notes.includes(query)
-          );
-        });
+      } else if (isSupabaseConfigured) {
+        try {
+          const { data, error } = await supabase
+            .from('brokers')
+            .select('*')
+            .eq('organization_id', orgId)
+            .order('company_name', { ascending: true });
+          if (!error && data) {
+            brokers = data as Broker[];
+          }
+        } catch (err) {
+          console.warn('Supabase listBrokers failed, falling back to local storage:', err);
+        }
       }
 
-      // Credit Status Filter
-      if (filters.creditStatus && filters.creditStatus !== 'all') {
-        brokers = brokers.filter((b) => b.credit_status === filters.creditStatus);
+      if (brokers.length === 0 && (!isUUID(orgId) || orgId === DEMO_ORGANIZATION_ID)) {
+        // Artificial small delay for UI smoothness when fallback
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        brokers = this.getRawBrokers(orgId);
       }
 
-      // Active/Inactive Status Filter
-      if (filters.status && filters.status !== 'all') {
-        brokers = brokers.filter((b) => b.status === filters.status);
-      }
-    }
+      if (filters) {
+        // Search filter
+        if (filters.search && filters.search.trim()) {
+          const query = filters.search.toLowerCase().trim();
+          brokers = brokers.filter((b) => {
+            const company = (b.company_name || '').toLowerCase();
+            const mc = (b.mc_number || '').toLowerCase();
+            const dot = (b.dot_number || '').toLowerCase();
+            const contact = (b.contact_name || '').toLowerCase();
+            const email = (b.contact_email || '').toLowerCase();
+            const phone = (b.contact_phone || '').toLowerCase();
+            const notes = (b.notes || '').toLowerCase();
 
-    // Hydrate with performance metrics
-    const hydratedBrokers: BrokerWithPerformance[] = brokers.map((b) => ({
-      ...b,
-      performance: this.calculatePerformance(orgId, b.id, b.payment_terms_days),
-    }));
+            return (
+              company.includes(query) ||
+              mc.includes(query) ||
+              dot.includes(query) ||
+              contact.includes(query) ||
+              email.includes(query) ||
+              phone.includes(query) ||
+              notes.includes(query)
+            );
+          });
+        }
 
-    // Sorting
-    const sortBy = filters?.sortBy || 'newest';
-    hydratedBrokers.sort((a, b) => {
-      switch (sortBy) {
-        case 'newest':
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-        case 'oldest':
-          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-        case 'company_asc':
-          return a.company_name.localeCompare(b.company_name);
-        case 'company_desc':
-          return b.company_name.localeCompare(a.company_name);
-        case 'payment_terms':
-          return a.payment_terms_days - b.payment_terms_days;
-        case 'total_gross':
-          return (b.performance?.total_gross || 0) - (a.performance?.total_gross || 0);
-        default:
-          return 0;
+        // Credit Status Filter
+        if (filters.creditStatus && filters.creditStatus !== 'all') {
+          brokers = brokers.filter((b) => b.credit_status === filters.creditStatus);
+        }
+
+        // Active/Inactive Status Filter
+        if (filters.status && filters.status !== 'all') {
+          brokers = brokers.filter((b) => ((b as Broker & { status?: BrokerStatus }).status || 'active') === filters.status);
+        }
       }
+
+      // Hydrate with performance metrics
+      const hydratedBrokers: BrokerWithPerformance[] = brokers.map((b) => ({
+        ...b,
+        performance: this.calculatePerformance(orgId, b.id, b.payment_terms_days),
+      }));
+
+      // Sorting
+      const sortBy = filters?.sortBy || 'newest';
+      hydratedBrokers.sort((a, b) => {
+        switch (sortBy) {
+          case 'newest':
+            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+          case 'oldest':
+            return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+          case 'company_asc':
+            return a.company_name.localeCompare(b.company_name);
+          case 'company_desc':
+            return b.company_name.localeCompare(a.company_name);
+          case 'payment_terms':
+            return a.payment_terms_days - b.payment_terms_days;
+          case 'total_gross':
+            return (b.performance?.total_gross || 0) - (a.performance?.total_gross || 0);
+          default:
+            return 0;
+        }
+      });
+
+      return hydratedBrokers;
+    })().finally(() => {
+      this.inFlightListBrokers.delete(key);
     });
 
-    return hydratedBrokers;
+    this.inFlightListBrokers.set(key, request);
+    return request;
   }
 
   /**
    * Get single broker with performance metrics
    */
   async getBroker(orgId: string, brokerId: string): Promise<BrokerWithPerformance | null> {
-    if (isSupabaseConfigured && isUUID(orgId) && isUUID(brokerId)) {
-      const { data, error } = await supabase
-        .from('brokers')
-        .select('*')
-        .eq('id', brokerId)
-        .eq('organization_id', orgId)
-        .maybeSingle();
-      if (error) {
-        console.error('[BrokerService] Supabase getBroker error:', error);
-        throw new Error(error.message || 'Failed to fetch broker from database.');
+    if (isSupabaseConfigured && isUUID(orgId)) {
+      if (orgId !== DEMO_ORGANIZATION_ID) {
+        if (!isUUID(brokerId)) return null;
+        const { data, error } = await supabase
+          .from('brokers')
+          .select('*')
+          .eq('id', brokerId)
+          .eq('organization_id', orgId)
+          .maybeSingle();
+        if (error) {
+          console.error('[BrokerService] Supabase getBroker error:', error);
+          throw new Error(error.message || 'Failed to fetch broker from database.');
+        }
+        if (data) {
+          const broker = data as Broker;
+          return {
+            ...broker,
+            performance: this.calculatePerformance(orgId, broker.id, broker.payment_terms_days),
+          };
+        }
+        return null;
       }
-      if (data) {
-        const broker = data as Broker;
-        return {
-          ...broker,
-          performance: this.calculatePerformance(orgId, broker.id, broker.payment_terms_days),
-        };
+
+      if (isUUID(brokerId)) {
+        const { data, error } = await supabase
+          .from('brokers')
+          .select('*')
+          .eq('id', brokerId)
+          .eq('organization_id', orgId)
+          .maybeSingle();
+        if (error) {
+          console.error('[BrokerService] Supabase getBroker error:', error);
+          throw new Error(error.message || 'Failed to fetch broker from database.');
+        }
+        if (data) {
+          const broker = data as Broker;
+          return {
+            ...broker,
+            performance: this.calculatePerformance(orgId, broker.id, broker.payment_terms_days),
+          };
+        }
+        return null;
       }
-      return null;
     }
 
     if (isSupabaseConfigured) {
@@ -384,6 +471,10 @@ class BrokerService {
       } catch (err) {
         console.warn('Supabase getBroker failed, falling back to local storage:', err);
       }
+    }
+
+    if (isUUID(orgId) && orgId !== DEMO_ORGANIZATION_ID) {
+      return null;
     }
 
     const brokers = this.getRawBrokers(orgId);
@@ -418,7 +509,6 @@ class BrokerService {
           payment_terms_days: paymentTerms,
           credit_status: input.credit_status || 'approved',
           notes: input.notes?.trim() || null,
-          status: input.status || 'active',
         })
         .select()
         .single();
@@ -453,12 +543,16 @@ class BrokerService {
             payment_terms_days: paymentTerms,
             credit_status: input.credit_status || 'approved',
             notes: input.notes?.trim() || null,
-            status: input.status || 'active',
           })
           .select()
           .single();
 
-        if (!error && data) {
+        if (error) {
+          console.error('[BrokerService] Supabase createBroker error:', error);
+          throw new Error(error.message || 'Failed to create broker in database.');
+        }
+
+        if (data) {
           const created = data as Broker;
           return {
             ...created,
@@ -466,13 +560,16 @@ class BrokerService {
           };
         }
       } catch (err) {
+        if (err instanceof Error && err.message.includes('Failed to create broker in database.')) {
+          throw err;
+        }
         console.warn('Supabase createBroker failed, saving locally:', err);
       }
     }
 
     const brokers = this.getRawBrokers(orgId);
     const now = new Date().toISOString();
-    const newBroker: Broker = {
+    const newBroker: Broker & { status?: BrokerStatus } = {
       id: `broker-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       organization_id: orgId,
       company_name: input.company_name.trim(),
@@ -517,7 +614,6 @@ class BrokerService {
             : {}),
           ...(input.credit_status !== undefined ? { credit_status: input.credit_status } : {}),
           ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
-          ...(input.status !== undefined ? { status: input.status } : {}),
           updated_at: new Date().toISOString(),
         })
         .eq('id', brokerId)
@@ -556,13 +652,17 @@ class BrokerService {
               : {}),
             ...(input.credit_status !== undefined ? { credit_status: input.credit_status } : {}),
             ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
-            ...(input.status !== undefined ? { status: input.status } : {}),
             updated_at: new Date().toISOString(),
           })
           .eq('id', brokerId)
           .eq('organization_id', orgId)
           .select()
           .single();
+
+        if (error) {
+          console.error('[BrokerService] Supabase updateBroker error:', error);
+          throw new Error(error.message || 'Failed to update broker in database.');
+        }
 
         if (!error && data) {
           const updated = data as Broker;
@@ -572,6 +672,9 @@ class BrokerService {
           };
         }
       } catch (err) {
+        if (err instanceof Error && err.message.includes('Failed to update broker in database.')) {
+          throw err;
+        }
         console.warn('Supabase updateBroker failed, updating locally:', err);
       }
     }
@@ -585,7 +688,7 @@ class BrokerService {
     const existing = brokers[index];
     const now = new Date().toISOString();
 
-    const updatedBroker: Broker = {
+    const updatedBroker: Broker & { status?: BrokerStatus } = {
       ...existing,
       company_name: input.company_name !== undefined ? input.company_name.trim() : existing.company_name,
       mc_number: input.mc_number !== undefined ? (input.mc_number ? cleanIdentifier(input.mc_number) || null : null) : existing.mc_number,
@@ -598,7 +701,7 @@ class BrokerService {
         : existing.payment_terms_days,
       credit_status: input.credit_status !== undefined ? input.credit_status : existing.credit_status,
       notes: input.notes !== undefined ? (input.notes?.trim() || null) : existing.notes,
-      status: input.status !== undefined ? input.status : existing.status,
+      status: input.status !== undefined ? input.status : (existing as { status?: BrokerStatus }).status,
       updated_at: now,
     };
 
@@ -615,11 +718,15 @@ class BrokerService {
    * Toggle Active / Inactive Status
    */
   async toggleBrokerStatus(orgId: string, brokerId: string): Promise<BrokerWithPerformance> {
+    if (isSupabaseConfigured && isUUID(orgId)) {
+      throw new Error('Partnership status cannot be toggled because status is not a persistent column in the database schema.');
+    }
     const broker = await this.getBroker(orgId, brokerId);
     if (!broker) {
       throw new Error(`Broker with ID ${brokerId} not found.`);
     }
-    const newStatus = broker.status === 'active' ? 'inactive' : 'active';
+    const currentStatus = (broker as BrokerWithPerformance).status || 'active';
+    const newStatus: BrokerStatus = currentStatus === 'active' ? 'inactive' : 'active';
     return this.updateBroker(orgId, brokerId, { status: newStatus });
   }
 

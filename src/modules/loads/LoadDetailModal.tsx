@@ -91,6 +91,7 @@ interface LoadDetailModalProps {
   onEdit?: (load: LoadWithRelations) => void;
   onStatusChange?: (loadId: string, newStatus: PipelineStatus) => Promise<void>;
   canEdit?: boolean;
+  onDocumentUpdated?: () => Promise<void> | void;
 }
 
 export const LoadDetailModal: React.FC<LoadDetailModalProps> = ({
@@ -100,6 +101,7 @@ export const LoadDetailModal: React.FC<LoadDetailModalProps> = ({
   onEdit,
   onStatusChange,
   canEdit = true,
+  onDocumentUpdated,
 }) => {
   const { operationalTimezone, dispatcherTimezone } = useTimezone();
   const { userRole, user, profile, activeOrganization } = useAuth();
@@ -322,6 +324,7 @@ export const LoadDetailModal: React.FC<LoadDetailModalProps> = ({
 
   const handleDocStatusChange = async (doc: FreightDocument, newStatus: DocumentStatus) => {
     await documentService.updateDocumentStatus(load.organization_id, doc.id, newStatus);
+    await onDocumentUpdated?.();
     await fetchPaperwork();
     const updated = await documentService.getDocument(load.organization_id, doc.id);
     setSelectedDoc(updated);
@@ -595,8 +598,8 @@ export const LoadDetailModal: React.FC<LoadDetailModalProps> = ({
           </div>
         </div>
 
-        {/* Operational Entity Cards (Client, Broker, Truck, Driver) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* Operational Entity Cards (Client, Broker, Truck, Driver, Dispatcher) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           {/* Client Carrier */}
           <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
             <div>
@@ -688,6 +691,79 @@ export const LoadDetailModal: React.FC<LoadDetailModalProps> = ({
               <div className="pt-2 mt-2 border-t border-slate-800/60 text-slate-400 text-[10px] flex items-center gap-1">
                 <Phone className="w-2.5 h-2.5" />
                 <span>{load.driver.phone}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Assigned To (Operational Team) */}
+          <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center gap-1.5 text-indigo-400 font-bold uppercase tracking-wider text-[10px] mb-1">
+                <UserCheck className="w-3 h-3" />
+                <span>
+                  {load.assigned_team && load.assigned_team.length > 1
+                    ? `Assigned Team (${load.assigned_team.length})`
+                    : 'Assigned To'}
+                </span>
+              </div>
+              {load.assigned_team && load.assigned_team.length > 0 ? (
+                load.assigned_team.length === 1 ? (
+                  <>
+                    <p className="font-semibold text-slate-100 text-xs truncate">
+                      {load.assigned_team[0].full_name}
+                    </p>
+                    <p className="text-slate-400 text-[11px] capitalize mt-0.5">
+                      {load.assigned_team[0].role === 'owner_admin'
+                        ? 'Admin'
+                        : load.assigned_team[0].role === 'dispatcher'
+                        ? 'Dispatcher'
+                        : 'Staff'}
+                    </p>
+                  </>
+                ) : (
+                  <div className="space-y-1 mt-1 max-h-20 overflow-y-auto pr-1">
+                    {load.assigned_team.map((m) => (
+                      <div
+                        key={m.user_id || m.id}
+                        className="flex items-center justify-between gap-1 text-[11px] bg-slate-900/90 px-1.5 py-0.5 rounded border border-slate-800"
+                        title={m.email || m.full_name || undefined}
+                      >
+                        <span className="font-medium text-slate-200 truncate">{m.full_name}</span>
+                        <span className="text-[9px] text-indigo-300 font-medium px-1 bg-indigo-950/80 rounded shrink-0">
+                          {m.role === 'owner_admin' ? 'Admin' : m.role === 'dispatcher' ? 'Disp' : 'Staff'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )
+              ) : load.dispatcher_profile ? (
+                <>
+                  <p className="font-semibold text-slate-100 text-xs truncate">
+                    {load.dispatcher_profile.full_name}
+                  </p>
+                  <p className="text-slate-400 text-[11px] capitalize mt-0.5">
+                    {load.dispatcher_profile.role === 'owner_admin'
+                      ? 'Admin'
+                      : load.dispatcher_profile.role === 'dispatcher'
+                      ? 'Dispatcher'
+                      : 'Staff'}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="font-semibold text-slate-400 text-xs">Unassigned</p>
+                  <p className="text-slate-500 text-[11px] mt-0.5">No team member</p>
+                </>
+              )}
+            </div>
+            {((load.assigned_team && load.assigned_team[0]?.email) || load.dispatcher_profile?.email) && (
+              <div className="pt-2 mt-2 border-t border-slate-800/60 text-slate-400 text-[10px] flex items-center gap-1 truncate">
+                <Mail className="w-2.5 h-2.5 shrink-0" />
+                <span className="truncate">
+                  {load.assigned_team && load.assigned_team[0]?.email
+                    ? load.assigned_team[0].email
+                    : load.dispatcher_profile?.email}
+                </span>
               </div>
             )}
           </div>

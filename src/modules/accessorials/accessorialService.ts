@@ -14,7 +14,9 @@ import { activityService } from '../activity/activityService.ts';
 import { CheckCall } from '../checkcalls/checkCallTypes.ts';
 import { LoadWithRelations } from '../loads/loadTypes.ts';
 
+export const DEMO_ORGANIZATION_ID = 'demo-org-1';
 const ACCESSORIALS_STORAGE_PREFIX = 'dispatchdesk_demo_accessorials_';
+const KNOWN_DEMO_ACCESSORIAL_IDS = new Set(['demo-acc-1', 'demo-acc-2', 'demo-acc-3']);
 
 /**
  * Pure calculation function for detention time and billing.
@@ -229,15 +231,43 @@ export interface IAccessorialService {
 
 class AccessorialService implements IAccessorialService {
   private ensureInitialized(organizationId: string): AccessorialClaim[] {
+    if (!organizationId) {
+      return [];
+    }
+
     const key = `${ACCESSORIALS_STORAGE_PREFIX}${organizationId}`;
+    const rawStored = localStorage.getItem(key);
+
+    // Dedicated Demo Organization: seed once if storage is uninitialized
+    if (organizationId === DEMO_ORGANIZATION_ID) {
+      if (!rawStored) {
+        const claims = SEED_ACCESSORIALS.map((c) => ({
+          ...c,
+          organization_id: organizationId,
+        }));
+        saveToStorage(key, claims);
+        return claims;
+      }
+      return loadFromStorage<AccessorialClaim[]>(key, []);
+    }
+
+    // Non-Demo Organizations: NEVER inject demo seeds
+    if (!rawStored) {
+      return [];
+    }
+
     let claims = loadFromStorage<AccessorialClaim[]>(key, []);
-    if (claims.length === 0) {
-      claims = SEED_ACCESSORIALS.map((c) => ({
-        ...c,
-        organization_id: organizationId,
-      }));
+    if (!Array.isArray(claims) || claims.length === 0) {
+      return [];
+    }
+
+    // Detect and clean up known demo IDs (demo-acc-1, demo-acc-2, demo-acc-3) from earlier runs
+    const hasDemoClaims = claims.some((c) => KNOWN_DEMO_ACCESSORIAL_IDS.has(c.id));
+    if (hasDemoClaims) {
+      claims = claims.filter((c) => !KNOWN_DEMO_ACCESSORIAL_IDS.has(c.id));
       saveToStorage(key, claims);
     }
+
     return claims;
   }
 

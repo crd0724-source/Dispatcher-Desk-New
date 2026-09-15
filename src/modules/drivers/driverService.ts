@@ -9,6 +9,8 @@ function isUUID(str?: string | null): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 }
 
+export const DEMO_ORGANIZATION_ID = 'demo-org-1';
+
 // Storage keys
 const DRIVERS_STORAGE_PREFIX = 'dispatchdesk_demo_drivers_';
 const CLIENTS_STORAGE_PREFIX = 'dispatchdesk_demo_clients_';
@@ -256,6 +258,8 @@ export interface IDriverService {
  * (Driver Client -> Assigned Truck -> Truck belongs to same Client).
  */
 class LocalDriverService implements IDriverService {
+  private inFlightGetDrivers = new Map<string, Promise<DriverWithRelations[]>>();
+
   private ensureInitialized(organizationId: string): {
     drivers: Driver[];
     clients: Client[];
@@ -266,6 +270,13 @@ class LocalDriverService implements IDriverService {
     const driversKey = `${DRIVERS_STORAGE_PREFIX}${organizationId}`;
 
     let clients = loadFromStorage<Client[]>(clientsKey, []);
+    let trucks = loadFromStorage<Truck[]>(trucksKey, []);
+    let drivers = loadFromStorage<Driver[]>(driversKey, []);
+
+    if (isUUID(organizationId) && organizationId !== DEMO_ORGANIZATION_ID) {
+      return { drivers, clients, trucks };
+    }
+
     if (clients.length === 0) {
       clients = SEED_CLIENTS.map((c) => ({
         ...c,
@@ -274,7 +285,6 @@ class LocalDriverService implements IDriverService {
       saveToStorage(clientsKey, clients);
     }
 
-    let trucks = loadFromStorage<Truck[]>(trucksKey, []);
     if (trucks.length === 0) {
       trucks = SEED_TRUCKS.map((t) => ({
         ...t,
@@ -283,7 +293,6 @@ class LocalDriverService implements IDriverService {
       saveToStorage(trucksKey, trucks);
     }
 
-    let drivers = loadFromStorage<Driver[]>(driversKey, []);
     if (drivers.length === 0) {
       drivers = SEED_DRIVERS.map((d) => ({
         ...d,
@@ -362,23 +371,45 @@ class LocalDriverService implements IDriverService {
     truckId: string,
     excludeDriverId?: string
   ): Promise<Driver | null> {
-    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(truckId)) {
-      let query = supabase
-        .from('drivers')
-        .select('*')
-        .eq('organization_id', organizationId)
-        .eq('assigned_truck_id', truckId);
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      if (organizationId !== DEMO_ORGANIZATION_ID) {
+        if (!isUUID(truckId)) return null;
+        let query = supabase
+          .from('drivers')
+          .select('*')
+          .eq('organization_id', organizationId)
+          .eq('assigned_truck_id', truckId);
 
-      if (excludeDriverId && isUUID(excludeDriverId)) {
-        query = query.neq('id', excludeDriverId);
+        if (excludeDriverId && isUUID(excludeDriverId)) {
+          query = query.neq('id', excludeDriverId);
+        }
+
+        const { data, error } = await query.maybeSingle();
+        if (error) {
+          console.error('[DriverService] Supabase getAssignedDriverForTruck error:', error);
+          throw new Error(error.message || 'Failed to fetch assigned driver for truck.');
+        }
+        return (data as Driver) || null;
       }
 
-      const { data, error } = await query.maybeSingle();
-      if (error) {
-        console.error('[DriverService] Supabase getAssignedDriverForTruck error:', error);
-        throw new Error(error.message || 'Failed to fetch assigned driver for truck.');
+      if (isUUID(truckId)) {
+        let query = supabase
+          .from('drivers')
+          .select('*')
+          .eq('organization_id', organizationId)
+          .eq('assigned_truck_id', truckId);
+
+        if (excludeDriverId && isUUID(excludeDriverId)) {
+          query = query.neq('id', excludeDriverId);
+        }
+
+        const { data, error } = await query.maybeSingle();
+        if (error) {
+          console.error('[DriverService] Supabase getAssignedDriverForTruck error:', error);
+          throw new Error(error.message || 'Failed to fetch assigned driver for truck.');
+        }
+        return (data as Driver) || null;
       }
-      return (data as Driver) || null;
     }
 
     if (isSupabaseConfigured) {
@@ -400,6 +431,10 @@ class LocalDriverService implements IDriverService {
       }
     }
 
+    if (isUUID(organizationId) && organizationId !== DEMO_ORGANIZATION_ID) {
+      return null;
+    }
+
     const { drivers } = this.ensureInitialized(organizationId);
     const found = drivers.find(
       (d) => d.assigned_truck_id === truckId && d.id !== excludeDriverId
@@ -407,69 +442,134 @@ class LocalDriverService implements IDriverService {
     return found || null;
   }
 
-  async getDrivers(organizationId: string): Promise<DriverWithRelations[]> {
-    let rawDrivers: Driver[] = [];
+  getDrivers(organizationId: string): Promise<DriverWithRelations[]> {
+    if (!organizationId) return Promise.resolve([]);
 
-    if (isSupabaseConfigured && isUUID(organizationId)) {
-      const { data, error } = await supabase
-        .from('drivers')
-        .select('*')
-        .eq('organization_id', organizationId)
-        .order('created_at', { ascending: false });
+    const inFlight = this.inFlightGetDrivers.get(organizationId);
+    if (inFlight) {
+      return inFlight;
+    }
 
-      if (error) {
-        console.error('[DriverService] Supabase getDrivers error:', error);
-        throw new Error(error.message || 'Failed to fetch drivers from database.');
-      }
-      rawDrivers = (data || []) as Driver[];
-    } else if (isSupabaseConfigured) {
-      try {
-        const { data, error } = await supabase
-          .from('drivers')
-          .select('*')
-          .eq('organization_id', organizationId)
-          .order('created_at', { ascending: false });
+    const request = (async () => {
+      let rawDrivers: Driver[] = [];
 
-        if (!error && data) {
-          rawDrivers = data as Driver[];
+      if (isSupabaseConfigured && isUUID(organizationId)) {
+        if (organizationId !== DEMO_ORGANIZATION_ID) {
+          try {
+            const { data, error } = await supabase
+              .from('drivers')
+              .select('*')
+              .eq('organization_id', organizationId)
+              .order('created_at', { ascending: false });
+
+            if (error) {
+              console.error('[DriverService] Supabase getDrivers error for real org:', error);
+              rawDrivers = [];
+            } else {
+              rawDrivers = (data || []) as Driver[];
+            }
+          } catch (fetchErr) {
+            console.error('[DriverService] Supabase getDrivers network error for real org:', fetchErr);
+            rawDrivers = [];
+          }
+        } else {
+          // Demo org flow
+          try {
+            const { data, error } = await supabase
+              .from('drivers')
+              .select('*')
+              .eq('organization_id', organizationId)
+              .order('created_at', { ascending: false });
+
+            if (error) {
+              console.warn('[DriverService] Supabase getDrivers error, using fallback:', error);
+              const { drivers } = this.ensureInitialized(organizationId);
+              rawDrivers = drivers;
+            } else {
+              rawDrivers = (data || []) as Driver[];
+              if (rawDrivers.length === 0) {
+                const { drivers } = this.ensureInitialized(organizationId);
+                rawDrivers = drivers;
+              }
+            }
+          } catch (fetchErr) {
+            console.warn('[DriverService] Supabase getDrivers network error, using fallback:', fetchErr);
+            const { drivers } = this.ensureInitialized(organizationId);
+            rawDrivers = drivers;
+          }
         }
-      } catch (err) {
-        console.warn('Supabase getDrivers failed, falling back to local storage:', err);
+      } else if (isSupabaseConfigured) {
+        try {
+          const { data, error } = await supabase
+            .from('drivers')
+            .select('*')
+            .eq('organization_id', organizationId)
+            .order('created_at', { ascending: false });
+
+          if (!error && data) {
+            rawDrivers = data as Driver[];
+          }
+        } catch (err) {
+          console.warn('Supabase getDrivers failed, falling back to local storage:', err);
+        }
       }
-    }
 
-    if (rawDrivers.length === 0 && !isUUID(organizationId)) {
-      const { drivers } = this.ensureInitialized(organizationId);
-      rawDrivers = drivers;
-    }
+      if (rawDrivers.length === 0 && (!isUUID(organizationId) || organizationId === DEMO_ORGANIZATION_ID)) {
+        const { drivers } = this.ensureInitialized(organizationId);
+        rawDrivers = drivers;
+      }
 
-    const [clients, trucks] = await Promise.all([
-      this.getClients(organizationId),
-      this.getTrucks(organizationId),
-    ]);
+      const [clients, trucks] = await Promise.all([
+        this.getClients(organizationId),
+        this.getTrucks(organizationId),
+      ]);
 
-    return rawDrivers
-      .map((d) => this.joinRelations(d, clients, trucks))
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      return rawDrivers
+        .map((d) => this.joinRelations(d, clients, trucks))
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    })().finally(() => {
+      this.inFlightGetDrivers.delete(organizationId);
+    });
+
+    this.inFlightGetDrivers.set(organizationId, request);
+    return request;
   }
 
   async getDriverById(organizationId: string, id: string): Promise<DriverWithRelations | null> {
     let rawDriver: Driver | null = null;
 
-    if (isSupabaseConfigured && isUUID(organizationId) && isUUID(id)) {
-      const { data, error } = await supabase
-        .from('drivers')
-        .select('*')
-        .eq('id', id)
-        .eq('organization_id', organizationId)
-        .maybeSingle();
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      if (organizationId !== DEMO_ORGANIZATION_ID) {
+        if (!isUUID(id)) return null;
+        const { data, error } = await supabase
+          .from('drivers')
+          .select('*')
+          .eq('id', id)
+          .eq('organization_id', organizationId)
+          .maybeSingle();
 
-      if (error) {
-        console.error('[DriverService] Supabase getDriverById error:', error);
-        throw new Error(error.message || 'Failed to fetch driver from database.');
+        if (error) {
+          console.error('[DriverService] Supabase getDriverById error:', error);
+          throw new Error(error.message || 'Failed to fetch driver from database.');
+        }
+        if (!data) return null;
+        rawDriver = data as Driver;
+      } else if (isUUID(id)) {
+        const { data, error } = await supabase
+          .from('drivers')
+          .select('*')
+          .eq('id', id)
+          .eq('organization_id', organizationId)
+          .maybeSingle();
+
+        if (error) {
+          console.error('[DriverService] Supabase getDriverById error:', error);
+          throw new Error(error.message || 'Failed to fetch driver from database.');
+        }
+        if (data) {
+          rawDriver = data as Driver;
+        }
       }
-      if (!data) return null;
-      rawDriver = data as Driver;
     } else if (isSupabaseConfigured) {
       try {
         const { data, error } = await supabase
@@ -487,7 +587,7 @@ class LocalDriverService implements IDriverService {
       }
     }
 
-    if (!rawDriver && !isUUID(organizationId)) {
+    if (!rawDriver && (!isUUID(organizationId) || organizationId === DEMO_ORGANIZATION_ID)) {
       const { drivers } = this.ensureInitialized(organizationId);
       rawDriver = drivers.find((d) => d.id === id) || null;
     }

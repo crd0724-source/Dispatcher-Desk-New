@@ -9,8 +9,8 @@ import {
   Kanban,
   DollarSign,
   FileText,
+  MessageSquare,
   MessageSquareText,
-  BarChart3,
   Bot,
   Settings,
   ShieldCheck,
@@ -21,6 +21,7 @@ import {
   MapPin,
   LogOut,
   LogIn,
+  CreditCard,
 } from 'lucide-react';
 import { UserRole } from '../../types/domain.types.ts';
 import { useAuth } from '../../contexts/AuthContext.tsx';
@@ -35,15 +36,25 @@ export type NavModule =
   | 'brokers'
   | 'loads'
   | 'pipeline'
+  | 'workload'
+  | 'communication'
   | 'checkcalls'
   | 'accessorials'
   | 'tasks'
   | 'profitability'
   | 'documents'
   | 'notes'
-  | 'reports'
   | 'ai'
+  | 'billing'
   | 'settings';
+
+interface NavItem {
+  id: NavModule;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  sub?: string;
+  badge?: string;
+}
 
 interface SidebarProps {
   activeModule: NavModule;
@@ -63,12 +74,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenAuthModal,
 }) => {
   const { user, signOut } = useAuth();
+  const isOwnerAdmin = userRole === 'owner_admin';
+
   const mainNavItems = [
     { id: 'dashboard' as NavModule, label: 'Dashboard', icon: LayoutDashboard },
     { id: 'calendar' as NavModule, label: 'Operations Calendar', icon: Calendar, sub: 'Timeline & Docks' },
     { id: 'map' as NavModule, label: 'Dispatch Map', icon: MapPin, sub: 'Stop Sequence Viz', badge: 'V1' },
     { id: 'pipeline' as NavModule, label: 'Load Pipeline', icon: Kanban, badge: '7 Stages' },
     { id: 'loads' as NavModule, label: 'Loads & Dispatches', icon: PackageCheck },
+    ...(isOwnerAdmin || userRole === null
+      ? [{ id: 'workload' as NavModule, label: 'Team Workload', icon: Users, sub: 'Assignment Overview', badge: 'Admin' }]
+      : []),
+    { id: 'communication' as NavModule, label: 'Driver Comms', icon: MessageSquare, sub: 'In-App Dispatch Chat' },
     { id: 'checkcalls' as NavModule, label: 'Load Tracking', icon: Radio, sub: 'Live Check Calls' },
     { id: 'accessorials' as NavModule, label: 'Accessorials & Detention', icon: Timer, sub: 'Detention Clocks' },
     { id: 'tasks' as NavModule, label: 'Tasks & Reminders', icon: CheckSquare, sub: 'Action Reminders' },
@@ -82,11 +99,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'brokers' as NavModule, label: 'Brokers / Shippers', icon: Building2 },
   ];
 
-  const backOfficeItems = [
+  const backOfficeItems: NavItem[] = [
+    { id: 'billing' as NavModule, label: 'Billing & Plans', icon: CreditCard, sub: 'Capacity & Invoices' },
     { id: 'documents' as NavModule, label: 'Documents', icon: FileText, sub: 'Rate Con / BOL / POD' },
     { id: 'notes' as NavModule, label: 'Activity & Notes', icon: MessageSquareText, sub: 'Audit & Shift Handover' },
-    { id: 'reports' as NavModule, label: 'Performance Reports', icon: BarChart3 },
-    { id: 'ai' as NavModule, label: 'AI Assistant', icon: Bot, badge: 'Roadmap' },
+    { id: 'ai' as NavModule, label: 'AI Assistant', icon: Bot },
     { id: 'settings' as NavModule, label: 'Settings & Security', icon: Settings },
   ];
 

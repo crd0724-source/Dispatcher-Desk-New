@@ -41,9 +41,19 @@ import {
   Bell,
   CheckSquare,
   FileSpreadsheet,
+  Building2,
+  Truck as TruckIcon,
+  UserCheck,
+  PackageCheck,
+  Upload,
 } from 'lucide-react';
+import { NavModule } from '../../components/layout/Sidebar.tsx';
 
-export const DocumentsView: React.FC = () => {
+interface DocumentsViewProps {
+  onNavigate?: (module: NavModule) => void;
+}
+
+export const DocumentsView: React.FC<DocumentsViewProps> = ({ onNavigate }) => {
   const { activeOrganization, userRole } = useAuth();
   const orgId = activeOrganization?.id || '';
 
@@ -209,6 +219,11 @@ export const DocumentsView: React.FC = () => {
     });
   };
 
+  const handleOpenUploadModal = () => {
+    setUploadPreselectLoadId(undefined);
+    setIsUploadModalOpen(true);
+  };
+
   const visibleMissingLoads = isMissingExpanded ? missingDocLoads : missingDocLoads.slice(0, 3);
 
   return (
@@ -256,14 +271,11 @@ export const DocumentsView: React.FC = () => {
           <button
             id="upload-paperwork-btn"
             type="button"
-            onClick={() => {
-              setUploadPreselectLoadId(undefined);
-              setIsUploadModalOpen(true);
-            }}
+            onClick={handleOpenUploadModal}
             className="h-9 inline-flex items-center gap-2 px-4 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-xs transition-colors cursor-pointer"
           >
-            <Plus className="w-4 h-4" />
-            <span>Upload Paperwork</span>
+            <Upload className="w-4 h-4" />
+            <span>Upload Document</span>
           </button>
         </div>
       </div>
@@ -417,10 +429,7 @@ export const DocumentsView: React.FC = () => {
         }}
         onViewLoad={(loadId) => handleOpenLoadDetail(loadId)}
         userRole={userRole}
-        onNewDocumentClick={() => {
-          setUploadPreselectLoadId(undefined);
-          setIsUploadModalOpen(true);
-        }}
+        onNewDocumentClick={handleOpenUploadModal}
         onResetFilters={handleResetFilters}
         hasActiveFilters={
           Boolean(filters.search) ||
@@ -430,6 +439,11 @@ export const DocumentsView: React.FC = () => {
           (Boolean(filters.date_range) && filters.date_range !== 'all') ||
           Boolean(filters.load_id)
         }
+        loadsCount={loads.length}
+        clientsCount={clients.length}
+        trucksCount={trucks.length}
+        driversCount={drivers.length}
+        onNavigate={onNavigate}
       />
 
       {/* Upload Paperwork Modal */}
@@ -438,6 +452,10 @@ export const DocumentsView: React.FC = () => {
         onClose={() => setIsUploadModalOpen(false)}
         onUpload={handleUploadDocument}
         loads={loads}
+        clients={clients}
+        drivers={drivers}
+        trucks={trucks}
+        brokers={brokers}
         initialLoadId={uploadPreselectLoadId}
         isUploading={isUploading}
         onOpenAIExtraction={() => {
@@ -510,9 +528,11 @@ export const DocumentsView: React.FC = () => {
           onClose={() => {
             setIsLoadModalOpen(false);
             setInspectingLoad(null);
+            loadData();
           }}
           load={inspectingLoad}
           canEdit={userRole === 'owner_admin' || userRole === 'dispatcher'}
+          onDocumentUpdated={loadData}
         />
       )}
     </div>

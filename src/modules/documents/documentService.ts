@@ -19,6 +19,8 @@ import {
 const DOCUMENTS_STORAGE_PREFIX = 'dispatchdesk_demo_documents_';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+export const DEMO_ORGANIZATION_ID = 'demo-org-1';
+
 function isUUID(str?: string | null): boolean {
   return Boolean(str && UUID_REGEX.test(str.trim()));
 }
@@ -192,6 +194,9 @@ class DocumentService implements IDocumentService {
     try {
       const data = localStorage.getItem(this.getStorageKey(orgId));
       if (!data) {
+        if (isUUID(orgId) && orgId !== DEMO_ORGANIZATION_ID) {
+          return [];
+        }
         // Seed default documents for demo tenant
         const seeded: Document[] = SEED_DOCUMENTS.map((doc) => ({
           ...doc,
@@ -203,7 +208,9 @@ class DocumentService implements IDocumentService {
       const parsed = JSON.parse(data);
       if (!Array.isArray(parsed)) return [];
       // Guarantee tenant isolation
-      return parsed.filter((d: Document) => d && d.organization_id === orgId);
+      return parsed
+        .filter((d: Document) => d && d.organization_id === orgId)
+        .filter((d: Document) => !(isUUID(orgId) && orgId !== DEMO_ORGANIZATION_ID && typeof d.id === 'string' && d.id.startsWith('demo-doc-')));
     } catch {
       return [];
     }
@@ -301,7 +308,7 @@ class DocumentService implements IDocumentService {
       }
     }
 
-    if (rawDocs.length === 0 && !isUUID(orgId)) {
+    if (rawDocs.length === 0 && (!isUUID(orgId) || orgId === DEMO_ORGANIZATION_ID)) {
       rawDocs = this.readRawDocs(orgId);
     }
 
@@ -369,24 +376,47 @@ class DocumentService implements IDocumentService {
   }
 
   async getDocument(orgId: string, id: string): Promise<FreightDocument | null> {
-    if (isSupabaseConfigured && isUUID(orgId) && isUUID(id)) {
-      const { data, error } = await supabase
-        .from('documents')
-        .select('*')
-        .eq('organization_id', orgId)
-        .eq('id', id)
-        .maybeSingle();
+    if (isSupabaseConfigured && isUUID(orgId)) {
+      if (orgId !== DEMO_ORGANIZATION_ID) {
+        if (!isUUID(id)) return null;
+        const { data, error } = await supabase
+          .from('documents')
+          .select('*')
+          .eq('organization_id', orgId)
+          .eq('id', id)
+          .maybeSingle();
 
-      if (error) {
-        console.error('[DocumentService] Supabase getDocument error:', error);
-        throw new Error(error.message || 'Failed to fetch document from database.');
+        if (error) {
+          console.error('[DocumentService] Supabase getDocument error:', error);
+          throw new Error(error.message || 'Failed to fetch document from database.');
+        }
+
+        if (data) {
+          const [joined] = await this.joinLoads(orgId, [data as Document]);
+          return joined || null;
+        }
+        return null;
       }
 
-      if (data) {
-        const [joined] = await this.joinLoads(orgId, [data as Document]);
-        return joined || null;
+      if (isUUID(id)) {
+        const { data, error } = await supabase
+          .from('documents')
+          .select('*')
+          .eq('organization_id', orgId)
+          .eq('id', id)
+          .maybeSingle();
+
+        if (error) {
+          console.error('[DocumentService] Supabase getDocument error:', error);
+          throw new Error(error.message || 'Failed to fetch document from database.');
+        }
+
+        if (data) {
+          const [joined] = await this.joinLoads(orgId, [data as Document]);
+          return joined || null;
+        }
+        return null;
       }
-      return null;
     }
 
     if (isSupabaseConfigured) {
@@ -405,6 +435,10 @@ class DocumentService implements IDocumentService {
       } catch (err) {
         console.warn('Supabase getDocument failed, falling back to local storage:', err);
       }
+    }
+
+    if (isUUID(orgId) && orgId !== DEMO_ORGANIZATION_ID) {
+      return null;
     }
 
     const raw = this.readRawDocs(orgId);
@@ -925,19 +959,22 @@ class DocumentService implements IDocumentService {
 
   async getDocumentsForLoad(orgId: string, loadId: string): Promise<FreightDocument[]> {
     if (isSupabaseConfigured && isUUID(orgId) && isUUID(loadId)) {
-      const { data, error } = await supabase
-        .from('documents')
-        .select('*')
-        .eq('organization_id', orgId)
-        .eq('load_id', loadId)
-        .order('created_at', { ascending: false });
+      try {
+        const { data, error } = await supabase
+          .from('documents')
+          .select('*')
+          .eq('organization_id', orgId)
+          .eq('load_id', loadId)
+          .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error('[DocumentService] Supabase getDocumentsForLoad error:', error);
-        throw new Error(error.message || 'Failed to fetch documents for load from database.');
+        if (error) {
+          console.warn('[DocumentService] Supabase getDocumentsForLoad error, using local fallback:', error);
+        } else if (data) {
+          return this.joinLoads(orgId, data as Document[]);
+        }
+      } catch (fetchErr) {
+        console.warn('[DocumentService] Supabase getDocumentsForLoad network error, using local fallback:', fetchErr);
       }
-
-      return this.joinLoads(orgId, (data || []) as Document[]);
     }
 
     if (isSupabaseConfigured) {
@@ -1028,8 +1065,10 @@ class DocumentService implements IDocumentService {
     }
   }
 
-  async getDocumentSummaryForLoad(orgId: string, load: Load): Promise<LoadDocumentSummary> {
-    const loadDocs = await this.getDocumentsForLoad(orgId, load.id);
+  private computeDocumentSummary(
+    load: Load,
+    loadDocs: FreightDocument[]
+  ): LoadDocumentSummary {
     const requiredTypes = getRequiredDocumentsForLoadStatus(load.pipeline_status);
 
     const allStandardTypes: DocumentType[] = ['rate_confirmation', 'bol', 'pod', 'invoice'];
@@ -1093,14 +1132,34 @@ class DocumentService implements IDocumentService {
     };
   }
 
+  async getDocumentSummaryForLoad(orgId: string, load: Load): Promise<LoadDocumentSummary> {
+    const loadDocs = await this.getDocumentsForLoad(orgId, load.id);
+    return this.computeDocumentSummary(load, loadDocs);
+  }
+
   async getMissingDocuments(
     orgId: string
   ): Promise<{ load: Load; missingDocs: DocumentType[]; summary: LoadDocumentSummary }[]> {
+    const docs = await this.listDocuments(orgId);
     const loads = await loadService.getLoads(orgId);
+
+    const docsByLoadId = new Map<string, FreightDocument[]>();
+    for (const doc of docs) {
+      if (doc.load_id) {
+        const existing = docsByLoadId.get(doc.load_id);
+        if (existing) {
+          existing.push(doc);
+        } else {
+          docsByLoadId.set(doc.load_id, [doc]);
+        }
+      }
+    }
+
     const results: { load: Load; missingDocs: DocumentType[]; summary: LoadDocumentSummary }[] = [];
 
     for (const load of loads) {
-      const summary = await this.getDocumentSummaryForLoad(orgId, load);
+      const loadDocs = docsByLoadId.get(load.id) || [];
+      const summary = this.computeDocumentSummary(load, loadDocs);
       if (summary.missingTypes.length > 0) {
         results.push({
           load,
@@ -1124,14 +1183,26 @@ class DocumentService implements IDocumentService {
     let missingPODsCount = 0;
     let readyToInvoiceLoadsCount = 0;
 
-    docs.forEach((d) => {
+    const docsByLoadId = new Map<string, FreightDocument[]>();
+
+    for (const d of docs) {
       if (d.doc_status === 'pending') pendingVerificationCount++;
       if (d.doc_status === 'verified') verifiedCount++;
       if (d.doc_status === 'received') receivedCount++;
-    });
+
+      if (d.load_id) {
+        const existing = docsByLoadId.get(d.load_id);
+        if (existing) {
+          existing.push(d);
+        } else {
+          docsByLoadId.set(d.load_id, [d]);
+        }
+      }
+    }
 
     for (const load of loads) {
-      const summary = await this.getDocumentSummaryForLoad(orgId, load);
+      const loadDocs = docsByLoadId.get(load.id) || [];
+      const summary = this.computeDocumentSummary(load, loadDocs);
       if (summary.missingTypes.includes('rate_confirmation')) {
         missingRateConsCount++;
       }

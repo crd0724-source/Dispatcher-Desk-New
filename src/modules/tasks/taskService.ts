@@ -18,7 +18,7 @@ import {
 import { activityService } from '../activity/activityService.ts';
 import { loadService } from '../loads/loadService.ts';
 import { checkCallService } from '../checkcalls/checkCallService.ts';
-import { accessorialService, calculateDetention } from '../accessorials/accessorialService.ts';
+import { accessorialService, calculateDetention, DEMO_ORGANIZATION_ID } from '../accessorials/accessorialService.ts';
 import { documentService } from '../documents/documentService.ts';
 
 const TASK_STORAGE_PREFIX = 'dispatchdesk_demo_tasks_';
@@ -116,6 +116,11 @@ export function calculateSnoozeDate(
  * Initial realistic seed tasks for newly initialized demo organizations.
  */
 function generateSeedTasks(orgId: string): DispatcherTask[] {
+  // Demo seed tasks are strictly limited to the dedicated demo organization
+  if (orgId !== DEMO_ORGANIZATION_ID) {
+    return [];
+  }
+
   const now = Date.now();
 
   return [
@@ -274,6 +279,25 @@ export class TaskService implements ITaskService {
         this.saveTasksToStorage(organizationId, seeds);
         return seeds;
       }
+
+      // For non-demo organizations: detect and purge known demo detention task (task-seed-1) from previous runs
+      if (organizationId !== DEMO_ORGANIZATION_ID) {
+        const hasDemoDetentionTask = parsed.some(
+          (t: DispatcherTask) =>
+            t.id.startsWith('task-seed-1') ||
+            (t.category === 'detention_warning' && t.load_id === 'demo-load-2' && t.trigger_source === 'detention_clock')
+        );
+        if (hasDemoDetentionTask) {
+          const cleaned = parsed.filter(
+            (t: DispatcherTask) =>
+              !t.id.startsWith('task-seed-1') &&
+              !(t.category === 'detention_warning' && t.load_id === 'demo-load-2' && t.trigger_source === 'detention_clock')
+          );
+          this.saveTasksToStorage(organizationId, cleaned);
+          return cleaned;
+        }
+      }
+
       return parsed;
     } catch (err) {
       console.error(`[TaskService] Storage read error for org ${organizationId}:`, err);

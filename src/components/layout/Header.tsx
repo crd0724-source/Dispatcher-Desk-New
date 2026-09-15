@@ -14,6 +14,7 @@ import {
   Sparkles,
   LogIn,
   UserPlus,
+  Plus,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import { useTimezone } from '../../contexts/TimezoneContext.tsx';
@@ -28,9 +29,15 @@ interface HeaderProps {
   onToggleSidebar: () => void;
   onSelectModule?: (module: NavModule) => void;
   onOpenAuthModal?: () => void;
+  onCreateOrgClick?: (isFirstOrg?: boolean) => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onToggleSidebar, onSelectModule, onOpenAuthModal }) => {
+export const Header: React.FC<HeaderProps> = ({
+  onToggleSidebar,
+  onSelectModule,
+  onOpenAuthModal,
+  onCreateOrgClick,
+}) => {
   const { user, profile, activeOrganization, userRole, memberships, setActiveOrganizationId, signOut } = useAuth();
   const { operationalTimezone, dispatcherTimezone, setOperationalTimezone, setDispatcherTimezone, liveOpsTime, liveDispatcherTime } = useTimezone();
 
@@ -190,6 +197,23 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar, onSelectModule,
                     </button>
                   ))
                 )}
+                {onCreateOrgClick && (
+                  <>
+                    <div className="border-t border-slate-800 my-1" />
+                    <button
+                      id="create-new-org-btn"
+                      type="button"
+                      onClick={() => {
+                        setIsOrgDropdownOpen(false);
+                        onCreateOrgClick(false);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-indigo-400 hover:text-indigo-300 hover:bg-slate-800/80 rounded-lg text-left cursor-pointer transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5 shrink-0" />
+                      <span>+ Create New Organization</span>
+                    </button>
+                  </>
+                )}
               </div>
             </>
           )}
@@ -203,12 +227,11 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar, onSelectModule,
           id="dual-clocks-container"
           onClick={() => setIsTimezoneModalOpen(!isTimezoneModalOpen)}
           className="hidden md:flex items-center gap-3 px-3 py-1.5 rounded-lg bg-slate-950/60 border border-slate-800 text-xs font-mono cursor-pointer hover:border-slate-700 transition-colors"
-          title="Click to customize timezones"
+          title={`Ops: ${opsTzObj?.label || 'US CT'} • Local: ${dispTzObj?.label || 'IST'} (Click to customize)`}
         >
           {/* US Ops Zone */}
           <div className="flex items-center gap-1.5 text-slate-300">
             <Clock className="w-3.5 h-3.5 text-indigo-400" />
-            <span className="text-slate-400 text-[11px] font-sans">{opsTzObj?.code || 'US'}:</span>
             <span className="text-slate-200 font-semibold">{liveOpsTime || '10:00 AM'}</span>
           </div>
 
@@ -216,7 +239,6 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar, onSelectModule,
 
           {/* Dispatcher Local Zone */}
           <div className="flex items-center gap-1.5 text-slate-300">
-            <span className="text-slate-400 text-[11px] font-sans">{dispTzObj?.code || 'IST'}:</span>
             <span className="text-indigo-300 font-semibold">{liveDispatcherTime || '8:30 PM'}</span>
           </div>
 

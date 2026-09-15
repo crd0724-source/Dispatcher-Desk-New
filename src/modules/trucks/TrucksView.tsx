@@ -12,9 +12,15 @@ import {
   AlertTriangle,
   CheckCircle2,
   Trash2,
+  Building2,
 } from 'lucide-react';
+import { NavModule } from '../../components/layout/Sidebar.tsx';
 
-export const TrucksView: React.FC = () => {
+interface TrucksViewProps {
+  onNavigate?: (module: NavModule) => void;
+}
+
+export const TrucksView: React.FC<TrucksViewProps> = ({ onNavigate }) => {
   const { activeOrganization, userRole } = useAuth();
   const orgId = activeOrganization?.id || 'demo-organization-default';
 
@@ -78,6 +84,10 @@ export const TrucksView: React.FC = () => {
 
   // Handlers
   const handleOpenAddModal = () => {
+    if (clients.length === 0 && onNavigate) {
+      onNavigate('clients');
+      return;
+    }
     setTruckToEdit(null);
     setIsAddEditModalOpen(true);
   };
@@ -215,8 +225,17 @@ export const TrucksView: React.FC = () => {
             onClick={handleOpenAddModal}
             className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg shadow-sm transition-colors cursor-pointer self-start sm:self-auto"
           >
-            <Plus className="w-4 h-4" />
-            <span>Add Truck Unit</span>
+            {clients.length === 0 ? (
+              <>
+                <Building2 className="w-4 h-4" />
+                <span>Add Client</span>
+              </>
+            ) : (
+              <>
+                <Plus className="w-4 h-4" />
+                <span>Add Truck Unit</span>
+              </>
+            )}
           </button>
         )}
       </div>
@@ -236,6 +255,7 @@ export const TrucksView: React.FC = () => {
         canEdit={canEdit}
         canDelete={canDelete}
         togglingTruckId={togglingTruckId}
+        onNavigateToClients={() => onNavigate?.('clients')}
       />
 
       {/* Add / Edit Truck Modal */}

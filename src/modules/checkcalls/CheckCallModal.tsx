@@ -114,7 +114,7 @@ export const CheckCallModal: React.FC<CheckCallModalProps> = ({
     }
   }, [isOpen, initialCheckCall, initialCallType, initialStatus, load, profile]);
 
-  if (!isOpen || !load) return null;
+  if (!isOpen || (!load && !initialCheckCall)) return null;
 
   const isException = callType === 'delay' || callType === 'breakdown' || status === 'delayed' || status === 'at_risk';
 
@@ -161,6 +161,10 @@ export const CheckCallModal: React.FC<CheckCallModalProps> = ({
           notes: trimmedNotes || null,
         } as UpdateCheckCallInput);
       } else {
+        if (!load) {
+          setValidationError('A valid load is required to create a check call.');
+          return;
+        }
         await onSubmit({
           load_id: load.id,
           call_type: callType,
@@ -188,7 +192,11 @@ export const CheckCallModal: React.FC<CheckCallModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title={isEditing ? 'Edit Dispatch Check Call' : 'Log Dispatch Check Call'}
-      subtitle={`Load ${load.load_number} • ${load.origin_city}, ${load.origin_state} → ${load.dest_city}, ${load.dest_state}`}
+      subtitle={
+        load
+          ? `Load ${load.load_number} • ${load.origin_city}, ${load.origin_state} → ${load.dest_city}, ${load.dest_state}`
+          : `Check Call #${initialCheckCall?.id || ''}`
+      }
       maxWidth="lg"
     >
       <form onSubmit={handleSubmit} className="space-y-4 text-xs text-slate-200">

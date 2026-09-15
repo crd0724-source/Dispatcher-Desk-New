@@ -11,6 +11,8 @@ import {
   DocumentType,
   DocumentStatus,
   NoteType,
+  PlanType,
+  BillingState,
 } from './database.types.ts';
 
 export type Organization = Database['public']['Tables']['organizations']['Row'];
@@ -23,6 +25,9 @@ export type Driver = Database['public']['Tables']['drivers']['Row'];
 export type Load = Database['public']['Tables']['loads']['Row'];
 export type Document = Database['public']['Tables']['documents']['Row'];
 export type ActivityNote = Database['public']['Tables']['activity_notes']['Row'];
+export type Subscription = Database['public']['Tables']['subscriptions']['Row'];
+export type TruckActivationHistory = Database['public']['Tables']['truck_activation_history']['Row'];
+export type BillingPaymentTransaction = Database['public']['Tables']['billing_payment_transactions']['Row'];
 
 export type {
   UserRole,
@@ -36,6 +41,8 @@ export type {
   DocumentType,
   DocumentStatus,
   NoteType,
+  PlanType,
+  BillingState,
 };
 
 // Rich Joined Load for UI grids & pipeline
@@ -102,6 +109,8 @@ export interface TeamInvitation {
   organization_name?: string;
   email: string;
   role: UserRole;
+  driver_id?: string | null;
+  driver_name?: string | null;
   invited_by_user_id?: string | null;
   invited_by_name?: string | null;
   token_hash?: string;
@@ -121,4 +130,20 @@ export interface SupportedTimezone {
   label: string; // e.g. 'Central Time (CST/CDT)'
   code: string; // e.g. 'CT'
   region: 'US' | 'Canada' | 'India';
+}
+
+export interface SubscriptionUsageSummary {
+  organization_id: string;
+  plan: PlanType;
+  billing_state: BillingState;
+  billing_period_key: string;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  trial_starts_at: string | null;
+  trial_ends_at: string | null;
+  is_trial: boolean;
+  is_trial_expired: boolean;
+  amt_usage: number;
+  amt_capacity: number;
+  remaining_amt_slots: number;
 }

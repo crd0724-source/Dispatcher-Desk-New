@@ -13,6 +13,7 @@ export interface BrokerPerformanceMetrics {
 
 export interface BrokerWithPerformance extends Broker {
   performance?: BrokerPerformanceMetrics;
+  status?: BrokerStatus;
 }
 
 export interface CreateBrokerInput {

@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { Load, DocumentType, DocumentStatus } from '../../types/domain.types.ts';
+import React, { useState, useRef, useEffect } from 'react';
+import { Load, DocumentType, DocumentStatus, Client, Driver, Truck, Broker } from '../../types/domain.types.ts';
 import {
   CreateDocumentInput,
   DOCUMENT_TYPE_LABELS,
@@ -19,13 +19,22 @@ import {
   X,
   Building2,
   AlertTriangle,
+  User,
+  Truck as TruckIcon,
+  Briefcase,
 } from 'lucide-react';
+
+export type DocumentRelationType = 'load' | 'client' | 'driver' | 'truck' | 'broker' | 'general';
 
 interface DocumentUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
   onUpload: (input: CreateDocumentInput, file?: File) => Promise<void>;
   loads: Load[];
+  clients?: Client[];
+  drivers?: Driver[];
+  trucks?: Truck[];
+  brokers?: Broker[];
   initialLoadId?: string;
   initialDocType?: DocumentType;
   isUploading?: boolean;
@@ -37,12 +46,25 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   onClose,
   onUpload,
   loads,
+  clients = [],
+  drivers = [],
+  trucks = [],
+  brokers = [],
   initialLoadId,
   initialDocType = 'rate_confirmation',
   isUploading = false,
   onOpenAIExtraction,
 }) => {
+  const [relationType, setRelationType] = useState<DocumentRelationType>(() => {
+    if (initialLoadId) return 'load';
+    if (loads.length > 0) return 'load';
+    return 'general';
+  });
   const [selectedLoadId, setSelectedLoadId] = useState<string>(initialLoadId || (loads[0]?.id || ''));
+  const [selectedClientId, setSelectedClientId] = useState<string>('');
+  const [selectedDriverId, setSelectedDriverId] = useState<string>('');
+  const [selectedTruckId, setSelectedTruckId] = useState<string>('');
+  const [selectedBrokerId, setSelectedBrokerId] = useState<string>('');
   const [docType, setDocType] = useState<DocumentType>(initialDocType);
   const [docStatus, setDocStatus] = useState<DocumentStatus>('received');
   const [notes, setNotes] = useState<string>('');
@@ -58,13 +80,14 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Sync initial load if passed
-  React.useEffect(() => {
+  useEffect(() => {
     if (initialLoadId) {
+      setRelationType('load');
       setSelectedLoadId(initialLoadId);
     }
   }, [initialLoadId]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (initialDocType) {
       setDocType(initialDocType);
     }
@@ -126,7 +149,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
     e.preventDefault();
     setErrorMessage(null);
 
-    if (!selectedLoadId) {
+    if (relationType === 'load' && !selectedLoadId) {
       setErrorMessage('Please select a load to associate this paperwork with.');
       return;
     }
@@ -136,16 +159,54 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
       return;
     }
 
+    let finalLoadId: string | null = null;
+    let entityContext = '';
+
+    if (relationType === 'load') {
+      finalLoadId = selectedLoadId || null;
+    } else if (relationType === 'client') {
+      finalLoadId = null;
+      const client = clients.find((c) => c.id === selectedClientId);
+      if (client) {
+        entityContext = `[Client: ${client.company_name}]`;
+      }
+    } else if (relationType === 'driver') {
+      finalLoadId = null;
+      const driver = drivers.find((d) => d.id === selectedDriverId);
+      if (driver) {
+        entityContext = `[Driver: ${driver.full_name}]`;
+      }
+    } else if (relationType === 'truck') {
+      finalLoadId = null;
+      const truck = trucks.find((t) => t.id === selectedTruckId);
+      if (truck) {
+        entityContext = `[Truck: #${truck.truck_number}]`;
+      }
+    } else if (relationType === 'broker') {
+      finalLoadId = null;
+      const broker = brokers.find((b) => b.id === selectedBrokerId);
+      if (broker) {
+        entityContext = `[Broker: ${broker.company_name}]`;
+      }
+    } else {
+      finalLoadId = null;
+    }
+
+    const trimmedNotes = notes.trim();
+    const finalNotes = entityContext
+      ? (trimmedNotes ? `${entityContext} ${trimmedNotes}` : entityContext)
+      : (trimmedNotes || null);
+
     try {
       await onUpload(
         {
-          load_id: selectedLoadId,
+          load_id: finalLoadId,
           doc_type: docType,
           doc_status: docStatus,
           file_name: selectedFile.name,
           file_size_bytes: selectedFile.size,
           mime_type: selectedFile.type,
-          notes: notes.trim() || null,
+          notes: finalNotes,
           uploaded_by: 'Dispatcher',
         },
         rawFile || undefined
@@ -181,32 +242,186 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
           </div>
         )}
 
-        {/* Load Selector */}
+        {/* Relation Type Selector */}
         <div className="space-y-1.5">
-          <label htmlFor="doc-load-select" className="block text-slate-300 font-semibold">
-            Associated Dispatch Load <span className="text-rose-400">*</span>
+          <label className="block text-slate-300 font-semibold">
+            Associate Paperwork With
           </label>
-          <select
-            id="doc-load-select"
-            value={selectedLoadId}
-            onChange={(e) => setSelectedLoadId(e.target.value)}
-            required
-            className="w-full h-9 px-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 cursor-pointer"
-          >
-            <option value="">-- Select a Load --</option>
-            {loads.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.load_number} ({l.origin_state} &rarr; {l.dest_state}) • {l.pipeline_status.toUpperCase()}
-              </option>
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+            {[
+              { type: 'load' as const, label: 'Load' },
+              { type: 'client' as const, label: 'Client' },
+              { type: 'driver' as const, label: 'Driver' },
+              { type: 'truck' as const, label: 'Truck' },
+              { type: 'broker' as const, label: 'Broker' },
+              { type: 'general' as const, label: 'General' },
+            ].map((item) => (
+              <button
+                key={item.type}
+                type="button"
+                id={`relation-type-${item.type}`}
+                onClick={() => setRelationType(item.type)}
+                className={`py-1.5 px-2 text-xs font-semibold rounded-lg border transition-all text-center cursor-pointer truncate ${
+                  relationType === item.type
+                    ? 'bg-indigo-600 border-indigo-500 text-white shadow-xs'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                }`}
+              >
+                {item.label}
+              </button>
             ))}
-          </select>
-          {selectedLoad && (
-            <p className="text-[11px] text-slate-400 font-sans">
-              Lane: {selectedLoad.origin_city}, {selectedLoad.origin_state} &rarr;{' '}
-              {selectedLoad.dest_city}, {selectedLoad.dest_state}
-            </p>
-          )}
+          </div>
         </div>
+
+        {/* Load Selector */}
+        {relationType === 'load' && (
+          <div className="space-y-1.5">
+            <label htmlFor="doc-load-select" className="block text-slate-300 font-semibold">
+              Associated Dispatch Load <span className="text-rose-400">*</span>
+            </label>
+            <select
+              id="doc-load-select"
+              value={selectedLoadId}
+              onChange={(e) => setSelectedLoadId(e.target.value)}
+              required
+              className="w-full h-9 px-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="">-- Select a Load --</option>
+              {loads.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.load_number} ({l.origin_state} &rarr; {l.dest_state}) • {l.pipeline_status.toUpperCase()}
+                </option>
+              ))}
+            </select>
+            {selectedLoad && (
+              <p className="text-[11px] text-slate-400 font-sans">
+                Lane: {selectedLoad.origin_city}, {selectedLoad.origin_state} &rarr;{' '}
+                {selectedLoad.dest_city}, {selectedLoad.dest_state}
+              </p>
+            )}
+            {loads.length === 0 && (
+              <p className="text-[11px] text-amber-400 font-sans">
+                No loads found. You can choose another relation type or upload as General / Unrelated.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Client Selector */}
+        {relationType === 'client' && (
+          <div className="space-y-1.5">
+            <label htmlFor="doc-client-select" className="block text-slate-300 font-semibold">
+              Associated Carrier Client
+            </label>
+            <select
+              id="doc-client-select"
+              value={selectedClientId}
+              onChange={(e) => setSelectedClientId(e.target.value)}
+              className="w-full h-9 px-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="">-- Select a Carrier Client --</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.company_name} ({c.client_type.replace('_', ' ')})
+                </option>
+              ))}
+            </select>
+            {clients.length === 0 && (
+              <p className="text-[11px] text-amber-400 font-sans">
+                No carrier clients found. Document will be recorded with standalone intake.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Driver Selector */}
+        {relationType === 'driver' && (
+          <div className="space-y-1.5">
+            <label htmlFor="doc-driver-select" className="block text-slate-300 font-semibold">
+              Associated Driver
+            </label>
+            <select
+              id="doc-driver-select"
+              value={selectedDriverId}
+              onChange={(e) => setSelectedDriverId(e.target.value)}
+              className="w-full h-9 px-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="">-- Select a Driver --</option>
+              {drivers.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.full_name} {d.phone ? `(${d.phone})` : ''}
+                </option>
+              ))}
+            </select>
+            {drivers.length === 0 && (
+              <p className="text-[11px] text-amber-400 font-sans">
+                No drivers registered yet. Document will be recorded with standalone intake.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Truck Selector */}
+        {relationType === 'truck' && (
+          <div className="space-y-1.5">
+            <label htmlFor="doc-truck-select" className="block text-slate-300 font-semibold">
+              Associated Truck / Equipment
+            </label>
+            <select
+              id="doc-truck-select"
+              value={selectedTruckId}
+              onChange={(e) => setSelectedTruckId(e.target.value)}
+              className="w-full h-9 px-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="">-- Select a Truck --</option>
+              {trucks.map((t) => (
+                <option key={t.id} value={t.id}>
+                  Truck #{t.truck_number} ({t.equipment_type}) {t.vin ? `• VIN ${t.vin.slice(-6)}` : ''}
+                </option>
+              ))}
+            </select>
+            {trucks.length === 0 && (
+              <p className="text-[11px] text-amber-400 font-sans">
+                No trucks registered yet. Document will be recorded with standalone intake.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Broker Selector */}
+        {relationType === 'broker' && (
+          <div className="space-y-1.5">
+            <label htmlFor="doc-broker-select" className="block text-slate-300 font-semibold">
+              Associated Broker / Shipper
+            </label>
+            <select
+              id="doc-broker-select"
+              value={selectedBrokerId}
+              onChange={(e) => setSelectedBrokerId(e.target.value)}
+              className="w-full h-9 px-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="">-- Select a Broker --</option>
+              {brokers.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.company_name} {b.mc_number ? `(MC #${b.mc_number})` : ''}
+                </option>
+              ))}
+            </select>
+            {brokers.length === 0 && (
+              <p className="text-[11px] text-amber-400 font-sans">
+                No brokers listed yet. Document will be recorded with standalone intake.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* General / Unrelated */}
+        {relationType === 'general' && (
+          <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 text-slate-400 text-xs flex items-center gap-2">
+            <FileText className="w-4 h-4 text-slate-400 shrink-0" />
+            <span>Uploading as a general standalone document without entity association.</span>
+          </div>
+        )}
 
         {/* Document Type & Initial Status */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -377,7 +592,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
           </button>
           <button
             type="submit"
-            disabled={isUploading || !selectedFile || !selectedLoadId}
+            disabled={isUploading || !selectedFile || (relationType === 'load' && !selectedLoadId)}
             className="h-9 inline-flex items-center gap-2 px-5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-xs transition-colors cursor-pointer"
           >
             <Upload className="w-4 h-4" />
