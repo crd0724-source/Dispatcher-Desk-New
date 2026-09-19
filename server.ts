@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
+import { PDFParse } from 'pdf-parse';
 import { parseRateConfirmationText } from './src/modules/documents/rateConParser.ts';
 import { RazorpayAdapter } from './src/server/billing/providers/RazorpayAdapter.ts';
 import { BillingOrchestrator } from './src/server/billing/billingOrchestrator.ts';
@@ -14,13 +15,28 @@ const app = express();
 const PORT = 3000;
 
 // Helper to extract text from documentText or buffer
-function extractTextFromPayload(documentText?: string, fileData?: string): string {
+async function extractTextFromPayload(documentText?: string, fileData?: string): Promise<string> {
   if (documentText && documentText.trim()) {
     return documentText.trim();
   }
   if (fileData) {
     try {
       const buffer = Buffer.from(fileData, 'base64');
+      const isPdf = buffer.subarray(0, 5).toString('ascii') === '%PDF-';
+
+      if (isPdf) {
+        const parser = new PDFParse({ data: buffer });
+        try {
+          const result = await parser.getText();
+          const text = result.text?.trim();
+          if (text) {
+            return text;
+          }
+        } finally {
+          await parser.destroy();
+        }
+      }
+
       const raw = buffer.toString('utf-8');
       const printable = raw.replace(/[^\x20-\x7E\n\r\t]/g, ' ');
       if (printable.length > 50 && (printable.includes('RATE') || printable.includes('LOAD') || printable.includes('Broker') || printable.includes('APX') || printable.includes('BlueLine'))) {
@@ -1377,7 +1393,7 @@ ${documentText ? `Document Text:\n"""\n${documentText}\n"""` : 'Document is atta
 
       // If all Gemini attempts encountered upstream spikes (e.g. 503 / 429), fall back to deterministic regex parser
       console.warn('All live AI OCR models unavailable or high demand. Falling back to deterministic extraction parser.', lastError?.message);
-      const textToParse = extractTextFromPayload(documentText, fileData);
+      const textToParse = await extractTextFromPayload(documentText, fileData);
       const fallbackData = parseRateConfirmationText(textToParse, fileName);
       return res.json({
         success: true,
@@ -1389,7 +1405,7 @@ ${documentText ? `Document Text:\n"""\n${documentText}\n"""` : 'Document is atta
     }
 
     // Fallback deterministic extraction for offline/demo simulation if GEMINI_API_KEY is not set
-    const textToParse = extractTextFromPayload(documentText, fileData);
+    const textToParse = await extractTextFromPayload(documentText, fileData);
     const fallbackData = parseRateConfirmationText(textToParse, fileName);
     return res.json({
       success: true,
