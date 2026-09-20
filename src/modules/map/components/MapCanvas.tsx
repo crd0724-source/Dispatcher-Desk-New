@@ -19,27 +19,65 @@ import {
 
 // Safeguard Leaflet against uncaught "Cannot read properties of undefined (reading '_leaflet_pos')"
 // which occurs when React updates/unmounts DOM nodes during active Leaflet animations or transitions.
-if (typeof window !== 'undefined' && L && L.DomUtil) {
-  const origGetPosition = L.DomUtil.getPosition;
-  L.DomUtil.getPosition = function (el: HTMLElement | undefined | null) {
-    if (!el) return new L.Point(0, 0);
-    try {
-      return origGetPosition.call(L.DomUtil, el) || (el as any)._leaflet_pos || new L.Point(0, 0);
-    } catch {
-      return (el as any)?._leaflet_pos || new L.Point(0, 0);
-    }
-  };
+if (typeof window !== 'undefined' && L) {
+  if (L.DomUtil) {
+    const origGetPosition = L.DomUtil.getPosition;
+    L.DomUtil.getPosition = function (el: HTMLElement | undefined | null) {
+      if (!el) return new L.Point(0, 0);
+      try {
+        return origGetPosition.call(L.DomUtil, el) || (el as any)._leaflet_pos || new L.Point(0, 0);
+      } catch {
+        return (el as any)?._leaflet_pos || new L.Point(0, 0);
+      }
+    };
 
-  const origSetPosition = L.DomUtil.setPosition;
-  L.DomUtil.setPosition = function (el: HTMLElement | undefined | null, point: L.Point) {
-    if (!el) return;
-    try {
-      origSetPosition.call(L.DomUtil, el, point);
-    } catch {
-      if (el) (el as any)._leaflet_pos = point;
-    }
-  };
+    const origSetPosition = L.DomUtil.setPosition;
+    L.DomUtil.setPosition = function (el: HTMLElement | undefined | null, point: L.Point) {
+      if (!el) return;
+      try {
+        origSetPosition.call(L.DomUtil, el, point);
+      } catch {
+        if (el) (el as any)._leaflet_pos = point;
+      }
+    };
+  }
 
+  // Guard Map pane access
+  if (L.Map && (L.Map.prototype as any)._getMapPanePos) {
+    const origGetMapPanePos = (L.Map.prototype as any)._getMapPanePos;
+    (L.Map.prototype as any)._getMapPanePos = function () {
+      if (!this._mapPane) return new L.Point(0, 0);
+      try {
+        return origGetMapPanePos.call(this) || new L.Point(0, 0);
+      } catch {
+        return new L.Point(0, 0);
+      }
+    };
+  }
+
+  // Guard PosAnimation
+  if (L.PosAnimation && (L.PosAnimation.prototype as any).run) {
+    const origPosAnimRun = (L.PosAnimation.prototype as any).run;
+    (L.PosAnimation.prototype as any).run = function (el: any, newPos: any, duration: any, easeLinearity: any) {
+      if (!el) return;
+      try {
+        origPosAnimRun.call(this, el, newPos, duration, easeLinearity);
+      } catch {}
+    };
+  }
+
+  // Guard Draggable
+  if (L.Draggable && (L.Draggable.prototype as any)._onDown) {
+    const origDraggableOnDown = (L.Draggable.prototype as any)._onDown;
+    (L.Draggable.prototype as any)._onDown = function (e: any) {
+      if (!this._element) return;
+      try {
+        origDraggableOnDown.call(this, e);
+      } catch {}
+    };
+  }
+
+  // Guard Marker positions and zoom animations
   if (L.Marker && (L.Marker.prototype as any)._setPos) {
     const origMarkerSetPos = (L.Marker.prototype as any)._setPos;
     (L.Marker.prototype as any)._setPos = function (pos: any) {
@@ -60,14 +98,37 @@ if (typeof window !== 'undefined' && L && L.DomUtil) {
     };
   }
 
-  if (L.Popup && (L.Popup.prototype as any)._animateZoom) {
+  // Guard Popup animations and pan adjustment
+  if (L.Popup && L.Popup.prototype) {
     const origPopupAnimateZoom = (L.Popup.prototype as any)._animateZoom;
-    (L.Popup.prototype as any)._animateZoom = function (opt: any) {
-      if (!this._container || !this._map) return;
-      try {
-        origPopupAnimateZoom.call(this, opt);
-      } catch {}
-    };
+    if (origPopupAnimateZoom) {
+      (L.Popup.prototype as any)._animateZoom = function (opt: any) {
+        if (!this._container || !this._map) return;
+        try {
+          origPopupAnimateZoom.call(this, opt);
+        } catch {}
+      };
+    }
+
+    const origPopupAdjustPan = (L.Popup.prototype as any)._adjustPan;
+    if (origPopupAdjustPan) {
+      (L.Popup.prototype as any)._adjustPan = function () {
+        if (!this._container || !this._map) return;
+        try {
+          origPopupAdjustPan.call(this);
+        } catch {}
+      };
+    }
+
+    const origPopupUpdatePosition = (L.Popup.prototype as any)._updatePosition;
+    if (origPopupUpdatePosition) {
+      (L.Popup.prototype as any)._updatePosition = function () {
+        if (!this._container || !this._map) return;
+        try {
+          origPopupUpdatePosition.call(this);
+        } catch {}
+      };
+    }
   }
 }
 
@@ -151,26 +212,34 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
     container.addEventListener('click', handlePopupClick);
 
     // Resize observer to ensure Leaflet renders correctly across layout shifts
-    const resizeObserver = new ResizeObserver(() => {
-      if (mapInstanceRef.current && mapContainerRef.current) {
-        try {
-          map.invalidateSize();
-        } catch {}
+    const resizeObserver = new ResizeObserver((entries) => {
+      if (!mapInstanceRef.current || !mapContainerRef.current) return;
+      const entry = entries[0];
+      if (entry && entry.contentRect) {
+        if (entry.contentRect.width <= 0 || entry.contentRect.height <= 0) {
+          return;
+        }
       }
+      try {
+        mapInstanceRef.current.invalidateSize({ pan: false, debounceMoveend: true });
+      } catch {}
     });
     resizeObserver.observe(container);
 
     return () => {
       container.removeEventListener('click', handlePopupClick);
       resizeObserver.disconnect();
-      try {
-        map.stop();
-        map.closePopup();
-        if (layerGroupRef.current) layerGroupRef.current.clearLayers();
-        if (polylineGroupRef.current) polylineGroupRef.current.clearLayers();
-        map.remove();
-      } catch (err) {
-        console.warn('Map cleanup error:', err);
+      if (mapInstanceRef.current) {
+        const map = mapInstanceRef.current;
+        try {
+          map.stop();
+          map.closePopup();
+          if (layerGroupRef.current) layerGroupRef.current.clearLayers();
+          if (polylineGroupRef.current) polylineGroupRef.current.clearLayers();
+          map.remove();
+        } catch (err) {
+          console.warn('Map cleanup error:', err);
+        }
       }
       mapInstanceRef.current = null;
     };
@@ -211,6 +280,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
 
     if (allPoints.length > 0) {
       try {
+        map.stop();
         const bounds = L.latLngBounds(allPoints);
         map.fitBounds(bounds, {
           padding: [50, 50],
@@ -317,6 +387,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
 
     const stopCoords: L.LatLngExpression[] = selectedRoute.stops.map((s) => [s.lat, s.lng]);
     try {
+      map.stop();
       if (stopCoords.length === 1) {
         map.flyTo(stopCoords[0], 9, { animate: true });
       } else if (stopCoords.length > 1) {

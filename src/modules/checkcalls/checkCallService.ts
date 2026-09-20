@@ -33,6 +33,34 @@ function isUUID(str?: string | null): boolean {
   return Boolean(str && UUID_REGEX.test(str.trim()));
 }
 
+/**
+ * Determines whether a load is in scope for active check-in tracking & stale evaluation.
+ * - in_transit: always in scope (tracked)
+ * - booked + pickup_datetime <= now: in scope (tracked)
+ * - booked + pickup_datetime > now: NOT in scope (future pickup, not tracked)
+ * - booked + no pickup_datetime: in scope (existing behavior preserved)
+ * - all other statuses: NOT in scope
+ */
+export function isLoadActiveForCheckInTracking(load: {
+  pipeline_status: string;
+  pickup_datetime?: string | null;
+}): boolean {
+  if (load.pipeline_status === 'in_transit') {
+    return true;
+  }
+  if (load.pipeline_status === 'booked') {
+    if (!load.pickup_datetime) {
+      return true;
+    }
+    const pickupTime = new Date(load.pickup_datetime).getTime();
+    if (isNaN(pickupTime)) {
+      return true;
+    }
+    return pickupTime <= Date.now();
+  }
+  return false;
+}
+
 // Initial realistic seed check calls for demo organization
 const SEED_CHECK_CALLS: Omit<CheckCall, 'organization_id'>[] = [
   {
@@ -592,10 +620,10 @@ class CheckCallService implements ICheckCallService {
     }
 
     // Determine if load is missing a recent check-in (>24 hours for booked or in_transit)
-    const isBookedOrInTransit = load.pipeline_status === 'booked' || load.pipeline_status === 'in_transit';
+    const isTracked = isLoadActiveForCheckInTracking(load);
     let isMissingRecentCheckIn = false;
 
-    if (isBookedOrInTransit) {
+    if (isTracked) {
       if (!latest) {
         isMissingRecentCheckIn = true;
       } else {
@@ -629,9 +657,7 @@ class CheckCallService implements ICheckCallService {
       loadService.getLoads(organizationId),
     ]);
 
-    const activeLoads = allLoads.filter(
-      (l) => l.pipeline_status === 'booked' || l.pipeline_status === 'in_transit'
-    );
+    const activeLoads = allLoads.filter((l) => isLoadActiveForCheckInTracking(l));
 
     let onTimeCount = 0;
     let delayedCount = 0;
@@ -680,9 +706,7 @@ class CheckCallService implements ICheckCallService {
       this.getCheckCalls(organizationId),
     ]);
 
-    const activeLoads = allLoads.filter(
-      (l) => l.pipeline_status === 'booked' || l.pipeline_status === 'in_transit'
-    );
+    const activeLoads = allLoads.filter((l) => isLoadActiveForCheckInTracking(l));
 
     const twentyFourHoursAgoMs = Date.now() - 24 * 3600000;
 

@@ -51,7 +51,8 @@ const MainApp: React.FC = () => {
     isLoading,
   } = useAuth();
 
-  const isAuthenticated = Boolean(user);
+  const isEmailVerified = !user?.email || Boolean(user?.email_confirmed_at || (user as any)?.confirmed_at);
+  const isAuthenticated = Boolean(user && isEmailVerified);
 
   const [activeModule, setActiveModule] =
     useState<NavModule>('dashboard');
@@ -101,7 +102,7 @@ const MainApp: React.FC = () => {
     /*
      * Authenticated users always enter the application shell.
      */
-    if (user) {
+    if (user && isEmailVerified) {
       setCurrentView('app');
 
       try {
@@ -112,9 +113,9 @@ const MainApp: React.FC = () => {
       } catch {
         // ignore
       }
-    } else if (prevUserRef.current && !user) {
+    } else if (prevUserRef.current && (!user || !isEmailVerified)) {
       /*
-       * User logged out:
+       * User logged out or unverified:
        * return to public landing page and clear stale app preference.
        */
       setCurrentView('landing');
@@ -141,7 +142,7 @@ const MainApp: React.FC = () => {
     }
 
     prevUserRef.current = user;
-  }, [user]);
+  }, [user, isEmailVerified]);
 
   /*
    * Launch Workspace:
@@ -181,6 +182,7 @@ const MainApp: React.FC = () => {
   useEffect(() => {
     if (
       user &&
+      isEmailVerified &&
       !isLoading &&
       !isDriver &&
       userRole !== 'driver' &&
@@ -192,6 +194,7 @@ const MainApp: React.FC = () => {
     }
   }, [
     user,
+    isEmailVerified,
     isLoading,
     isDriver,
     userRole,
@@ -201,7 +204,7 @@ const MainApp: React.FC = () => {
 
   // Resume support: Check if the user is in an active, uncompleted first-time onboarding for this org
   useEffect(() => {
-    if (!activeOrganization) {
+    if (!activeOrganization || !isEmailVerified) {
       setIsInFirstTimeOnboarding(false);
       return;
     }
@@ -233,6 +236,7 @@ const MainApp: React.FC = () => {
   }, [
     user?.id,
     activeOrganization?.id,
+    isEmailVerified,
   ]);
 
   // Auto-dismiss toast after 6 seconds
@@ -250,6 +254,10 @@ const MainApp: React.FC = () => {
   const handleOpenCreateOrg = (
     isFirst: boolean = false
   ) => {
+    if (isFirst && !isEmailVerified) {
+      setIsAuthModalOpen(true);
+      return;
+    }
     setIsFirstOrgModal(isFirst);
     setIsOnboardingModalOpen(true);
   };
@@ -259,6 +267,10 @@ const MainApp: React.FC = () => {
     isFirst: boolean
   ) => {
     if (isFirst) {
+      if (!isEmailVerified) {
+        console.warn('Blocked organization onboarding: Email is not verified.');
+        return;
+      }
       // First-time onboarding: Start FirstTimeOnboardingView, do NOT show Dashboard
       setIsInFirstTimeOnboarding(true);
 
@@ -725,6 +737,8 @@ const MainApp: React.FC = () => {
           onClose={() =>
             setIsAuthModalOpen(false)
           }
+          initialEmail={user && !isEmailVerified ? user.email : undefined}
+          initialStep={user && !isEmailVerified ? 'verify_email' : 'auth'}
           onSuccessSignUp={() => {
             setCurrentView('app');
             handleOpenCreateOrg(

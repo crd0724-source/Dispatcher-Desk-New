@@ -602,6 +602,42 @@ class LocalDriverService implements IDriverService {
     return this.joinRelations(rawDriver, clients, trucks);
   }
 
+  private async attemptResolvePhoneConflict(
+    organizationId: string,
+    phone: string,
+    driverData: Record<string, any>,
+    driverId?: string
+  ): Promise<Driver | null> {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      const res = await fetch('/api/drivers/resolve-conflict', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          'x-organization-id': organizationId,
+        },
+        body: JSON.stringify({
+          organizationId,
+          phone,
+          driverData,
+          driverId,
+          action: 'transfer',
+        }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && result.driver) {
+          return result.driver as Driver;
+        }
+      }
+    } catch (resolveErr) {
+      console.warn('[DriverService] Phone conflict resolution attempt failed:', resolveErr);
+    }
+    return null;
+  }
+
   async createDriver(organizationId: string, input: CreateDriverInput): Promise<DriverWithRelations> {
     const [clients, trucks] = await Promise.all([
       this.getClients(organizationId),
@@ -650,6 +686,34 @@ class LocalDriverService implements IDriverService {
         .single();
 
       if (error) {
+        const isDuplicatePhone =
+          error.code === '23505' &&
+          (error.message?.includes('uq_drivers_active_normalized_phone') ||
+            (error as any).details?.includes('uq_drivers_active_normalized_phone'));
+
+        if (isDuplicatePhone && input.phone?.trim()) {
+          console.warn('[DriverService] Active driver phone collision detected, attempting automated conflict resolution...');
+          const resolvedDriver = await this.attemptResolvePhoneConflict(
+            organizationId,
+            input.phone.trim(),
+            {
+              ...input,
+              pay_rate: payRateNum,
+            }
+          );
+
+          if (resolvedDriver) {
+            return this.joinRelations(resolvedDriver, clients, trucks);
+          }
+
+          const friendlyError = new Error(
+            `Phone number "${input.phone}" is already registered to an active driver profile. Please use a different phone number or leave the phone field blank.`
+          );
+          (friendlyError as any).code = '23505';
+          (friendlyError as any).field = 'phone';
+          throw friendlyError;
+        }
+
         console.error('[DriverService] Supabase createDriver error:', error);
         throw new Error(error.message || 'Failed to create driver in database.');
       }
@@ -785,6 +849,35 @@ class LocalDriverService implements IDriverService {
         .single();
 
       if (error) {
+        const isDuplicatePhone =
+          error.code === '23505' &&
+          (error.message?.includes('uq_drivers_active_normalized_phone') ||
+            (error as any).details?.includes('uq_drivers_active_normalized_phone'));
+
+        if (isDuplicatePhone && input.phone?.trim()) {
+          console.warn('[DriverService] Active driver phone collision detected on update, attempting automated conflict resolution...');
+          const resolvedDriver = await this.attemptResolvePhoneConflict(
+            organizationId,
+            input.phone.trim(),
+            {
+              ...input,
+              pay_rate: input.pay_rate !== undefined ? Number(input.pay_rate) : undefined,
+            },
+            id
+          );
+
+          if (resolvedDriver) {
+            return this.joinRelations(resolvedDriver, clients, trucks);
+          }
+
+          const friendlyError = new Error(
+            `Phone number "${input.phone}" is already registered to an active driver profile. Please use a different phone number or leave the phone field blank.`
+          );
+          (friendlyError as any).code = '23505';
+          (friendlyError as any).field = 'phone';
+          throw friendlyError;
+        }
+
         console.error('[DriverService] Supabase updateDriver error:', error);
         throw new Error(error.message || 'Failed to update driver in database.');
       }

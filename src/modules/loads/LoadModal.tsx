@@ -21,8 +21,12 @@ import { Modal } from '../../components/common/Modal.tsx';
 import { LoadProfitabilityCard } from './LoadProfitabilityCard.tsx';
 import { estimateDriverPay, estimateFuelCost, formatCurrency } from '../../lib/calculations.ts';
 import { extractionService } from '../documents/extractionService.ts';
+import { brokerService } from '../brokers/brokerService.ts';
 import { normalizeEquipmentType } from '../documents/rateConParser.ts';
 import { RateConfirmationExtraction, ExtractedBrokerInfo } from '../documents/extractionTypes.ts';
+import { useAuth } from '../../contexts/AuthContext.tsx';
+import { useTimezone } from '../../contexts/TimezoneContext.tsx';
+import { DEFAULT_OPERATIONAL_TIMEZONE } from '../../lib/timezones.ts';
 import {
   Building2,
   Truck as TruckIcon,
@@ -69,25 +73,60 @@ export const TIME_OPTIONS: { value: string; label: string }[] = (() => {
   return options;
 })();
 
-export const toLocalDateString = (d: Date): string => {
+export const toLocalDateString = (d: Date, operationalTimezone: string = DEFAULT_OPERATIONAL_TIMEZONE): string => {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: operationalTimezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(d);
+    const p = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    if (p.year && p.month && p.day) {
+      return `${p.year}-${p.month}-${p.day}`;
+    }
+  } catch {
+    // Fallback if timezone string is invalid
+  }
   const pad = (n: number) => n.toString().padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 
-export const parseDateAndTimeToInputs = (isoString?: string | null): { date: string; time: string } => {
+export const parseDateAndTimeToInputs = (
+  isoString?: string | null,
+  operationalTimezone: string = DEFAULT_OPERATIONAL_TIMEZONE
+): { date: string; time: string } => {
   if (!isoString) return { date: '', time: '' };
   try {
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return { date: '', time: '' };
-    const date = toLocalDateString(d);
-    const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: operationalTimezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(d);
+
+    const p = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    if (!p.year || !p.month || !p.day) return { date: '', time: '' };
+
+    const date = `${p.year}-${p.month}-${p.day}`;
+    const time = `${p.hour || '00'}:${p.minute || '00'}`;
     return { date, time };
   } catch {
     return { date: '', time: '' };
   }
 };
 
-export const constructIsoDatetime = (dateStr: string, timeStr: string): string | null => {
+export const constructIsoDatetime = (
+  dateStr: string,
+  timeStr: string,
+  operationalTimezone: string = DEFAULT_OPERATIONAL_TIMEZONE
+): string | null => {
   if (!dateStr || !dateStr.trim()) return null;
   const time = (timeStr && timeStr.trim()) ? timeStr.trim() : '00:00';
   const [yearStr, monthStr, dayStr] = dateStr.trim().split('-');
@@ -99,10 +138,57 @@ export const constructIsoDatetime = (dateStr: string, timeStr: string): string |
   const [hourStr, minuteStr] = time.split(':');
   const hour = parseInt(hourStr || '0', 10);
   const minute = parseInt(minuteStr || '0', 10);
+  if (isNaN(hour) || isNaN(minute)) return null;
 
-  const dateObj = new Date(year, month - 1, day, isNaN(hour) ? 0 : hour, isNaN(minute) ? 0 : minute, 0, 0);
-  if (isNaN(dateObj.getTime())) return null;
-  return dateObj.toISOString();
+  // Interpret wall-clock date and time in the operational timezone.
+  // Use Date.UTC to establish a pure UTC reference without browser-local timezone bias.
+  const targetUtcMs = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: operationalTimezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    });
+
+    // Iteratively resolve for the exact UTC ms that formats to the desired wall-clock time in operationalTimezone
+    let guessUtcMs = targetUtcMs;
+    for (let i = 0; i < 3; i++) {
+      const parts = formatter.formatToParts(new Date(guessUtcMs));
+      const p = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+      const renderedYear = parseInt(p.year, 10);
+      const renderedMonth = parseInt(p.month, 10);
+      const renderedDay = parseInt(p.day, 10);
+      const renderedHour = parseInt(p.hour, 10);
+      const renderedMinute = parseInt(p.minute, 10);
+
+      const renderedAsUtcMs = Date.UTC(
+        renderedYear,
+        renderedMonth - 1,
+        renderedDay,
+        renderedHour,
+        renderedMinute,
+        0,
+        0
+      );
+      const diff = renderedAsUtcMs - targetUtcMs;
+      guessUtcMs -= diff;
+      if (diff === 0) break;
+    }
+
+    const finalDate = new Date(guessUtcMs);
+    if (isNaN(finalDate.getTime())) return null;
+    return finalDate.toISOString();
+  } catch {
+    // Fallback if operationalTimezone is unrecognized
+    const fallbackDate = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0));
+    return isNaN(fallbackDate.getTime()) ? null : fallbackDate.toISOString();
+  }
 };
 
 export interface LoadScheduleInput {
@@ -123,10 +209,11 @@ export interface DerivedLoadSchedule {
  * Single source of truth for deriving ISO timestamps directly from current UI selector values.
  */
 export const deriveLoadScheduleFromInputs = (
-  schedule: LoadScheduleInput
+  schedule: LoadScheduleInput,
+  operationalTimezone: string = DEFAULT_OPERATIONAL_TIMEZONE
 ): DerivedLoadSchedule => {
-  const pickup_datetime = constructIsoDatetime(schedule.pickupDate, schedule.pickupTime);
-  const delivery_datetime = constructIsoDatetime(schedule.deliveryDate, schedule.deliveryTime);
+  const pickup_datetime = constructIsoDatetime(schedule.pickupDate, schedule.pickupTime, operationalTimezone);
+  const delivery_datetime = constructIsoDatetime(schedule.deliveryDate, schedule.deliveryTime, operationalTimezone);
 
   if (pickup_datetime && delivery_datetime) {
     if (new Date(delivery_datetime).getTime() < new Date(pickup_datetime).getTime()) {
@@ -158,6 +245,7 @@ interface LoadModalProps {
   teamMembers?: TeamMember[];
   nextLoadNumber?: string;
   isSaving?: boolean;
+  organizationId?: string;
 }
 
 interface FormSnapshot {
@@ -202,7 +290,11 @@ export const LoadModal: React.FC<LoadModalProps> = ({
   teamMembers = [],
   nextLoadNumber,
   isSaving = false,
+  organizationId: propOrganizationId,
 }) => {
+  const { activeOrganization } = useAuth();
+  const { operationalTimezone } = useTimezone();
+  const organizationId = propOrganizationId || activeOrganization?.id || 'demo-organization-default';
   const isEditing = !!initialLoad;
 
   // Form State
@@ -262,6 +354,20 @@ export const LoadModal: React.FC<LoadModalProps> = ({
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
+  // Unmatched extracted broker handling
+  const [unmatchedBroker, setUnmatchedBroker] = useState<ExtractedBrokerInfo | null>(null);
+  const [isCreatingBroker, setIsCreatingBroker] = useState(false);
+  const [localBrokers, setLocalBrokers] = useState<Broker[]>([]);
+
+  // Combined brokers list including any broker created on the fly in this modal
+  const allBrokers = useMemo(() => {
+    if (localBrokers.length === 0) return brokers;
+    const map = new Map<string, Broker>();
+    brokers.forEach((b) => map.set(b.id, b));
+    localBrokers.forEach((b) => map.set(b.id, b));
+    return Array.from(map.values());
+  }, [brokers, localBrokers]);
+
   // Reset or populate on open
   useEffect(() => {
     if (!isOpen) return;
@@ -278,6 +384,9 @@ export const LoadModal: React.FC<LoadModalProps> = ({
     setExtractionNotice(null);
     setFormSnapshotBeforeExtraction(null);
     setIsDragOver(false);
+    setUnmatchedBroker(null);
+    setIsCreatingBroker(false);
+    setLocalBrokers([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -306,7 +415,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
       setOriginZip(initialLoad.origin_zip || '');
 
       if (initialLoad.pickup_datetime) {
-        const parsed = parseDateAndTimeToInputs(initialLoad.pickup_datetime);
+        const parsed = parseDateAndTimeToInputs(initialLoad.pickup_datetime, operationalTimezone);
         setPickupDate(parsed.date);
         setPickupTime(parsed.time || '08:00');
       } else {
@@ -321,7 +430,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
       setDestZip(initialLoad.dest_zip || '');
 
       if (initialLoad.delivery_datetime) {
-        const parsed = parseDateAndTimeToInputs(initialLoad.delivery_datetime);
+        const parsed = parseDateAndTimeToInputs(initialLoad.delivery_datetime, operationalTimezone);
         setDeliveryDate(parsed.date);
         setDeliveryTime(parsed.time || '17:00');
       } else {
@@ -363,24 +472,24 @@ export const LoadModal: React.FC<LoadModalProps> = ({
       const tomorrow = new Date(Date.now() + 86400000);
       const dayAfter = new Date(Date.now() + 2 * 86400000);
 
-      setPickupDate(toLocalDateString(tomorrow));
+      setPickupDate(toLocalDateString(tomorrow, operationalTimezone));
       setPickupTime('08:00');
 
       setDestCity('Atlanta');
       setDestState('GA');
       setDestZip('30301');
-      setDeliveryDate(toLocalDateString(dayAfter));
+      setDeliveryDate(toLocalDateString(dayAfter, operationalTimezone));
       setDeliveryTime('17:00');
 
       setRate('2450');
       setLoadedMiles('780');
-      setDeadheadMiles('45');
+      setDeadheadMiles('0');
       setFuelExpense('485');
       setDriverPay('660');
       setOtherExpenses('50');
       setSpecialInstructions('');
     }
-  }, [isOpen, initialLoad?.id]);
+  }, [isOpen, initialLoad?.id, operationalTimezone]);
 
   // Available trucks strictly filtered by selected client
   const availableTrucks = useMemo(() => {
@@ -405,8 +514,8 @@ export const LoadModal: React.FC<LoadModalProps> = ({
 
   // Active broker details for preview
   const selectedBroker = useMemo(() => {
-    return brokers.find((b) => b.id === brokerId) || null;
-  }, [brokers, brokerId]);
+    return allBrokers.find((b) => b.id === brokerId) || null;
+  }, [allBrokers, brokerId]);
 
   // Active driver details for contract calculation
   const selectedDriver = useMemo(() => {
@@ -603,7 +712,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
 
     try {
       // Call EXISTING P0.2 extraction service
-      const result = await extractionService.extractRateConfirmation({ file });
+      const result = await extractionService.extractRateConfirmation({ file, organizationId });
       setExtractionResult(result);
 
       let populatedCount = 0;
@@ -720,7 +829,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
         result.stops?.[0]?.datetime_iso ||
         result.stops?.[0]?.date_string;
       if (rawPickup) {
-        const parsedPickup = parseDateAndTimeToInputs(rawPickup);
+        const parsedPickup = parseDateAndTimeToInputs(rawPickup, operationalTimezone);
         if (parsedPickup.date) {
           setPickupDate(parsedPickup.date);
           if (parsedPickup.time) {
@@ -767,7 +876,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
         result.stops?.[1]?.datetime_iso ||
         result.stops?.[1]?.date_string;
       if (rawDelivery) {
-        const parsedDelivery = parseDateAndTimeToInputs(rawDelivery);
+        const parsedDelivery = parseDateAndTimeToInputs(rawDelivery, operationalTimezone);
         if (parsedDelivery.date) {
           setDeliveryDate(parsedDelivery.date);
           if (parsedDelivery.time) {
@@ -777,12 +886,18 @@ export const LoadModal: React.FC<LoadModalProps> = ({
         }
       }
 
-      // 10. Broker Matching (only when reliable; NEVER creates a new broker; leaves unchanged if no match)
+      // 10. Broker Matching
       if (result.broker) {
-        const matchedBrokerId = matchBrokerFromExtraction(result.broker, brokers);
+        const matchedBrokerId = matchBrokerFromExtraction(result.broker, allBrokers);
         if (matchedBrokerId) {
           setBrokerId(matchedBrokerId);
+          setUnmatchedBroker(null);
           populatedCount++;
+        } else {
+          // Immediately set brokerId(''); do NOT select brokers[0]
+          // Preserve the extracted Broker information for the UI
+          setBrokerId('');
+          setUnmatchedBroker(result.broker);
         }
       }
 
@@ -853,9 +968,50 @@ export const LoadModal: React.FC<LoadModalProps> = ({
     setExtractionError(null);
     setExtractionNotice(null);
     setFormSnapshotBeforeExtraction(null);
+    setUnmatchedBroker(null);
+    setIsCreatingBroker(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
+  };
+
+  // Add & Link newly extracted broker to CRM and current load
+  const handleAddAndLinkBroker = async () => {
+    if (!unmatchedBroker || isCreatingBroker) return;
+    setIsCreatingBroker(true);
+    setSubmitError(null);
+
+    try {
+      const targetOrgId = organizationId || 'demo-organization-default';
+      const createdBroker = await brokerService.createBroker(targetOrgId, {
+        company_name: unmatchedBroker.company_name.trim(),
+        mc_number: unmatchedBroker.mc_number || null,
+        dot_number: unmatchedBroker.dot_number || null,
+        contact_name: unmatchedBroker.contact_name || null,
+        contact_email: unmatchedBroker.contact_email || null,
+        contact_phone: unmatchedBroker.contact_phone || null,
+        payment_terms_days: unmatchedBroker.payment_terms_days || 30,
+        credit_status: 'approved',
+        notes: 'Created via RateCon extraction auto-link',
+      });
+
+      // Add to local brokers list so it is immediately available in dropdown
+      setLocalBrokers((prev) => [...prev, createdBroker]);
+      // Link the new broker ID to this load form
+      setBrokerId(createdBroker.id);
+      // Clear unmatched state
+      setUnmatchedBroker(null);
+    } catch (err: any) {
+      console.error('Failed to create and link broker:', err);
+      setSubmitError(err?.message || 'Failed to add broker. Please select an existing broker or try again.');
+    } finally {
+      setIsCreatingBroker(false);
+    }
+  };
+
+  // Dismiss unmatched broker warning and allow manual selection of existing broker
+  const handleSelectExistingBroker = () => {
+    setUnmatchedBroker(null);
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -916,7 +1072,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
         pickupTime,
         deliveryDate,
         deliveryTime,
-      });
+      }, operationalTimezone);
       if (!schedule.isValid && schedule.validationError) {
         errors.deliveryDate = schedule.validationError;
       }
@@ -941,7 +1097,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
       pickupTime,
       deliveryDate,
       deliveryTime,
-    });
+    }, operationalTimezone);
 
     const payload: CreateLoadInput = {
       load_number: loadNumber.trim().toUpperCase(),
@@ -1292,6 +1448,52 @@ export const LoadModal: React.FC<LoadModalProps> = ({
             <span>2. Freight Broker / Customer</span>
           </div>
 
+          {/* Unmatched Broker Inline Confirmation Area */}
+          {unmatchedBroker && (
+            <div
+              id="unmatched-broker-card"
+              className="p-3 bg-amber-950/40 border border-amber-800/60 rounded-xl text-amber-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in"
+            >
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-semibold text-amber-300">Broker not found in CRM</div>
+                  <div className="font-bold text-slate-100 text-sm mt-0.5">{unmatchedBroker.company_name}</div>
+                  <div className="text-[11px] text-amber-200/80 mt-0.5">
+                    MC: {unmatchedBroker.mc_number || 'N/A'}{unmatchedBroker.dot_number ? ` • DOT: ${unmatchedBroker.dot_number}` : ''}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  id="add-and-link-broker-btn"
+                  type="button"
+                  disabled={isCreatingBroker}
+                  onClick={handleAddAndLinkBroker}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  {isCreatingBroker ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-white" />
+                      <span>Adding Broker...</span>
+                    </>
+                  ) : (
+                    <span>Add & Link Broker</span>
+                  )}
+                </button>
+                <button
+                  id="select-existing-broker-btn"
+                  type="button"
+                  disabled={isCreatingBroker}
+                  onClick={handleSelectExistingBroker}
+                  className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-slate-300 hover:text-white text-xs font-medium rounded-lg border border-slate-700 transition-colors cursor-pointer"
+                >
+                  Select Existing
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-slate-300 font-medium mb-1">
@@ -1300,11 +1502,16 @@ export const LoadModal: React.FC<LoadModalProps> = ({
               <select
                 id="load-broker-select"
                 value={brokerId}
-                onChange={(e) => setBrokerId(e.target.value)}
+                onChange={(e) => {
+                  setBrokerId(e.target.value);
+                  if (e.target.value) {
+                    setUnmatchedBroker(null);
+                  }
+                }}
                 className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
               >
                 <option value="">(No broker linked)</option>
-                {brokers.map((b) => (
+                {allBrokers.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.company_name} {b.mc_number ? `(MC-${b.mc_number})` : ''}
                   </option>

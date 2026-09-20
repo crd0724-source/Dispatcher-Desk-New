@@ -30,7 +30,7 @@ import { EmptyState } from '../../components/common/EmptyState.tsx';
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import { NavModule } from '../../components/layout/Sidebar.tsx';
 import { loadService } from '../loads/loadService.ts';
-import { checkCallService } from '../checkcalls/checkCallService.ts';
+import { checkCallService, isLoadActiveForCheckInTracking } from '../checkcalls/checkCallService.ts';
 import { LoadWithRelations } from '../loads/loadTypes.ts';
 import {
   DocumentStats,
@@ -461,9 +461,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onNewL
         };
 
         // 3. Compute tracking stats and missing check-ins across active loads
-        const activeTrackingLoads = allLoads.filter(
-          (l) => l.pipeline_status === 'booked' || l.pipeline_status === 'in_transit'
-        );
+        const activeTrackingLoads = allLoads.filter((l) => isLoadActiveForCheckInTracking(l));
 
         let onTimeCount = 0;
         let delayedCount = 0;
@@ -1122,7 +1120,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onNewL
                 <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center gap-3">
                   <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
                   <p className="text-xs text-slate-300">
-                    All active loads have verified rate confirmations and delivery paperwork on file!
+                    All active loads have required paperwork uploaded on file.
                   </p>
                 </div>
               ) : (

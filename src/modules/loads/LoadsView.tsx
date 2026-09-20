@@ -23,7 +23,6 @@ import { LoadDetailModal } from './LoadDetailModal.tsx';
 import { BulkAssignTeamMemberModal } from './BulkAssignTeamMemberModal.tsx';
 import { Modal } from '../../components/common/Modal.tsx';
 import { useAuth } from '../../contexts/AuthContext.tsx';
-import { RateConExtractionModal } from '../documents/RateConExtractionModal.tsx';
 import { exportBulkLoadsBillingCsv } from '../billing/utils/billingExportUtils.ts';
 import {
   PackageCheck,
@@ -31,7 +30,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   Trash2,
-  Sparkles,
   FileSpreadsheet,
   Building2,
   Truck as TruckIcon,
@@ -109,7 +107,6 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
   // Modal States
   const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
   const [loadToEdit, setLoadToEdit] = useState<LoadWithRelations | null>(null);
-  const [isExtractionModalOpen, setIsExtractionModalOpen] = useState(false);
 
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [selectedLoadForDetail, setSelectedLoadForDetail] = useState<LoadWithRelations | null>(null);
@@ -229,6 +226,7 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
               {
                 load_id: created.id,
                 doc_type: 'rate_confirmation',
+                doc_status: 'verified', // Dispatcher reviewed and confirmed during Load Booking
                 file_name: rateConFile.name,
                 file_size_bytes: rateConFile.size,
                 mime_type: rateConFile.type || 'application/pdf',
@@ -361,22 +359,6 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
           {canEdit && (
             <div className="flex items-center gap-2">
               <button
-                id="header-ai-ratecon-btn"
-                type="button"
-                onClick={() => {
-                  if (clients.length === 0 && onNavigate) {
-                    onNavigate('clients');
-                    return;
-                  }
-                  setIsExtractionModalOpen(true);
-                }}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 rounded-lg shadow-sm transition-all cursor-pointer border border-indigo-400/30 self-start sm:self-auto"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
-                <span>AI Rate Con Import</span>
-              </button>
-
-              <button
                 id="header-create-load-btn"
                 type="button"
                 onClick={handleCreateLoadClick}
@@ -459,6 +441,7 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
         teamMembers={teamMembers}
         nextLoadNumber={nextLoadNumber}
         isSaving={isSaving}
+        organizationId={orgId}
       />
 
       {/* View Load Details Modal */}
@@ -485,24 +468,6 @@ export const LoadsView: React.FC<LoadsViewProps> = ({
         selectedLoads={loads.filter((l) => selectedLoadIds.includes(l.id))}
         organizationId={orgId}
         onAssigned={handleBulkAssigned}
-      />
-
-      {/* AI Rate Confirmation OCR & Assisted Load Extraction Modal */}
-      <RateConExtractionModal
-        isOpen={isExtractionModalOpen}
-        onClose={() => setIsExtractionModalOpen(false)}
-        organizationId={orgId}
-        loads={loads}
-        clients={clients}
-        brokers={brokers}
-        trucks={trucks}
-        drivers={drivers}
-        onExtractionApplied={async (appliedLoad) => {
-          await fetchData();
-          showToast(`Rate confirmation successfully applied to Load #${appliedLoad.load_number}!`);
-          setSelectedLoadForDetail(appliedLoad);
-          setIsDetailModalOpen(true);
-        }}
       />
 
       {/* Delete Confirmation Modal */}

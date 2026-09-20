@@ -25,6 +25,7 @@ import {
 } from '../accessorials/accessorialService.ts';
 import { AccessorialWithLoad } from '../accessorials/accessorialTypes.ts';
 import { activityService } from '../activity/activityService.ts';
+import { supabase } from '../../lib/supabase.ts';
 
 // Catalog of standard Quick Prompts for Dispatchers
 export const QUICK_PROMPTS: QuickPrompt[] = [
@@ -159,10 +160,38 @@ async function callServerGeminiEndpoint(
   request: AIRequest
 ): Promise<AIResponse | null> {
   try {
+    const orgId =
+      context.organizationId ||
+      (() => {
+        try {
+          return localStorage.getItem('dispatchdesk_active_org_id') || 'demo-org-1';
+        } catch {
+          return 'demo-org-1';
+        }
+      })();
+
+    let token = 'demo-token';
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.access_token) {
+        token = data.session.access_token;
+      }
+    } catch {
+      // ignore session lookup failure, use fallback token
+    }
+
     const res = await fetch('/api/ai/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ context, request }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'x-organization-id': orgId,
+      },
+      body: JSON.stringify({
+        context: { ...context, organizationId: orgId },
+        request,
+        organizationId: orgId,
+      }),
     });
 
     if (!res.ok) {

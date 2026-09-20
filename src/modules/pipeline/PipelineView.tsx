@@ -213,6 +213,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick, onNa
             {
               load_id: created.id,
               doc_type: 'rate_confirmation',
+              doc_status: 'verified', // Dispatcher reviewed and confirmed during Load Booking
               file_name: rateConFile.name,
               file_size_bytes: rateConFile.size,
               mime_type: rateConFile.type || 'application/pdf',
@@ -624,6 +625,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick, onNa
           trucks={trucks}
           drivers={drivers}
           isSaving={isSaving}
+          organizationId={activeOrganization?.id}
         />
       )}
 
@@ -639,6 +641,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick, onNa
           drivers={drivers}
           nextLoadNumber={nextLoadNumber}
           isSaving={isSaving}
+          organizationId={activeOrganization?.id}
         />
       )}
 

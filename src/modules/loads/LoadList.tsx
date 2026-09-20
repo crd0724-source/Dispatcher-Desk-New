@@ -21,7 +21,6 @@ import {
   PackageCheck,
   Search,
   Filter,
-  Plus,
   RefreshCw,
   Eye,
   Edit2,
@@ -149,7 +148,7 @@ export const LoadList: React.FC<LoadListProps> = ({
             )}
           </div>
 
-          {/* Quick Refresh & New Load Action */}
+          {/* Quick Refresh Action */}
           <div className="flex items-center gap-2 self-end lg:self-auto shrink-0">
             <button
               id="refresh-loads-btn"
@@ -162,18 +161,6 @@ export const LoadList: React.FC<LoadListProps> = ({
               <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-indigo-400' : 'text-slate-400'}`} />
               <span className="hidden sm:inline">Refresh</span>
             </button>
-
-            {canEdit && (
-              <button
-                id="create-load-btn"
-                type="button"
-                onClick={onAddLoad}
-                className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg shadow-sm transition-colors cursor-pointer shrink-0"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Book Load</span>
-              </button>
-            )}
           </div>
         </div>
 

@@ -205,6 +205,61 @@ export const DriverModal: React.FC<DriverModalProps> = ({
 
       await onSaveDriver(payload);
     } catch (err: unknown) {
+      const rawMsg =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'object' && err !== null && 'message' in err
+          ? String((err as { message: unknown }).message)
+          : 'Failed to save driver profile. Please try again.';
+
+      const isPhoneDuplicate =
+        (err as any)?.code === '23505' ||
+        (err as any)?.field === 'phone' ||
+        rawMsg.includes('uq_drivers_active_normalized_phone') ||
+        rawMsg.toLowerCase().includes('already registered') ||
+        rawMsg.toLowerCase().includes('phone number');
+
+      if (isPhoneDuplicate) {
+        setFieldErrors((prev) => ({
+          ...prev,
+          phone: 'This phone number is already registered to an active driver.',
+        }));
+        setFormError(
+          `Phone number "${phone}" is already assigned to an active driver profile. You can remove the phone number to continue now, or provide a different phone number.`
+        );
+      } else {
+        setFormError(rawMsg);
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSaveWithoutPhone = async () => {
+    setPhone('');
+    setFieldErrors((prev) => {
+      const copy = { ...prev };
+      delete copy.phone;
+      return copy;
+    });
+    setFormError(null);
+    setIsSubmitting(true);
+
+    try {
+      const payload = {
+        client_id: clientId || null,
+        assigned_truck_id: assignedTruckId || null,
+        full_name: fullName.trim(),
+        phone: null,
+        email: email.trim() || null,
+        pay_type: payType,
+        pay_rate: parseFloat(payRate) || 0,
+        status,
+        notes: notes.trim() || null,
+      };
+
+      await onSaveDriver(payload);
+    } catch (err: unknown) {
       const msg =
         err instanceof Error
           ? err.message
@@ -237,9 +292,24 @@ export const DriverModal: React.FC<DriverModalProps> = ({
             className="p-3 bg-rose-950/50 border border-rose-800/80 rounded-lg text-rose-200 flex items-start gap-2"
           >
             <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-            <div>
+            <div className="flex-1">
               <p className="font-semibold text-xs">Error Saving Driver</p>
               <p className="text-[11px] text-rose-300 mt-0.5">{formError}</p>
+              {fieldErrors.phone && (
+                <div className="mt-2.5 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveWithoutPhone}
+                    disabled={isSubmitting}
+                    className="px-2.5 py-1 text-[11px] font-semibold bg-rose-800 hover:bg-rose-700 text-white rounded border border-rose-600 transition-colors cursor-pointer"
+                  >
+                    Save Without Phone Number
+                  </button>
+                  <span className="text-[10px] text-rose-300">
+                    You can add or update the phone number later.
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -293,7 +363,19 @@ export const DriverModal: React.FC<DriverModalProps> = ({
               type="tel"
               placeholder="e.g. +12145550199"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => {
+                setPhone(e.target.value);
+                if (fieldErrors.phone) {
+                  setFieldErrors((prev) => {
+                    const copy = { ...prev };
+                    delete copy.phone;
+                    return copy;
+                  });
+                }
+                if (formError && formError.toLowerCase().includes('phone')) {
+                  setFormError(null);
+                }
+              }}
               className={`w-full px-3 py-2 bg-slate-950 border rounded-lg text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 font-mono ${
                 fieldErrors.phone ? 'border-rose-500' : 'border-slate-800'
               }`}

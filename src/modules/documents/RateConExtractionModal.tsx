@@ -14,7 +14,7 @@ import {
 } from './extractionTypes.ts';
 import { normalizeEquipmentType } from './rateConParser.ts';
 import { extractionService } from './extractionService.ts';
-import { SAMPLE_RATE_CONFIRMATIONS, SampleRateConDoc } from './sampleRateConfirmations.ts';
+import { brokerService } from '../brokers/brokerService.ts';
 import { calculateProfitability, formatCurrency, formatRPM, formatMiles } from '../../lib/calculations.ts';
 import { Modal } from '../../components/common/Modal.tsx';
 import {
@@ -23,6 +23,7 @@ import {
   FileText,
   CheckCircle2,
   AlertTriangle,
+  AlertCircle,
   ArrowRight,
   Building2,
   Truck as TruckIcon,
@@ -69,8 +70,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
   // Processing States
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [pastedText, setPastedText] = useState<string>('');
-  const [selectedSample, setSelectedSample] = useState<SampleRateConDoc | null>(SAMPLE_RATE_CONFIRMATIONS[0]);
-  const [inputTab, setInputTab] = useState<'sample' | 'upload' | 'text'>('sample');
+  const [inputTab, setInputTab] = useState<'upload' | 'text'>('upload');
   const [isExtracting, setIsExtracting] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -86,6 +86,22 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
   const [selectedBrokerId, setSelectedBrokerId] = useState<string>('');
   const [selectedTruckId, setSelectedTruckId] = useState<string>('');
   const [selectedDriverId, setSelectedDriverId] = useState<string>('');
+
+  // Broker States for Extraction Review
+  const [localBrokers, setLocalBrokers] = useState<Broker[]>(brokers);
+  const [unmatchedBroker, setUnmatchedBroker] = useState<ExtractedBrokerInfo | null>(null);
+  const [isCreatingBroker, setIsCreatingBroker] = useState(false);
+
+  useEffect(() => {
+    setLocalBrokers(brokers);
+  }, [brokers]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setUnmatchedBroker(null);
+      setErrorMessage(null);
+    }
+  }, [isOpen]);
 
   // Editable Overrides State
   const [formFields, setFormFields] = useState<{
@@ -142,6 +158,46 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
     }
   }, [initialLoadId]);
 
+  // Add & Link newly extracted broker to CRM and current load
+  const handleAddAndLinkBroker = async () => {
+    if (!unmatchedBroker || isCreatingBroker) return;
+    setIsCreatingBroker(true);
+    setErrorMessage(null);
+
+    try {
+      const targetOrgId = organizationId || 'demo-organization-default';
+      const createdBroker = await brokerService.createBroker(targetOrgId, {
+        company_name: unmatchedBroker.company_name?.trim() || 'Extracted Broker',
+        mc_number: unmatchedBroker.mc_number || null,
+        dot_number: unmatchedBroker.dot_number || null,
+        contact_name: unmatchedBroker.contact_name || null,
+        contact_email: unmatchedBroker.contact_email || null,
+        contact_phone: unmatchedBroker.contact_phone || null,
+        payment_terms_days: unmatchedBroker.payment_terms_days || 30,
+        credit_status: 'approved',
+        notes: 'Created via RateCon extraction auto-link',
+      });
+
+      // Add to local brokers list so it is immediately available in dropdown
+      setLocalBrokers((prev) => [...prev, createdBroker]);
+      // Link the new broker ID to this load form
+      setSelectedBrokerId(createdBroker.id);
+      // Clear unmatched state
+      setUnmatchedBroker(null);
+    } catch (err: unknown) {
+      console.error('Failed to create and link broker:', err);
+      const msg = err instanceof Error ? err.message : 'Failed to add broker. Please select an existing broker or try again.';
+      setErrorMessage(msg);
+    } finally {
+      setIsCreatingBroker(false);
+    }
+  };
+
+  // Dismiss unmatched broker warning and allow manual selection of existing broker
+  const handleSelectExistingBroker = () => {
+    setUnmatchedBroker(null);
+  };
+
   // Handle extraction trigger
   const handleRunExtraction = async () => {
     setIsExtracting(true);
@@ -150,40 +206,54 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
     try {
       let result: RateConfirmationExtraction;
 
-      if (inputTab === 'sample' && selectedSample) {
-        result = await extractionService.extractRateConfirmation({
-          documentText: selectedSample.rawText,
-          fileName: selectedSample.simulatedFileName,
-        });
-      } else if (inputTab === 'upload' && selectedFile) {
+      if (inputTab === 'upload' && selectedFile) {
         result = await extractionService.extractRateConfirmation({
           file: selectedFile,
           fileName: selectedFile.name,
+          organizationId,
         });
       } else if (inputTab === 'text' && pastedText.trim()) {
         result = await extractionService.extractRateConfirmation({
           documentText: pastedText.trim(),
           fileName: 'Pasted_RateCon.txt',
+          organizationId,
         });
       } else {
-        throw new Error('Please select a sample, upload a rate confirmation file, or paste text to extract.');
+        throw new Error(
+          inputTab === 'upload'
+            ? 'Please upload a rate confirmation file to extract.'
+            : 'Please paste rate confirmation text to extract.'
+        );
       }
 
       setExtraction(result);
 
       // Auto-match broker if matching name or MC number exists
-      const match = brokers.find((b) => {
-        if (result.broker.mc_number && b.mc_number && b.mc_number.replace(/\D/g, '') === result.broker.mc_number.replace(/\D/g, '')) {
-          return true;
-        }
-        return b.company_name.toLowerCase().includes(result.broker.company_name.toLowerCase()) ||
-          result.broker.company_name.toLowerCase().includes(b.company_name.toLowerCase());
-      });
+      if (result.broker && (result.broker.company_name || result.broker.mc_number)) {
+        const extractedMC = result.broker.mc_number?.replace(/\D/g, '');
+        const extractedName = result.broker.company_name?.toLowerCase().trim();
 
-      if (match) {
-        setSelectedBrokerId(match.id);
-      } else if (brokers.length > 0) {
-        setSelectedBrokerId(brokers[0].id);
+        const match = localBrokers.find((b) => {
+          if (extractedMC && b.mc_number && b.mc_number.replace(/\D/g, '') === extractedMC) {
+            return true;
+          }
+          if (extractedName && b.company_name) {
+            const bName = b.company_name.toLowerCase().trim();
+            return bName.includes(extractedName) || extractedName.includes(bName);
+          }
+          return false;
+        });
+
+        if (match) {
+          setSelectedBrokerId(match.id);
+          setUnmatchedBroker(null);
+        } else {
+          setSelectedBrokerId('');
+          setUnmatchedBroker(result.broker);
+        }
+      } else {
+        setSelectedBrokerId('');
+        setUnmatchedBroker(null);
       }
 
       // Initialize form fields with fully normalized extracted data
@@ -237,8 +307,50 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
       const eqType = normalizeEquipmentType(result.load_info?.equipment_type || (result as any).equipment_type);
       const commodity = result.load_info?.commodity || (result as any).commodity || '';
       const weight = result.load_info?.weight_lbs || (result as any).weight_lbs || (result as any).weight || 0;
-      const specialInstructions =
-        result.load_info?.special_instructions || (result as any).special_instructions || '';
+
+      // Aggregate ONLY actual extracted instruction fields into special_instructions
+      const instructionParts: string[] = [];
+      const loadSpecialInstructions = (
+        result.load_info?.special_instructions ||
+        (result as any).special_instructions ||
+        ''
+      ).trim();
+
+      if (loadSpecialInstructions) {
+        instructionParts.push(loadSpecialInstructions);
+      }
+
+      const pickupInstructions = (result.origin?.instructions || '').trim();
+      if (pickupInstructions && !loadSpecialInstructions.includes(pickupInstructions)) {
+        instructionParts.push(`Pickup: ${pickupInstructions}`);
+      }
+
+      const deliveryInstructions = (result.destination?.instructions || '').trim();
+      if (deliveryInstructions && !loadSpecialInstructions.includes(deliveryInstructions)) {
+        instructionParts.push(`Delivery: ${deliveryInstructions}`);
+      }
+
+      // Include stop-level instructions if present in result.stops
+      if (Array.isArray(result.stops)) {
+        result.stops.forEach((stop, idx) => {
+          const stopInst = (stop.instructions || '').trim();
+          if (
+            stopInst &&
+            !loadSpecialInstructions.includes(stopInst) &&
+            stopInst !== pickupInstructions &&
+            stopInst !== deliveryInstructions
+          ) {
+            const stopLabel = stop.stop_type === 'pickup'
+              ? `Stop ${idx + 1} (Pickup)`
+              : stop.stop_type === 'delivery'
+              ? `Stop ${idx + 1} (Delivery)`
+              : `Stop ${idx + 1}`;
+            instructionParts.push(`${stopLabel}: ${stopInst}`);
+          }
+        });
+      }
+
+      const specialInstructions = instructionParts.join('\n\n');
 
       setFormFields({
         load_number: extractedLoadNum,
@@ -398,17 +510,6 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
             <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
               <button
                 type="button"
-                onClick={() => setInputTab('sample')}
-                className={`h-8 px-3 rounded-xl font-semibold text-xs transition-colors cursor-pointer ${
-                  inputTab === 'sample'
-                    ? 'bg-indigo-600 text-white shadow-xs'
-                    : 'bg-slate-900 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                1-Click Sample Rate Cons
-              </button>
-              <button
-                type="button"
                 onClick={() => setInputTab('upload')}
                 className={`h-8 px-3 rounded-xl font-semibold text-xs transition-colors cursor-pointer ${
                   inputTab === 'upload'
@@ -430,42 +531,6 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                 Paste Rate Con Text
               </button>
             </div>
-
-            {/* TAB: Sample Documents */}
-            {inputTab === 'sample' && (
-              <div className="space-y-3">
-                <p className="text-slate-400 text-xs">
-                  Select a pre-loaded, authentic freight Rate Confirmation to test instant OCR parsing and financial extraction:
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {SAMPLE_RATE_CONFIRMATIONS.map((sample) => {
-                    const isSelected = selectedSample?.id === sample.id;
-                    return (
-                      <div
-                        key={sample.id}
-                        onClick={() => setSelectedSample(sample)}
-                        className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
-                          isSelected
-                            ? 'bg-indigo-950/50 border-indigo-500 ring-1 ring-indigo-500/50 shadow-xs'
-                            : 'bg-slate-950 border-slate-800 hover:border-slate-700'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-1 mb-1.5">
-                          <span className="font-bold text-slate-100 text-xs truncate">{sample.title}</span>
-                          <span className="px-1.5 py-0.5 rounded-md bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 font-mono tabular-nums text-[11px] shrink-0 font-bold">
-                            {formatCurrency(sample.rate)}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-sky-400 font-mono mb-1">{sample.lane}</p>
-                        <p className="text-[11px] text-slate-400 leading-snug line-clamp-2">
-                          {sample.description}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
 
             {/* TAB: File Upload */}
             {inputTab === 'upload' && (
@@ -597,7 +662,10 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setExtraction(null)}
+                  onClick={() => {
+                    setExtraction(null);
+                    setUnmatchedBroker(null);
+                  }}
                   className="h-8 px-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-800 text-[11px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
@@ -611,7 +679,7 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
               <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 space-y-1.5">
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Raw Document Text</span>
                 <pre className="text-[11px] text-slate-300 font-mono max-h-36 overflow-y-auto whitespace-pre-wrap bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
-                  {selectedSample?.rawText || extraction.load_info.raw_text || 'Document binary analyzed directly by Gemini Vision.'}
+                  {pastedText.trim() || extraction.load_info.raw_text || 'Document binary analyzed directly by Gemini Vision.'}
                 </pre>
               </div>
             )}
@@ -684,48 +752,101 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                   )}
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <label className="block text-slate-300 font-semibold">
-                      Carrier Client <span className="text-rose-400">*</span>
-                    </label>
-                    <select
-                      value={selectedClientId}
-                      onChange={(e) => setSelectedClientId(e.target.value)}
-                      required
-                      className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 cursor-pointer"
+                <div className="space-y-3">
+                  {/* Unmatched Broker Inline Confirmation Area */}
+                  {unmatchedBroker && (
+                    <div
+                      id="unmatched-broker-card"
+                      className="p-3 bg-amber-950/40 border border-amber-800/60 rounded-xl text-amber-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in"
                     >
-                      {clients.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.company_name} ({c.client_type})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                      <div className="flex items-start gap-2.5">
+                        <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-semibold text-amber-300">Broker not found in CRM</div>
+                          <div className="font-bold text-slate-100 text-sm mt-0.5">{unmatchedBroker.company_name}</div>
+                          <div className="text-[11px] text-amber-200/80 mt-0.5">
+                            MC: {unmatchedBroker.mc_number || 'N/A'}{unmatchedBroker.dot_number ? ` • DOT: ${unmatchedBroker.dot_number}` : ''}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          id="add-and-link-broker-btn"
+                          type="button"
+                          disabled={isCreatingBroker}
+                          onClick={handleAddAndLinkBroker}
+                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer flex items-center gap-1.5"
+                        >
+                          {isCreatingBroker ? (
+                            <>
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin text-white" />
+                              <span>Adding Broker...</span>
+                            </>
+                          ) : (
+                            <span>Add & Link Broker</span>
+                          )}
+                        </button>
+                        <button
+                          id="select-existing-broker-btn"
+                          type="button"
+                          disabled={isCreatingBroker}
+                          onClick={handleSelectExistingBroker}
+                          className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-slate-300 hover:text-white text-xs font-medium rounded-lg border border-slate-700 transition-colors cursor-pointer"
+                        >
+                          Select Existing
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
-                  <div className="space-y-1.5">
-                    <label className="block text-slate-300 font-semibold">Matched Broker</label>
-                    <select
-                      value={selectedBrokerId}
-                      onChange={(e) => setSelectedBrokerId(e.target.value)}
-                      className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 cursor-pointer"
-                    >
-                      <option value="">-- Select or Match Broker --</option>
-                      {brokers.map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {b.company_name} (MC: {b.mc_number || 'N/A'})
-                        </option>
-                      ))}
-                    </select>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="block text-slate-300 font-semibold">
+                        Carrier Client <span className="text-rose-400">*</span>
+                      </label>
+                      <select
+                        value={selectedClientId}
+                        onChange={(e) => setSelectedClientId(e.target.value)}
+                        required
+                        className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 cursor-pointer"
+                      >
+                        {clients.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.company_name} ({c.client_type})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-slate-300 font-semibold">Matched Broker</label>
+                      <select
+                        value={selectedBrokerId}
+                        onChange={(e) => {
+                          setSelectedBrokerId(e.target.value);
+                          if (e.target.value) {
+                            setUnmatchedBroker(null);
+                          }
+                        }}
+                        className="w-full h-9 px-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 cursor-pointer"
+                      >
+                        <option value="">-- Select or Match Broker --</option>
+                        {localBrokers.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.company_name} (MC: {b.mc_number || 'N/A'})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
               )}
             </div>
 
             {/* EDITABLE EXTRACTED FIELDS & FINANCIAL CARD */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
               {/* Left 2 Cols: Form Fields */}
-              <div className="md:col-span-2 space-y-4">
+              <div className="sm:col-span-2 space-y-4">
                 {/* Broker & Carrier Identification Header */}
                 <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2">
@@ -785,9 +906,9 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                             : 'N/A'}
                         </p>
                       </div>
-                      <div>
-                        <p className="text-[10px] text-amber-400 uppercase font-sans">Fuel Surcharge</p>
-                        <p className="font-bold text-amber-300">
+                      <div className="min-w-0">
+                        <p className="text-[10px] text-amber-400 uppercase font-sans truncate">Fuel Surcharge</p>
+                        <p className="font-bold text-amber-300 whitespace-nowrap">
                           {extraction.financial_breakdown.fuel_surcharge_amount !== null && extraction.financial_breakdown.fuel_surcharge_amount !== undefined
                             ? formatCurrency(extraction.financial_breakdown.fuel_surcharge_amount)
                             : extraction.load_info.fuel_surcharge !== null && extraction.load_info.fuel_surcharge !== undefined
@@ -996,21 +1117,22 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                       />
                     </div>
                   </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-[11px] text-slate-400 font-semibold">Special Instructions & Handling Terms</label>
+                  <div className="space-y-1.5 min-w-0">
+                    <label className="text-[11px] text-slate-400 font-semibold block">Special Instructions & Check Call Rules</label>
                     <textarea
-                      rows={2}
+                      id="ratecon-special-instructions"
+                      rows={3}
                       value={formFields.special_instructions}
                       onChange={(e) => setFormFields({ ...formFields, special_instructions: e.target.value })}
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs resize-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500"
+                      placeholder="Special instructions, check-call intervals, pickup/delivery procedures..."
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs resize-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 placeholder-slate-600 font-mono"
                     />
                   </div>
                 </div>
               </div>
 
               {/* Right 1 Col: Real-time Profitability & Accessorials */}
-              <div className="space-y-4">
+              <div className="sm:col-span-1 space-y-4">
                 {/* Financial Benchmark Engine */}
                 <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
@@ -1019,25 +1141,25 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                   </div>
 
                   <div className="space-y-2 font-mono tabular-nums text-xs">
-                    <div className="flex justify-between py-1 border-b border-slate-900">
-                      <span className="text-slate-400 font-sans">Gross Revenue</span>
-                      <span className="font-bold text-emerald-300">{formatCurrency(currentProfitability.grossRate)}</span>
+                    <div className="flex items-center justify-between py-1 border-b border-slate-900 whitespace-nowrap">
+                      <span className="text-slate-400 font-sans truncate pr-2">Gross Revenue</span>
+                      <span className="font-bold text-emerald-300 shrink-0">{formatCurrency(currentProfitability.grossRate)}</span>
                     </div>
-                    <div className="flex justify-between py-1 border-b border-slate-900">
-                      <span className="text-slate-400 font-sans">Rate Per Mile (RPM)</span>
-                      <span className="font-bold text-slate-100">{formatRPM(currentProfitability.rpm)}</span>
+                    <div className="flex items-center justify-between py-1 border-b border-slate-900 whitespace-nowrap">
+                      <span className="text-slate-400 font-sans truncate pr-2">Rate Per Mile (RPM)</span>
+                      <span className="font-bold text-slate-100 shrink-0">{formatRPM(currentProfitability.rpm)}</span>
                     </div>
-                    <div className="flex justify-between py-1 border-b border-slate-900">
-                      <span className="text-slate-400 font-sans">Est. Fuel Cost</span>
-                      <span className="text-slate-300">{formatCurrency(currentProfitability.fuelExpense)}</span>
+                    <div className="flex items-center justify-between py-1 border-b border-slate-900 whitespace-nowrap">
+                      <span className="text-slate-400 font-sans truncate pr-2">Est. Fuel Cost</span>
+                      <span className="text-slate-300 shrink-0">{formatCurrency(currentProfitability.fuelExpense)}</span>
                     </div>
-                    <div className="flex justify-between py-1 border-b border-slate-900">
-                      <span className="text-slate-400 font-sans">Est. Driver Pay</span>
-                      <span className="text-slate-300">{formatCurrency(currentProfitability.driverPay)}</span>
+                    <div className="flex items-center justify-between py-1 border-b border-slate-900 whitespace-nowrap">
+                      <span className="text-slate-400 font-sans truncate pr-2">Est. Driver Pay</span>
+                      <span className="text-slate-300 shrink-0">{formatCurrency(currentProfitability.driverPay)}</span>
                     </div>
-                    <div className="flex justify-between py-1.5 bg-slate-900/60 px-2 rounded-lg font-bold">
-                      <span className="text-indigo-300 font-sans">Net Estimated Profit</span>
-                      <span className="text-indigo-200">{formatCurrency(currentProfitability.estimatedProfit)} ({currentProfitability.profitMargin}%)</span>
+                    <div className="flex items-center justify-between py-1.5 bg-slate-900/60 px-2 rounded-lg font-bold whitespace-nowrap">
+                      <span className="text-indigo-300 font-sans truncate pr-2">Net Estimated Profit</span>
+                      <span className="text-indigo-200 shrink-0">{formatCurrency(currentProfitability.estimatedProfit)} ({currentProfitability.profitMargin}%)</span>
                     </div>
                   </div>
                 </div>
@@ -1049,9 +1171,9 @@ export const RateConExtractionModal: React.FC<RateConExtractionModalProps> = ({
                     <div className="space-y-1.5">
                       {extraction.accessorials.map((acc, idx) => (
                         <div key={idx} className="p-2.5 rounded-lg bg-slate-900/70 border border-slate-800 text-[11px]">
-                          <div className="flex justify-between font-semibold text-slate-200 font-mono tabular-nums">
-                            <span className="capitalize font-sans">{acc.type.replace(/_/g, ' ')}</span>
-                            {acc.amount ? <span>{formatCurrency(acc.amount)}</span> : null}
+                          <div className="flex items-center justify-between font-semibold text-slate-200 font-mono tabular-nums whitespace-nowrap">
+                            <span className="capitalize font-sans truncate pr-2">{acc.type.replace(/_/g, ' ')}</span>
+                            {acc.amount ? <span className="shrink-0">{formatCurrency(acc.amount)}</span> : null}
                           </div>
                           {acc.notes && <p className="text-slate-400 mt-0.5 text-[10px]">{acc.notes}</p>}
                         </div>

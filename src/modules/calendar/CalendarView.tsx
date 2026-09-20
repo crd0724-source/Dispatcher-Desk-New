@@ -272,6 +272,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onNewLoadClick }) =>
               {
                 load_id: created.id,
                 doc_type: 'rate_confirmation',
+                doc_status: 'verified', // Dispatcher reviewed and confirmed during Load Booking
                 file_name: rateConFile.name,
                 file_size_bytes: rateConFile.size,
                 mime_type: rateConFile.type || 'application/pdf',
@@ -605,6 +606,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({ onNewLoadClick }) =>
         brokers={brokers}
         trucks={trucks}
         drivers={drivers}
+        organizationId={activeOrganization?.id}
       />
     </div>
   );

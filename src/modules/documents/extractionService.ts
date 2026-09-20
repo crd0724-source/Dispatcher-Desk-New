@@ -10,6 +10,7 @@ import { activityService } from '../activity/activityService.ts';
 import { calculateProfitability } from '../../lib/calculations.ts';
 import { LoadWithRelations, CreateLoadInput, UpdateLoadInput } from '../loads/loadTypes.ts';
 import { EquipmentType } from '../../types/domain.types.ts';
+import { supabase } from '../../lib/supabase.ts';
 
 class ExtractionService {
   /**
@@ -40,6 +41,7 @@ class ExtractionService {
     file?: File;
     documentText?: string;
     fileName?: string;
+    organizationId?: string;
   }): Promise<RateConfirmationExtraction> {
     let fileData: string | undefined = undefined;
     let mimeType: string | undefined = undefined;
@@ -50,23 +52,56 @@ class ExtractionService {
       mimeType = params.file.type || 'application/pdf';
     }
 
+    // Resolve tenant organization
+    const orgId =
+      params.organizationId ||
+      (() => {
+        try {
+          return localStorage.getItem('dispatchdesk_active_org_id') || 'demo-org-1';
+        } catch {
+          return 'demo-org-1';
+        }
+      })();
+
+    // Retrieve active Supabase session token if available
+    let token = 'demo-token';
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.access_token) {
+        token = data.session.access_token;
+      }
+    } catch {
+      // ignore session lookup failure, use fallback token
+    }
+
     try {
       const response = await fetch('/api/ai/extract-rate-con', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-organization-id': orgId,
         },
         body: JSON.stringify({
           fileData,
           mimeType,
           fileName,
           documentText: params.documentText,
+          organizationId: orgId,
         }),
       });
 
       if (!response.ok) {
-        const errorBody = await response.json().catch(() => ({}));
-        throw new Error(errorBody.error || `Server responded with status ${response.status}`);
+        let errorMsg = `Server responded with status ${response.status}`;
+        try {
+          const errorBody = await response.json();
+          if (errorBody?.error) {
+            errorMsg = errorBody.error;
+          }
+        } catch {
+          // Response body was not JSON (e.g. reverse proxy HTML error page)
+        }
+        throw new Error(errorMsg);
       }
 
       const resData: ExtractionResponse = await response.json();
@@ -82,7 +117,7 @@ class ExtractionService {
           fileSize: params.file?.size,
           mimeType: mimeType || 'text/plain',
           extractedAt: resData.extractedAt || new Date().toISOString(),
-          model: resData.source || 'gemini-3.8-flash',
+          model: resData.source || 'gemini-3.1-flash-lite',
           sourceType: params.file
             ? params.file.type.includes('pdf')
               ? 'uploaded_pdf'
@@ -99,8 +134,16 @@ class ExtractionService {
       return extraction;
     } catch (err: any) {
       console.warn('Extraction API request failed or offline. Attempting deterministic fallback.', err);
-      if (params.documentText) {
-        const fallbackExtraction = parseRateConfirmationText(params.documentText, fileName);
+      let textForFallback = params.documentText;
+      if (!textForFallback && params.file && (params.file.type.includes('text') || params.file.name.endsWith('.txt'))) {
+        try {
+          textForFallback = await params.file.text();
+        } catch {
+          // ignore
+        }
+      }
+      if (textForFallback) {
+        const fallbackExtraction = parseRateConfirmationText(textForFallback, fileName);
         this.validateFinancialConsistency(fallbackExtraction);
         return fallbackExtraction;
       }
@@ -317,7 +360,7 @@ class ExtractionService {
         extractedBroker: extractedData.broker.company_name,
         extractedRate: extractedData.load_info.rate,
         confidence: extractedData.confidence_scores.overall,
-        model: extractedData.provenance?.model || 'gemini-3.8-flash',
+        model: extractedData.provenance?.model || 'gemini-3.1-flash-lite',
       }
     );
 

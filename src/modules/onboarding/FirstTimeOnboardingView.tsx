@@ -217,6 +217,13 @@ export const FirstTimeOnboardingView: React.FC<FirstTimeOnboardingViewProps> = (
     }
   };
 
+  const handleSkipDriver = () => {
+    setStepError(null);
+    setCreatedDriver(null);
+    setCurrentStep(4);
+    saveTransientState({ driver: null, step: 4 });
+  };
+
   // Step 4: Broker handlers
   const handleSaveBroker = async (input: CreateBrokerInput | UpdateBrokerInput) => {
     setStepError(null);
@@ -267,6 +274,7 @@ export const FirstTimeOnboardingView: React.FC<FirstTimeOnboardingViewProps> = (
             {
               load_id: created.id,
               doc_type: 'rate_confirmation',
+              doc_status: 'verified', // Dispatcher reviewed and confirmed during Load Booking
               file_name: rateConFile.name,
               file_size_bytes: rateConFile.size,
               mime_type: rateConFile.type || 'application/pdf',
@@ -796,6 +804,14 @@ export const FirstTimeOnboardingView: React.FC<FirstTimeOnboardingViewProps> = (
                   </button>
                   <button
                     type="button"
+                    id="onboarding-skip-driver-btn"
+                    onClick={handleSkipDriver}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <span>Skip for Now</span>
+                  </button>
+                  <button
+                    type="button"
                     id="onboarding-create-driver-btn"
                     onClick={() => {
                       setIsEditingDriver(false);
@@ -1113,6 +1129,7 @@ export const FirstTimeOnboardingView: React.FC<FirstTimeOnboardingViewProps> = (
         brokers={createdBroker ? [createdBroker as Broker] : []}
         nextLoadNumber={nextLoadNumber}
         isSaving={isSavingLoad}
+        organizationId={organization?.id}
       />
     </div>
   );
