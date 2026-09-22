@@ -85,7 +85,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     ...(isOwnerAdmin || userRole === null
       ? [{ id: 'workload' as NavModule, label: 'Team Workload', icon: Users, sub: 'Assignment Overview', badge: 'Admin' }]
       : []),
-    { id: 'communication' as NavModule, label: 'Driver Comms', icon: MessageSquare, sub: 'In-App Dispatch Chat' },
+    {
+      id: 'communication' as NavModule,
+      label: 'Driver Comms',
+      icon: MessageSquare,
+      sub: 'In-App Dispatch Chat',
+    },
     { id: 'checkcalls' as NavModule, label: 'Load Tracking', icon: Radio, sub: 'Live Check Calls' },
     { id: 'accessorials' as NavModule, label: 'Accessorials & Detention', icon: Timer, sub: 'Detention Clocks' },
     { id: 'tasks' as NavModule, label: 'Tasks & Reminders', icon: CheckSquare, sub: 'Action Reminders' },
@@ -172,7 +177,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <span className="truncate">{item.label}</span>
                     </div>
                     {item.badge && (
-                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800/80 text-slate-400 border border-slate-700/60 font-mono">
+                      <span
+                        id={`sidebar-badge-${item.id}`}
+                        className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                          item.id === 'communication'
+                            ? 'bg-indigo-600 text-white animate-pulse'
+                            : 'bg-slate-800/80 text-slate-400 border border-slate-700/60'
+                        }`}
+                      >
                         {item.badge}
                       </span>
                     )}

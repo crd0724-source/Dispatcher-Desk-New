@@ -36,6 +36,7 @@ if (typeof globalThis.localStorage === 'undefined') {
 
 import { communicationService } from './communicationService.ts';
 import { ConversationType, MessageType } from './types.ts';
+import { supabase } from '../../lib/supabase.ts';
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
@@ -61,7 +62,10 @@ async function runTests() {
   // Seed authoritative driver identities for test runner
   const driverUser1 = 'user-auth-driver-1';
   communicationService.setAuthoritativeDriverForUser(orgA, driverUser1, driverA1);
-  globalThis.localStorage.setItem('dispatchdesk_current_user_id', driverUser1);
+  (supabase.auth as any).getUser = async () => ({
+    data: { user: { id: driverUser1 } },
+    error: null,
+  });
 
   // ---------------------------------------------------------------------------
   // TEST 1: Conversation Listing

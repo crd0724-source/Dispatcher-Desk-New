@@ -20,6 +20,7 @@ import {
   Building2,
   Truck,
   Plus,
+  RotateCcw,
 } from 'lucide-react';
 
 interface ClientListProps {
@@ -142,11 +143,14 @@ export const ClientList: React.FC<ClientListProps> = ({
           {/* Active Filter Clear Action */}
           {hasActiveFilters && (
             <button
+              id="clients-reset-filters-btn"
+              type="button"
               onClick={clearFilters}
-              className="h-9 px-3 text-xs text-indigo-300 hover:text-indigo-200 bg-indigo-950/60 border border-indigo-800/60 hover:bg-indigo-900/60 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 font-medium"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 rounded-lg text-xs font-semibold text-slate-200 hover:text-white transition-colors cursor-pointer shrink-0"
+              title="Reset all filters"
             >
-              <X className="w-3 h-3" />
-              <span>Clear ({activeFilterCount})</span>
+              <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+              <span>Reset Filters</span>
             </button>
           )}
 
@@ -264,11 +268,12 @@ export const ClientList: React.FC<ClientListProps> = ({
           </p>
           {hasActiveFilters && (
             <button
+              type="button"
               onClick={clearFilters}
-              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-colors cursor-pointer shadow-xs inline-flex items-center gap-1.5"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 rounded-lg text-xs font-semibold text-slate-200 hover:text-white transition-colors cursor-pointer"
             >
-              <X className="w-3.5 h-3.5" />
-              <span>Clear All Filters</span>
+              <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+              <span>Reset Filters</span>
             </button>
           )}
         </div>

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Modal } from '../../components/common/Modal.tsx';
 import { useAuth } from '../../contexts/AuthContext.tsx';
+import { useTimezone } from '../../contexts/TimezoneContext.tsx';
+import { constructIsoDatetime, parseDateAndTimeToInputs } from '../loads/LoadModal.tsx';
 import { LoadWithRelations } from '../loads/loadTypes.ts';
 import {
   CheckCall,
@@ -10,6 +12,8 @@ import {
   UpdateCheckCallInput,
   CHECK_CALL_TYPE_LABELS,
   CHECK_CALL_STATUS_LABELS,
+  isOperationalException,
+  isDeliveryEtaDelayed,
 } from './checkCallTypes.ts';
 import {
   Radio,
@@ -38,6 +42,9 @@ interface CheckCallModalProps {
   initialCheckCall?: CheckCall | null;
   initialCallType?: CheckCallType;
   initialStatus?: CheckCallOperationalStatus;
+  initialNotes?: string;
+  initialLatitude?: number | null;
+  initialLongitude?: number | null;
   onSubmit: (data: CreateCheckCallInput | UpdateCheckCallInput) => Promise<void>;
 }
 
@@ -48,9 +55,13 @@ export const CheckCallModal: React.FC<CheckCallModalProps> = ({
   initialCheckCall,
   initialCallType,
   initialStatus,
+  initialNotes,
+  initialLatitude,
+  initialLongitude,
   onSubmit,
 }) => {
   const { profile, activeOrganization } = useAuth();
+  const { operationalTimezone } = useTimezone();
 
   const isEditing = Boolean(initialCheckCall);
 
@@ -62,9 +73,23 @@ export const CheckCallModal: React.FC<CheckCallModalProps> = ({
   );
   const [locationCity, setLocationCity] = useState(initialCheckCall?.location_city || '');
   const [locationState, setLocationState] = useState(initialCheckCall?.location_state || '');
+  const [latitude, setLatitude] = useState<number | null>(
+    initialCheckCall?.latitude !== undefined
+      ? initialCheckCall.latitude
+      : initialLatitude !== undefined
+      ? initialLatitude
+      : null
+  );
+  const [longitude, setLongitude] = useState<number | null>(
+    initialCheckCall?.longitude !== undefined
+      ? initialCheckCall.longitude
+      : initialLongitude !== undefined
+      ? initialLongitude
+      : null
+  );
   const [etaPickup, setEtaPickup] = useState('');
   const [etaDelivery, setEtaDelivery] = useState('');
-  const [notes, setNotes] = useState(initialCheckCall?.notes || '');
+  const [notes, setNotes] = useState(initialCheckCall?.notes || initialNotes || '');
   const [createdBy, setCreatedBy] = useState(
     initialCheckCall?.created_by || profile?.full_name || 'Dispatcher'
   );
@@ -72,17 +97,21 @@ export const CheckCallModal: React.FC<CheckCallModalProps> = ({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Helper to convert ISO string to datetime-local input string (YYYY-MM-DDTHH:mm)
-  const toLocalInputValue = (isoString?: string | null) => {
+  // Helper to convert ISO string to datetime-local input string (YYYY-MM-DDTHH:mm) in operational timezone
+  const toLocalInputValue = (isoString?: string | null): string => {
     if (!isoString) return '';
-    try {
-      const date = new Date(isoString);
-      if (isNaN(date.getTime())) return '';
-      const pad = (n: number) => n.toString().padStart(2, '0');
-      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-    } catch {
-      return '';
-    }
+    const parsed = parseDateAndTimeToInputs(isoString, operationalTimezone);
+    if (!parsed.date) return '';
+    return `${parsed.date}T${parsed.time || '00:00'}`;
+  };
+
+  // Helper to convert datetime-local input string (YYYY-MM-DDTHH:mm) to ISO string in operational timezone
+  const parseInputToIso = (inputValue?: string | null): string | null => {
+    if (!inputValue || !inputValue.trim()) return null;
+    const trimmed = inputValue.trim();
+    const [dStr, tStr] = trimmed.split('T');
+    if (!dStr) return null;
+    return constructIsoDatetime(dStr, tStr || '00:00', operationalTimezone);
   };
 
   useEffect(() => {
@@ -92,6 +121,16 @@ export const CheckCallModal: React.FC<CheckCallModalProps> = ({
         setStatus(initialCheckCall.status);
         setLocationCity(initialCheckCall.location_city || '');
         setLocationState(initialCheckCall.location_state || '');
+        setLatitude(
+          typeof initialCheckCall.latitude === 'number' && Number.isFinite(initialCheckCall.latitude)
+            ? initialCheckCall.latitude
+            : null
+        );
+        setLongitude(
+          typeof initialCheckCall.longitude === 'number' && Number.isFinite(initialCheckCall.longitude)
+            ? initialCheckCall.longitude
+            : null
+        );
         setEtaPickup(toLocalInputValue(initialCheckCall.eta_pickup));
         setEtaDelivery(toLocalInputValue(initialCheckCall.eta_delivery));
         setNotes(initialCheckCall.notes || '');
@@ -105,18 +144,65 @@ export const CheckCallModal: React.FC<CheckCallModalProps> = ({
         );
         setLocationCity('');
         setLocationState('');
+        setLatitude(
+          typeof initialLatitude === 'number' && Number.isFinite(initialLatitude)
+            ? initialLatitude
+            : null
+        );
+        setLongitude(
+          typeof initialLongitude === 'number' && Number.isFinite(initialLongitude)
+            ? initialLongitude
+            : null
+        );
         setEtaPickup(toLocalInputValue(load?.pickup_datetime));
         setEtaDelivery(toLocalInputValue(load?.delivery_datetime));
-        setNotes('');
+        setNotes(initialNotes || '');
         setCreatedBy(profile?.full_name ? `${profile.full_name} (Dispatcher)` : 'Dispatcher');
       }
       setValidationError(null);
     }
-  }, [isOpen, initialCheckCall, initialCallType, initialStatus, load, profile]);
+  }, [
+    isOpen,
+    initialCheckCall,
+    initialCallType,
+    initialStatus,
+    initialNotes,
+    initialLatitude,
+    initialLongitude,
+    load,
+    profile,
+    operationalTimezone,
+  ]);
 
   if (!isOpen || (!load && !initialCheckCall)) return null;
 
-  const isException = callType === 'delay' || callType === 'breakdown' || status === 'delayed' || status === 'at_risk';
+  const getDeliveryEtaIso = (val?: string | null) => {
+    return parseInputToIso(val);
+  };
+
+  const isEtaDelayed = Boolean(
+    load?.delivery_datetime &&
+    isDeliveryEtaDelayed(load.delivery_datetime, getDeliveryEtaIso(etaDelivery))
+  );
+
+  const isException = isOperationalException(
+    callType,
+    status,
+    load?.delivery_datetime,
+    getDeliveryEtaIso(etaDelivery)
+  );
+
+  const handleDeliveryEtaChange = (val: string) => {
+    setEtaDelivery(val);
+    const etaIso = getDeliveryEtaIso(val);
+    if (load?.delivery_datetime && etaIso) {
+      if (isDeliveryEtaDelayed(load.delivery_datetime, etaIso)) {
+        if (status === 'on_time') {
+          setStatus('delayed');
+        }
+      }
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -150,14 +236,19 @@ export const CheckCallModal: React.FC<CheckCallModalProps> = ({
 
     setIsSubmitting(true);
     try {
+      const validLat = typeof latitude === 'number' && Number.isFinite(latitude) ? latitude : null;
+      const validLng = typeof longitude === 'number' && Number.isFinite(longitude) ? longitude : null;
+
       if (isEditing && initialCheckCall) {
         await onSubmit({
           call_type: callType,
           status: status,
           location_city: trimmedCity || null,
           location_state: trimmedState || null,
-          eta_pickup: etaPickup ? new Date(etaPickup).toISOString() : null,
-          eta_delivery: etaDelivery ? new Date(etaDelivery).toISOString() : null,
+          latitude: validLat,
+          longitude: validLng,
+          eta_pickup: parseInputToIso(etaPickup),
+          eta_delivery: parseInputToIso(etaDelivery),
           notes: trimmedNotes || null,
         } as UpdateCheckCallInput);
       } else {
@@ -171,8 +262,10 @@ export const CheckCallModal: React.FC<CheckCallModalProps> = ({
           status: status,
           location_city: trimmedCity || null,
           location_state: trimmedState || null,
-          eta_pickup: etaPickup ? new Date(etaPickup).toISOString() : null,
-          eta_delivery: etaDelivery ? new Date(etaDelivery).toISOString() : null,
+          latitude: validLat,
+          longitude: validLng,
+          eta_pickup: parseInputToIso(etaPickup),
+          eta_delivery: parseInputToIso(etaDelivery),
           notes: trimmedNotes || null,
           created_by: createdBy.trim() || 'Dispatcher',
         } as CreateCheckCallInput);
@@ -244,7 +337,9 @@ export const CheckCallModal: React.FC<CheckCallModalProps> = ({
                 } else if (nextType === 'delivered') {
                   setStatus('completed');
                 } else if (status === 'delayed') {
-                  setStatus('on_time');
+                  if (!isEtaDelayed) {
+                    setStatus('on_time');
+                  }
                 }
               }}
               className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-slate-200 text-xs font-semibold focus:outline-none focus:border-indigo-500 cursor-pointer"
@@ -285,6 +380,27 @@ export const CheckCallModal: React.FC<CheckCallModalProps> = ({
             <MapPin className="w-3 h-3" />
             <span>Driver GPS / Check-In Location (Optional)</span>
           </div>
+
+          {latitude !== null && longitude !== null && (
+            <div id="checkcall-gps-indicator" className="flex items-center justify-between px-2.5 py-1.5 bg-indigo-950/40 border border-indigo-800/60 rounded-lg text-[11px]">
+              <div className="flex items-center gap-1.5 text-indigo-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                <span className="font-semibold text-indigo-200">Driver GPS captured</span>
+                <span className="text-slate-400 font-mono text-[10px]">({latitude.toFixed(4)}, {longitude.toFixed(4)})</span>
+              </div>
+              <button
+                id="checkcall-clear-gps-btn"
+                type="button"
+                onClick={() => {
+                  setLatitude(null);
+                  setLongitude(null);
+                }}
+                className="text-[10px] text-slate-400 hover:text-rose-300 transition underline cursor-pointer"
+              >
+                Clear GPS
+              </button>
+            </div>
+          )}
 
           <div className="grid grid-cols-3 gap-2">
             <div className="col-span-2">
@@ -344,9 +460,23 @@ export const CheckCallModal: React.FC<CheckCallModalProps> = ({
               id="checkcall-delivery-eta"
               type="datetime-local"
               value={etaDelivery}
-              onChange={(e) => setEtaDelivery(e.target.value)}
-              className="w-full px-3 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-slate-200 font-mono text-xs focus:outline-none focus:border-indigo-500"
+              onChange={(e) => handleDeliveryEtaChange(e.target.value)}
+              className={`w-full px-3 py-1.5 bg-slate-950 border rounded-lg text-slate-200 font-mono text-xs focus:outline-none ${
+                isEtaDelayed
+                  ? 'border-amber-500/80 focus:border-amber-400'
+                  : 'border-slate-700 focus:border-indigo-500'
+              }`}
             />
+            {isEtaDelayed && (
+              <p className="text-[11px] text-amber-400 mt-1.5 flex items-center gap-1 font-medium">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>
+                  ETA is later than scheduled delivery.
+                  {status === 'delayed' && ' Status set to Delayed.'}
+                  {status === 'at_risk' && ' Flagged At Risk.'}
+                </span>
+              </p>
+            )}
           </div>
         </div>
 

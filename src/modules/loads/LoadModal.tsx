@@ -97,8 +97,30 @@ export const parseDateAndTimeToInputs = (
   operationalTimezone: string = DEFAULT_OPERATIONAL_TIMEZONE
 ): { date: string; time: string } => {
   if (!isoString) return { date: '', time: '' };
+  const trimmed = typeof isoString === 'string' ? isoString.trim() : '';
+  if (!trimmed) return { date: '', time: '' };
+
+  // If the incoming value is a pure date: YYYY-MM-DD, return unchanged
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return {
+      date: trimmed,
+      time: '',
+    };
+  }
+
+  // If the incoming value is a UTC-midnight representation used as a date-only value
+  // (e.g. 2026-09-23T00:00:00.000Z, 2026-09-23T00:00:00Z, 2026-09-23 00:00:00),
+  // preserve the calendar date without shifting backward into the prior day.
+  const utcMidnightMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2})[T ]00:00(?::00(?:\.000)?)?(?:Z|[+-]00:?00)?$/);
+  if (utcMidnightMatch) {
+    return {
+      date: utcMidnightMatch[1],
+      time: '',
+    };
+  }
+
   try {
-    const d = new Date(isoString);
+    const d = new Date(trimmed);
     if (isNaN(d.getTime())) return { date: '', time: '' };
 
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -313,7 +335,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
   const [originFacilityName, setOriginFacilityName] = useState('');
   const [originAddress, setOriginAddress] = useState('');
   const [originCity, setOriginCity] = useState('');
-  const [originState, setOriginState] = useState('TX');
+  const [originState, setOriginState] = useState('');
   const [originZip, setOriginZip] = useState('');
   const [pickupDate, setPickupDate] = useState('');
   const [pickupTime, setPickupTime] = useState('08:00');
@@ -322,18 +344,18 @@ export const LoadModal: React.FC<LoadModalProps> = ({
   const [destFacilityName, setDestFacilityName] = useState('');
   const [destAddress, setDestAddress] = useState('');
   const [destCity, setDestCity] = useState('');
-  const [destState, setDestState] = useState('GA');
+  const [destState, setDestState] = useState('');
   const [destZip, setDestZip] = useState('');
   const [deliveryDate, setDeliveryDate] = useState('');
   const [deliveryTime, setDeliveryTime] = useState('17:00');
 
   // Financials & Miles
-  const [rate, setRate] = useState<string>('2400');
-  const [loadedMiles, setLoadedMiles] = useState<string>('750');
-  const [deadheadMiles, setDeadheadMiles] = useState<string>('40');
-  const [fuelExpense, setFuelExpense] = useState<string>('480');
-  const [driverPay, setDriverPay] = useState<string>('600');
-  const [otherExpenses, setOtherExpenses] = useState<string>('50');
+  const [rate, setRate] = useState<string>('');
+  const [loadedMiles, setLoadedMiles] = useState<string>('');
+  const [deadheadMiles, setDeadheadMiles] = useState<string>('0');
+  const [fuelExpense, setFuelExpense] = useState<string>('');
+  const [driverPay, setDriverPay] = useState<string>('');
+  const [otherExpenses, setOtherExpenses] = useState<string>('');
 
   const [specialInstructions, setSpecialInstructions] = useState('');
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -448,45 +470,48 @@ export const LoadModal: React.FC<LoadModalProps> = ({
     } else {
       // Default new load values
       setLoadNumber(nextLoadNumber || `LD-${new Date().getFullYear()}-8850`);
-      const defaultClient = clients[0]?.id || '';
-      setClientId(defaultClient);
-      setBrokerId(brokers[0]?.id || '');
-
-      // Check trucks for default client
-      const clientTrucks = trucks.filter((t) => t.client_id === defaultClient);
-      setTruckId(clientTrucks[0]?.id || '');
-
-      const clientDrivers = drivers.filter((d) => d.client_id === defaultClient);
-      setDriverId(clientDrivers[0]?.id || '');
+      setClientId('');
+      setBrokerId('');
+      setTruckId('');
+      setDriverId('');
 
       setPipelineStatus('sourced');
       setEquipmentType('dry_van');
-      setCommodity('General Freight / Palletized');
-      setWeightLbs('38000');
+      setCommodity('');
+      setWeightLbs('');
       setAssignedDispatcherId('');
 
-      setOriginCity('Dallas');
-      setOriginState('TX');
-      setOriginZip('75207');
+      setOriginFacilityName('');
+      setOriginAddress('');
+      setOriginCity('');
+      setOriginState('');
+      setOriginZip('');
 
-      const tomorrow = new Date(Date.now() + 86400000);
-      const dayAfter = new Date(Date.now() + 2 * 86400000);
+      // Default dates: tomorrow (+1 calendar day) and day after (+2 calendar days) in operational timezone
+      const todayStr = toLocalDateString(new Date(), operationalTimezone);
+      const [tYear, tMonth, tDay] = todayStr.split('-').map(Number);
+      const pad = (n: number) => n.toString().padStart(2, '0');
 
-      setPickupDate(toLocalDateString(tomorrow, operationalTimezone));
+      const tomorrowDate = new Date(Date.UTC(tYear, tMonth - 1, tDay + 1));
+      const dayAfterDate = new Date(Date.UTC(tYear, tMonth - 1, tDay + 2));
+
+      setPickupDate(`${tomorrowDate.getUTCFullYear()}-${pad(tomorrowDate.getUTCMonth() + 1)}-${pad(tomorrowDate.getUTCDate())}`);
       setPickupTime('08:00');
 
-      setDestCity('Atlanta');
-      setDestState('GA');
-      setDestZip('30301');
-      setDeliveryDate(toLocalDateString(dayAfter, operationalTimezone));
+      setDestFacilityName('');
+      setDestAddress('');
+      setDestCity('');
+      setDestState('');
+      setDestZip('');
+      setDeliveryDate(`${dayAfterDate.getUTCFullYear()}-${pad(dayAfterDate.getUTCMonth() + 1)}-${pad(dayAfterDate.getUTCDate())}`);
       setDeliveryTime('17:00');
 
-      setRate('2450');
-      setLoadedMiles('780');
+      setRate('');
+      setLoadedMiles('');
       setDeadheadMiles('0');
-      setFuelExpense('485');
-      setDriverPay('660');
-      setOtherExpenses('50');
+      setFuelExpense('');
+      setDriverPay('');
+      setOtherExpenses('');
       setSpecialInstructions('');
     }
   }, [isOpen, initialLoad?.id, operationalTimezone]);
@@ -1310,7 +1335,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
               required
               value={loadNumber}
               onChange={(e) => setLoadNumber(e.target.value.toUpperCase())}
-              placeholder="e.g. LD-2024-8841"
+              placeholder="e.g. LD-2026-1001"
               className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono font-bold focus:outline-none focus:border-indigo-500"
             />
             {formErrors.loadNumber && (
@@ -1557,7 +1582,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                 <input
                   id="origin-facility-input"
                   type="text"
-                  placeholder="e.g. Midwest Distribution Center"
+                  placeholder="e.g. Central Logistics Center"
                   value={originFacilityName}
                   onChange={(e) => setOriginFacilityName(e.target.value)}
                   className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
@@ -1568,7 +1593,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                 <input
                   id="origin-address-input"
                   type="text"
-                  placeholder="e.g. 4800 S Central Ave"
+                  placeholder="e.g. 1000 Industrial Pkwy"
                   value={originAddress}
                   onChange={(e) => setOriginAddress(e.target.value)}
                   className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
@@ -1586,7 +1611,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                   id="origin-city-input"
                   type="text"
                   required
-                  placeholder="e.g. Dallas"
+                  placeholder="e.g. Chicago"
                   value={originCity}
                   onChange={(e) => setOriginCity(e.target.value)}
                   className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-indigo-500"
@@ -1606,6 +1631,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                   onChange={(e) => setOriginState(e.target.value)}
                   className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-indigo-500 cursor-pointer"
                 >
+                  <option value="">State...</option>
                   {US_STATES.map((st) => (
                     <option key={st} value={st}>
                       {st}
@@ -1619,7 +1645,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                 <input
                   id="origin-zip-input"
                   type="text"
-                  placeholder="75207"
+                  placeholder="e.g. 60601"
                   value={originZip}
                   onChange={(e) => setOriginZip(e.target.value)}
                   className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
@@ -1697,7 +1723,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                 <input
                   id="dest-facility-input"
                   type="text"
-                  placeholder="e.g. Texas Distribution Hub"
+                  placeholder="e.g. Metro Freight Terminal"
                   value={destFacilityName}
                   onChange={(e) => setDestFacilityName(e.target.value)}
                   className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
@@ -1708,7 +1734,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                 <input
                   id="dest-address-input"
                   type="text"
-                  placeholder="e.g. 5200 Mountain Creek Pkwy"
+                  placeholder="e.g. 2500 Commerce Way"
                   value={destAddress}
                   onChange={(e) => setDestAddress(e.target.value)}
                   className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
@@ -1726,7 +1752,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                   id="dest-city-input"
                   type="text"
                   required
-                  placeholder="e.g. Atlanta"
+                  placeholder="e.g. Houston"
                   value={destCity}
                   onChange={(e) => setDestCity(e.target.value)}
                   className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 focus:outline-none focus:border-indigo-500"
@@ -1746,6 +1772,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                   onChange={(e) => setDestState(e.target.value)}
                   className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-indigo-500 cursor-pointer"
                 >
+                  <option value="">State...</option>
                   {US_STATES.map((st) => (
                     <option key={st} value={st}>
                       {st}
@@ -1759,7 +1786,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                 <input
                   id="dest-zip-input"
                   type="text"
-                  placeholder="30301"
+                  placeholder="e.g. 77001"
                   value={destZip}
                   onChange={(e) => setDestZip(e.target.value)}
                   className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
@@ -1868,7 +1895,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
               <input
                 id="load-commodity-input"
                 type="text"
-                placeholder="e.g. Packaged Consumer Electronics"
+                placeholder="e.g. Palletized Dry Goods"
                 value={commodity}
                 onChange={(e) => setCommodity(e.target.value)}
                 className="w-full px-2.5 py-2 bg-slate-950 border border-slate-700 rounded-lg text-slate-200 focus:outline-none focus:border-indigo-500"
@@ -1882,7 +1909,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
                 type="number"
                 min="0"
                 step="100"
-                placeholder="38000"
+                placeholder="e.g. 40000"
                 value={weightLbs}
                 onChange={(e) => setWeightLbs(e.target.value)}
                 className="w-full px-2.5 py-2 bg-slate-950 border border-slate-700 rounded-lg text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
@@ -2047,7 +2074,7 @@ export const LoadModal: React.FC<LoadModalProps> = ({
           <textarea
             id="load-special-instructions-input"
             rows={2}
-            placeholder="e.g. Check in at Gate 4 with Broker PO #123. Lock trailer with bolt seal. 4-hour check call cadence mandatory."
+            placeholder="e.g. Standard appointment window. Call dispatch upon arrival and departure. Verify seal number on BOL."
             value={specialInstructions}
             onChange={(e) => setSpecialInstructions(e.target.value)}
             className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-slate-200 focus:outline-none focus:border-indigo-500 placeholder:text-slate-600 resize-none font-sans"

@@ -7,6 +7,7 @@ export const SUPPORTED_TIMEZONES: SupportedTimezone[] = [
   { id: 'America/Los_Angeles', label: 'US Pacific (PT)', code: 'PST/PDT', region: 'US' },
   { id: 'America/Toronto', label: 'Canada Eastern (ET)', code: 'EST/EDT', region: 'Canada' },
   { id: 'Asia/Kolkata', label: 'India Standard Time (IST)', code: 'IST', region: 'India' },
+  { id: 'Asia/Karachi', label: 'Pakistan Standard Time (PKT)', code: 'PKT', region: 'Pakistan' },
 ];
 
 export const DEFAULT_DISPATCHER_TIMEZONE = 'Asia/Kolkata';

@@ -22,6 +22,7 @@ import {
   Search,
   Filter,
   RefreshCw,
+  RotateCcw,
   Eye,
   Edit2,
   Trash2,
@@ -119,6 +120,28 @@ export const LoadList: React.FC<LoadListProps> = ({
     if (role === 'dispatcher') return 'Dispatcher';
     if (role === 'staff') return 'Staff';
     return role ? role.charAt(0).toUpperCase() + role.slice(1) : 'Staff';
+  };
+
+  const hasActiveFilters = Boolean(
+    (filters.search && filters.search.trim()) ||
+    (filters.status && filters.status !== 'all') ||
+    (filters.dispatcherId && filters.dispatcherId !== 'all') ||
+    (filters.clientId && filters.clientId !== 'all') ||
+    (filters.brokerId && filters.brokerId !== 'all') ||
+    (filters.equipmentType && filters.equipmentType !== 'all') ||
+    (filters.dateRange && filters.dateRange !== 'all')
+  );
+
+  const handleResetFilters = () => {
+    onFilterChange({
+      search: '',
+      clientId: 'all',
+      brokerId: 'all',
+      equipmentType: 'all',
+      status: 'all',
+      dispatcherId: 'all',
+      dateRange: 'all',
+    });
   };
 
   return (
@@ -269,6 +292,22 @@ export const LoadList: React.FC<LoadListProps> = ({
               <option value="past">Completed / Past</option>
             </select>
           </div>
+
+          {/* Reset Filters Action */}
+          {hasActiveFilters && (
+            <div className="col-span-2 sm:col-span-3 lg:col-span-6 flex justify-end pt-1">
+              <button
+                id="loads-reset-filters-btn"
+                type="button"
+                onClick={handleResetFilters}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700/90 border border-slate-700/60 rounded-lg text-xs font-semibold text-slate-200 hover:text-white transition-colors cursor-pointer shadow-xs"
+                title="Reset all Load & Dispatch filters"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+                <span>Reset Filters</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

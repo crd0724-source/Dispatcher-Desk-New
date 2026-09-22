@@ -18,6 +18,8 @@ interface ConversationThreadProps {
   onRefresh: () => Promise<void>;
   onBack?: () => void;
   onAcknowledgeMessage?: (messageId: string) => Promise<void>;
+  onLogCheckCall?: (message: ConversationMessage) => void;
+  loggedCheckCallMessageIds?: Set<string>;
   currentUserId?: string;
 }
 
@@ -34,6 +36,8 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
   onRefresh,
   onBack,
   onAcknowledgeMessage,
+  onLogCheckCall,
+  loggedCheckCallMessageIds,
   currentUserId,
 }) => {
   if (!conversation) {
@@ -101,6 +105,8 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
         currentUserId={currentUserId}
         driverName={conversation.driver?.full_name || 'Driver'}
         onAcknowledgeMessage={onAcknowledgeMessage}
+        onLogCheckCall={onLogCheckCall}
+        loggedCheckCallMessageIds={loggedCheckCallMessageIds}
       />
 
       {/* Message Input Composer */}

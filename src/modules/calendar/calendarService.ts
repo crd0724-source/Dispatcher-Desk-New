@@ -7,8 +7,30 @@ import {
 } from './calendarTypes.ts';
 import { loadService } from '../loads/loadService.ts';
 import { taskService } from '../tasks/taskService.ts';
-import { checkCallService } from '../checkcalls/checkCallService.ts';
+import { checkCallService, isLoadActiveForCheckInTracking } from '../checkcalls/checkCallService.ts';
+import { isDeliveryEtaDelayed, isOperationalException } from '../checkcalls/checkCallTypes.ts';
 import { getEffectiveDueAt } from '../tasks/taskService.ts';
+import { constructIsoDatetime } from '../loads/LoadModal.tsx';
+
+/**
+ * Normalizes date input for calendar operations.
+ * If the input is a pure date-only string (YYYY-MM-DD), anchors it to the specified
+ * default operational time (e.g. 17:00 for delivery/ETA, 08:00 for pickup) in the operational timezone,
+ * preventing UTC midnight from shifting backward by one day in North American timezones.
+ */
+export function normalizeCalendarDatetime(
+  datetimeStr: string | null | undefined,
+  operationalTz: string,
+  defaultTime: string = '17:00'
+): string | null | undefined {
+  if (!datetimeStr) return datetimeStr;
+  const trimmed = datetimeStr.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const iso = constructIsoDatetime(trimmed, defaultTime, operationalTz);
+    return iso || trimmed;
+  }
+  return trimmed;
+}
 
 export class CalendarService {
   /**
@@ -32,7 +54,8 @@ export class CalendarService {
     // 1. Derive Pickup Events
     loads.forEach((load) => {
       if (load.pickup_datetime) {
-        const pickupMs = new Date(load.pickup_datetime).getTime();
+        const effectivePickup = normalizeCalendarDatetime(load.pickup_datetime, operationalTz, '08:00') || load.pickup_datetime;
+        const pickupMs = new Date(effectivePickup).getTime();
         const isPast = pickupMs < nowMs;
         const isCompleted = ['in_transit', 'delivered', 'invoiced', 'paid'].includes(load.pipeline_status);
         const isOverdue = isPast && !isCompleted;
@@ -47,7 +70,7 @@ export class CalendarService {
           sourceType: 'load',
           sourceId: load.id,
           title: `Pickup: #${load.load_number} (${load.origin_city}, ${load.origin_state})`,
-          datetime: load.pickup_datetime,
+          datetime: effectivePickup,
           eventType: 'pickup',
           status: load.pipeline_status,
           urgency,
@@ -72,7 +95,8 @@ export class CalendarService {
 
       // 2. Derive Delivery Events
       if (load.delivery_datetime) {
-        const deliveryMs = new Date(load.delivery_datetime).getTime();
+        const effectiveDelivery = normalizeCalendarDatetime(load.delivery_datetime, operationalTz, '17:00') || load.delivery_datetime;
+        const deliveryMs = new Date(effectiveDelivery).getTime();
         const isPast = deliveryMs < nowMs;
         const isCompleted = ['delivered', 'invoiced', 'paid'].includes(load.pipeline_status);
         const isOverdue = isPast && !isCompleted;
@@ -87,7 +111,7 @@ export class CalendarService {
           sourceType: 'load',
           sourceId: load.id,
           title: `Delivery: #${load.load_number} (${load.dest_city}, ${load.dest_state})`,
-          datetime: load.delivery_datetime,
+          datetime: effectiveDelivery,
           eventType: 'delivery',
           status: load.pipeline_status,
           urgency,
@@ -157,55 +181,60 @@ export class CalendarService {
 
     // 4. Derive Check Call Milestones & Follow-ups
     loads.forEach((load) => {
-      if (load.pipeline_status === 'in_transit' || load.pipeline_status === 'booked') {
+      if (isLoadActiveForCheckInTracking(load)) {
         const loadCheckCalls = checkCalls.filter((cc) => cc.load_id === load.id);
         const latestCall = loadCheckCalls[0] || checkCalls.find((cc) => cc.load_id === load.id);
         
-        // 4a. Check-Call Due / Milestone Scheduled Event
-        // If there's an upcoming ETA pickup / delivery or reported check-in window
-        const checkCallTargetTime = latestCall?.eta_delivery || latestCall?.eta_pickup || load.pickup_datetime;
-        if (checkCallTargetTime) {
-          const targetDate = new Date(checkCallTargetTime);
-          const isCheckCallOverdue = targetDate.getTime() < now.getTime() && latestCall?.status !== 'completed';
+        const isEtaLate = Boolean(
+          latestCall &&
+          isDeliveryEtaDelayed(
+            load.delivery_datetime,
+            latestCall.eta_delivery
+          )
+        );
 
-          events.push({
-            id: `check-call-due-${load.id}`,
-            sourceType: 'check_call',
-            sourceId: latestCall ? latestCall.id : `load-cc-${load.id}`,
-            title: `Transit Check-In: #${load.load_number}`,
-            datetime: checkCallTargetTime,
-            eventType: 'check_call_due',
-            status: latestCall ? latestCall.status : 'scheduled',
-            urgency: isCheckCallOverdue ? 'overdue' : latestCall?.status === 'at_risk' ? 'urgent' : 'normal',
-            isOverdue: isCheckCallOverdue,
-            loadNumber: load.load_number,
-            driverName: load.driver?.full_name,
-            truckUnit: load.truck?.truck_number,
-            driverId: load.driver_id || undefined,
-            truckId: load.truck_id || undefined,
-            clientId: load.client_id || undefined,
-            brokerId: load.broker_id || undefined,
-            origin: `${load.origin_city}, ${load.origin_state}`,
-            destination: `${load.dest_city}, ${load.dest_state}`,
-            lastLocation: latestCall ? `${latestCall.location_city || ''}, ${latestCall.location_state || ''}`.replace(/^, |^,$/, '') : undefined,
-            reportedEta: latestCall?.eta_delivery || latestCall?.eta_pickup || undefined,
-            rawLoad: load,
-            rawCheckCall: latestCall,
-          });
-        }
+        const isDelayed = Boolean(
+          latestCall &&
+          (latestCall.status === 'delayed' || isEtaLate)
+        );
 
-        // 4b. If there's an explicit delay warning
-        if (latestCall && latestCall.status === 'delayed' && latestCall.eta_delivery) {
+        const hasException = Boolean(
+          latestCall &&
+          isOperationalException(
+            latestCall.call_type,
+            latestCall.status,
+            load.delivery_datetime,
+            latestCall.eta_delivery
+          )
+        );
+
+        const effectiveStatus =
+          isDelayed
+            ? 'delayed'
+            : (latestCall?.status || 'scheduled');
+
+        const isDelayedEta = Boolean(
+          latestCall &&
+          (isDelayed || hasException) &&
+          latestCall.eta_delivery
+        );
+
+        if (isDelayedEta && latestCall?.eta_delivery) {
+          // 4b. When the latest check call represents an active delayed ETA:
+          // Emit the existing eta_warning event as the primary exception representation
+          const effectiveEtaDelivery = normalizeCalendarDatetime(latestCall.eta_delivery, operationalTz, '17:00') || latestCall.eta_delivery;
+          const isWarningOverdue = new Date(effectiveEtaDelivery).getTime() < now.getTime();
+
           events.push({
             id: `eta-warning-${load.id}`,
             sourceType: 'check_call',
             sourceId: latestCall.id,
             title: `Delay Warning: #${load.load_number}`,
-            datetime: latestCall.eta_delivery,
+            datetime: effectiveEtaDelivery,
             eventType: 'eta_warning',
             status: 'delayed',
-            urgency: 'overdue',
-            isOverdue: true,
+            urgency: isWarningOverdue ? 'overdue' : 'urgent',
+            isOverdue: isWarningOverdue,
             loadNumber: load.load_number,
             driverName: load.driver?.full_name,
             truckUnit: load.truck?.truck_number,
@@ -220,6 +249,44 @@ export class CalendarService {
             rawLoad: load,
             rawCheckCall: latestCall,
           });
+        } else {
+          // 4a. Check-Call Due / Milestone Scheduled Event for normal / non-delayed load
+          const rawCheckCallTarget = latestCall?.eta_delivery || latestCall?.eta_pickup || load.pickup_datetime;
+          if (rawCheckCallTarget) {
+            const checkCallTargetTime = normalizeCalendarDatetime(rawCheckCallTarget, operationalTz, '17:00') || rawCheckCallTarget;
+            const targetDate = new Date(checkCallTargetTime);
+            const isCheckCallOverdue = targetDate.getTime() < now.getTime() && latestCall?.status !== 'completed';
+
+            events.push({
+              id: `check-call-due-${load.id}`,
+              sourceType: 'check_call',
+              sourceId: latestCall ? latestCall.id : `load-cc-${load.id}`,
+              title: `Transit Check-In: #${load.load_number}`,
+              datetime: checkCallTargetTime,
+              eventType: 'check_call_due',
+              status: effectiveStatus,
+              urgency:
+                isCheckCallOverdue
+                  ? 'overdue'
+                  : (latestCall?.status === 'at_risk' || hasException)
+                    ? 'urgent'
+                    : 'normal',
+              isOverdue: isCheckCallOverdue,
+              loadNumber: load.load_number,
+              driverName: load.driver?.full_name,
+              truckUnit: load.truck?.truck_number,
+              driverId: load.driver_id || undefined,
+              truckId: load.truck_id || undefined,
+              clientId: load.client_id || undefined,
+              brokerId: load.broker_id || undefined,
+              origin: `${load.origin_city}, ${load.origin_state}`,
+              destination: `${load.dest_city}, ${load.dest_state}`,
+              lastLocation: latestCall ? `${latestCall.location_city || ''}, ${latestCall.location_state || ''}`.replace(/^, |^,$/, '') : undefined,
+              reportedEta: latestCall?.eta_delivery || latestCall?.eta_pickup || undefined,
+              rawLoad: load,
+              rawCheckCall: latestCall,
+            });
+          }
         }
       }
     });
@@ -237,7 +304,7 @@ export class CalendarService {
     let overdueCount = 0;
 
     events.forEach((ev) => {
-      const evDateStr = getLocalDateString(new Date(ev.datetime), operationalTz);
+      const evDateStr = getLocalDateString(ev.datetime, operationalTz);
       const isToday = evDateStr === todayStr;
 
       if (ev.isOverdue) {
@@ -304,8 +371,13 @@ export class CalendarService {
       }
 
       // 2. Event Type Filter
-      if (filters.eventTypes.length > 0 && !filters.eventTypes.includes(event.eventType)) {
-        return false;
+      if (filters.eventTypes.length > 0) {
+        const matchesDirect = filters.eventTypes.includes(event.eventType);
+        const matchesCheckCallGroup =
+          event.eventType === 'eta_warning' && filters.eventTypes.includes('check_call_due');
+        if (!matchesDirect && !matchesCheckCallGroup) {
+          return false;
+        }
       }
 
       // 3. Client Filter
@@ -348,7 +420,13 @@ export class CalendarService {
 /**
  * Returns formatted YYYY-MM-DD string in a specific timezone
  */
-export function getLocalDateString(date: Date, timeZone: string): string {
+export function getLocalDateString(date: Date | string, timeZone: string): string {
+  if (typeof date === 'string') {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
+      return date.trim();
+    }
+    date = new Date(date);
+  }
   try {
     const formatter = new Intl.DateTimeFormat('en-CA', {
       timeZone,
@@ -371,12 +449,13 @@ export function getDaysInWeek(anchorDate: Date, startOnMonday: boolean = false):
   
   const diff = current.getDate() - day + (startOnMonday ? (day === 0 ? -6 : 1) : 0);
   const startOfWeek = new Date(current.setDate(diff));
-  startOfWeek.setHours(0, 0, 0, 0);
+  startOfWeek.setHours(12, 0, 0, 0);
 
   const days: Date[] = [];
   for (let i = 0; i < 7; i++) {
     const d = new Date(startOfWeek);
     d.setDate(startOfWeek.getDate() + i);
+    d.setHours(12, 0, 0, 0);
     days.push(d);
   }
   return days;

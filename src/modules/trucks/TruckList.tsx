@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   Power,
   Building2,
+  RotateCcw,
 } from 'lucide-react';
 
 interface TruckListProps {
@@ -87,11 +88,12 @@ export const TruckList: React.FC<TruckListProps> = ({
     return matchesSearch && matchesStatus && matchesEquipment && matchesClient;
   });
 
-  const hasActiveFilters =
-    searchQuery !== '' ||
+  const hasActiveFilters = Boolean(
+    searchQuery.trim() ||
     statusFilter !== 'all' ||
     equipmentFilter !== 'all' ||
-    clientFilter !== 'all';
+    clientFilter !== 'all'
+  );
 
   const clearFilters = () => {
     setSearchQuery('');
@@ -184,6 +186,19 @@ export const TruckList: React.FC<TruckListProps> = ({
             </select>
           </div>
 
+          {hasActiveFilters && (
+            <button
+              id="trucks-reset-filters-btn"
+              type="button"
+              onClick={clearFilters}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 rounded-lg text-xs font-semibold text-slate-200 hover:text-white transition-colors cursor-pointer shrink-0"
+              title="Reset all filters"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+              <span>Reset Filters</span>
+            </button>
+          )}
+
           {/* Refresh Button */}
           <button
             id="trucks-refresh-btn"
@@ -262,10 +277,12 @@ export const TruckList: React.FC<TruckListProps> = ({
           </p>
           {hasActiveFilters && (
             <button
+              type="button"
               onClick={clearFilters}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 rounded-lg text-xs font-semibold text-slate-200 hover:text-white transition-colors cursor-pointer"
             >
-              Clear All Filters
+              <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+              <span>Reset Filters</span>
             </button>
           )}
         </div>

@@ -11,6 +11,7 @@ import {
   LoadTrackingSummary,
   TrackingStats,
   isOperationalException,
+  isDeliveryEtaDelayed,
   formatTimeSince,
 } from './checkCallTypes.ts';
 
@@ -429,6 +430,8 @@ class CheckCallService implements ICheckCallService {
     const etaPickup = payload.eta_pickup || null;
     const etaDelivery = payload.eta_delivery || null;
 
+    let persistedCheckCall: CheckCall | null = null;
+
     if (isSupabaseConfigured && isUUID(payload.load_id)) {
       try {
         const { data, error } = await (supabase.from('check_calls' as any) as any)
@@ -454,36 +457,51 @@ class CheckCallService implements ICheckCallService {
           // Synchronize local cache
           const existing = this.readRawCheckCalls(organizationId);
           this.writeRawCheckCalls(organizationId, [createdCheckCall, ...existing.filter((c) => c.id !== createdCheckCall.id)]);
-          return createdCheckCall;
+          persistedCheckCall = createdCheckCall;
         }
       } catch (err) {
         console.warn('Supabase createCheckCall failed, saving locally:', err);
       }
     }
 
-    const now = new Date().toISOString();
-    const newCheckCall: CheckCall = {
-      id: `checkcall-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      organization_id: organizationId,
-      load_id: payload.load_id,
-      call_type: payload.call_type,
-      status: payload.status,
-      location_city: city,
-      location_state: state,
-      latitude: latitude,
-      longitude: longitude,
-      eta_pickup: etaPickup,
-      eta_delivery: etaDelivery,
-      notes: notes,
-      created_by: createdBy,
-      created_at: now,
-      updated_at: now,
-    };
+    if (!persistedCheckCall) {
+      const now = new Date().toISOString();
+      const newCheckCall: CheckCall = {
+        id: `checkcall-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        organization_id: organizationId,
+        load_id: payload.load_id,
+        call_type: payload.call_type,
+        status: payload.status,
+        location_city: city,
+        location_state: state,
+        latitude: latitude,
+        longitude: longitude,
+        eta_pickup: etaPickup,
+        eta_delivery: etaDelivery,
+        notes: notes,
+        created_by: createdBy,
+        created_at: now,
+        updated_at: now,
+      };
 
-    const existing = this.readRawCheckCalls(organizationId);
-    this.writeRawCheckCalls(organizationId, [newCheckCall, ...existing]);
+      const existing = this.readRawCheckCalls(organizationId);
+      this.writeRawCheckCalls(organizationId, [newCheckCall, ...existing]);
+      persistedCheckCall = newCheckCall;
+    }
 
-    return newCheckCall;
+    // Advance canonical load lifecycle status from 'booked' to 'in_transit' when En Route to Delivery check call is logged
+    if (persistedCheckCall.call_type === 'en_route_delivery') {
+      try {
+        const currentTargetLoad = await loadService.getLoad(organizationId, payload.load_id);
+        if (currentTargetLoad && currentTargetLoad.pipeline_status === 'booked') {
+          await loadService.updateLoadStatus(organizationId, payload.load_id, 'in_transit');
+        }
+      } catch (transitionErr) {
+        console.error('[CheckCallService] Failed to advance booked load to in_transit:', transitionErr);
+      }
+    }
+
+    return persistedCheckCall;
   }
 
   public async updateCheckCall(
@@ -635,12 +653,26 @@ class CheckCallService implements ICheckCallService {
       }
     }
 
-    const hasException = latest ? isOperationalException(latest.call_type, latest.status) : false;
+    const isEtaLate = isTracked && isDeliveryEtaDelayed(load.delivery_datetime, latest?.eta_delivery);
+
+    let effectiveStatus = latest?.status || null;
+    if (isEtaLate && effectiveStatus === 'on_time') {
+      effectiveStatus = 'delayed';
+    }
+
+    const hasException = latest
+      ? isOperationalException(
+          latest.call_type,
+          latest.status,
+          isTracked ? load.delivery_datetime : null,
+          isTracked ? latest.eta_delivery : null
+        )
+      : false;
 
     return {
       latestCheckCall: latest,
       totalCheckCalls: calls.length,
-      currentStatus: latest?.status || null,
+      currentStatus: effectiveStatus,
       currentLocation: currentLocation,
       etaPickup: latest?.eta_pickup || load.pickup_datetime || null,
       etaDelivery: latest?.eta_delivery || load.delivery_datetime || null,
@@ -679,11 +711,17 @@ class CheckCallService implements ICheckCallService {
           missingRecentCheckInCount++;
         }
 
-        if (latest.status === 'on_time') onTimeCount++;
-        else if (latest.status === 'delayed') delayedCount++;
-        else if (latest.status === 'at_risk') atRiskCount++;
+        const isEtaLate = isDeliveryEtaDelayed(load.delivery_datetime, latest.eta_delivery);
+        let effectiveStatus = latest.status;
+        if (isEtaLate && effectiveStatus === 'on_time') {
+          effectiveStatus = 'delayed';
+        }
 
-        if (isOperationalException(latest.call_type, latest.status)) {
+        if (effectiveStatus === 'on_time') onTimeCount++;
+        else if (effectiveStatus === 'delayed') delayedCount++;
+        else if (effectiveStatus === 'at_risk') atRiskCount++;
+
+        if (isOperationalException(latest.call_type, latest.status, load.delivery_datetime, latest.eta_delivery)) {
           exceptionsCount++;
         }
       }

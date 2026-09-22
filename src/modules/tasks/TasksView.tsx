@@ -266,6 +266,22 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenLoadDetail }) => {
     });
   }, [tasks, activeTab, priorityFilter, categoryFilter, assigneeFilter, triggerSourceFilter, searchQuery, user]);
 
+  const hasActiveFilters = Boolean(
+    searchQuery.trim() ||
+    priorityFilter !== 'all' ||
+    categoryFilter !== 'all' ||
+    triggerSourceFilter !== 'all' ||
+    assigneeFilter !== 'all'
+  );
+
+  const handleResetFilters = () => {
+    setSearchQuery('');
+    setPriorityFilter('all');
+    setCategoryFilter('all');
+    setTriggerSourceFilter('all');
+    setAssigneeFilter('all');
+  };
+
   // Fast Actions
   const handleQuickComplete = async (task: DispatcherTask) => {
     if (!orgId || !canMutate) return;
@@ -873,6 +889,19 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenLoadDetail }) => {
               </option>
             ))}
           </select>
+
+          {hasActiveFilters && (
+            <button
+              id="tasks-reset-filters-btn"
+              type="button"
+              onClick={handleResetFilters}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 rounded-lg text-xs font-semibold text-slate-200 hover:text-white transition-colors cursor-pointer shrink-0"
+              title="Reset all filters"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+              <span>Reset Filters</span>
+            </button>
+          )}
         </div>
       </div>
 

@@ -10,6 +10,7 @@ import {
   Truck as TruckIcon,
   Calendar,
   Layers,
+  RotateCcw,
 } from 'lucide-react';
 
 interface PipelineFiltersProps {
@@ -156,8 +157,8 @@ export const PipelineFilters: React.FC<PipelineFiltersProps> = ({
               onClick={handleClearAll}
               className="h-9 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700/60 text-xs text-slate-200 font-medium flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
             >
-              <X className="w-3.5 h-3.5" />
-              <span>Clear ({activeFiltersCount})</span>
+              <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+              <span>Reset Filters</span>
             </button>
           )}
         </div>

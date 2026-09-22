@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext.tsx';
+import { useTimezone } from '../../contexts/TimezoneContext.tsx';
 import { loadService } from '../loads/loadService.ts';
+import { getLocalDateString } from '../calendar/calendarService.ts';
 import {
   LoadWithRelations,
   CreateLoadInput,
@@ -55,6 +57,7 @@ interface StatusConfirmationState {
 
 export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick, onNavigate }) => {
   const { activeOrganization, userRole } = useAuth();
+  const { operationalTimezone } = useTimezone();
   const orgId = activeOrganization?.id || 'demo-org-1';
 
   // Role permissions
@@ -260,7 +263,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick, onNa
 
   // Filtered dataset
   const filteredLoads = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateString(new Date(), operationalTimezone);
 
     return loads.filter((load) => {
       // Search
@@ -310,8 +313,18 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick, onNa
 
       // Date range filter
       if (filters.dateRange && filters.dateRange !== 'all') {
-        const pickupDate = load.pickup_datetime ? load.pickup_datetime.split('T')[0] : null;
-        const delivDate = load.delivery_datetime ? load.delivery_datetime.split('T')[0] : null;
+        const pickupDate = load.pickup_datetime
+          ? (() => {
+              const d = new Date(load.pickup_datetime);
+              return isNaN(d.getTime()) ? null : getLocalDateString(d, operationalTimezone);
+            })()
+          : null;
+        const delivDate = load.delivery_datetime
+          ? (() => {
+              const d = new Date(load.delivery_datetime);
+              return isNaN(d.getTime()) ? null : getLocalDateString(d, operationalTimezone);
+            })()
+          : null;
 
         if (filters.dateRange === 'today') {
           if (pickupDate !== today && delivDate !== today) return false;
@@ -324,7 +337,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick, onNa
 
       return true;
     });
-  }, [loads, filters]);
+  }, [loads, filters, operationalTimezone]);
 
   // Overall pipeline metrics summary
   const pipelineMetrics = useMemo(() => {
@@ -370,7 +383,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick, onNa
         {/* Action Controls Hierarchy */}
         <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 self-start lg:self-auto">
           {/* Secondary Tools Group */}
-          <div className="inline-flex items-center bg-slate-900/90 p-1 border border-slate-800/90 rounded-xl shadow-xs gap-1">
+          <div className="inline-flex items-center bg-slate-900/90 p-1 border border-slate-800/90 rounded-xl shadow-xs">
             <button
               id="pipeline-refresh-btn"
               type="button"
@@ -380,23 +393,6 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick, onNa
               title="Refresh Pipeline"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-sky-400' : ''}`} />
-            </button>
-            <button
-              id="pipeline-clear-filters-quick-btn"
-              type="button"
-              onClick={() =>
-                setFilters({
-                  search: '',
-                  clientId: '',
-                  brokerId: '',
-                  equipmentType: '',
-                  dateRange: 'all',
-                })
-              }
-              className="px-2.5 py-1 text-xs font-semibold text-slate-300 hover:text-slate-100 hover:bg-slate-800/90 rounded-lg transition-colors cursor-pointer"
-              title="Reset Filters"
-            >
-              Reset Filters
             </button>
           </div>
 
@@ -422,6 +418,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({ onNewLoadClick, onNa
                 if (onNewLoadClick) {
                   onNewLoadClick();
                 } else {
+                  setLoadToEdit(null);
                   setIsCreateModalOpen(true);
                 }
               }}

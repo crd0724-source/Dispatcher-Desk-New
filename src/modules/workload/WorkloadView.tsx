@@ -22,6 +22,7 @@ import {
   TrendingUp,
   X,
   Layers,
+  RotateCcw,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import { TeamMember, UserRole, PipelineStatus } from '../../types/domain.types.ts';
@@ -516,10 +517,13 @@ export const WorkloadView: React.FC<WorkloadViewProps> = ({
             {/* Reset Filters */}
             {hasActiveFilters && (
               <button
+                type="button"
                 onClick={handleResetFilters}
-                className="px-2.5 py-1.5 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 rounded-lg text-xs font-semibold text-slate-200 hover:text-white transition-colors cursor-pointer shrink-0"
+                title="Reset all filters"
               >
-                Reset
+                <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+                <span>Reset Filters</span>
               </button>
             )}
           </div>
@@ -549,10 +553,12 @@ export const WorkloadView: React.FC<WorkloadViewProps> = ({
           </p>
           {hasActiveFilters && (
             <button
+              type="button"
               onClick={handleResetFilters}
-              className="mt-4 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 rounded-lg text-xs font-semibold text-slate-200 hover:text-white transition-colors cursor-pointer"
             >
-              Reset All Filters
+              <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+              <span>Reset Filters</span>
             </button>
           )}
         </div>

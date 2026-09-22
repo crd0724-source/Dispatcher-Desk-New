@@ -145,7 +145,7 @@ export const DriverConversationList: React.FC<DriverConversationListProps> = ({
                         <p className="text-[11px] text-slate-400">Direct dispatcher communication</p>
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
+                    <div className="text-right shrink-0 flex flex-col items-end gap-1">
                       <span className="text-[10px] text-slate-500 flex items-center gap-0.5 justify-end">
                         <Clock className="w-2.5 h-2.5" />
                         {formatTimestamp(conv.updated_at || conv.created_at)}
@@ -210,7 +210,7 @@ export const DriverConversationList: React.FC<DriverConversationListProps> = ({
                         )}
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
+                    <div className="text-right shrink-0 flex flex-col items-end gap-1">
                       <span className="text-[10px] text-slate-500 flex items-center gap-0.5 justify-end">
                         <Clock className="w-2.5 h-2.5" />
                         {formatTimestamp(conv.updated_at || conv.created_at)}

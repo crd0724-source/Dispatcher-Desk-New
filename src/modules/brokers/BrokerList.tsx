@@ -30,6 +30,7 @@ import {
   AlertTriangle,
   Copy,
   Check,
+  RotateCcw,
 } from 'lucide-react';
 
 export interface BrokerListProps {
@@ -252,10 +253,14 @@ export const BrokerList: React.FC<BrokerListProps> = ({
 
           {activeFiltersCount > 0 && (
             <button
+              id="broker-reset-filters-btn"
+              type="button"
               onClick={resetFilters}
-              className="text-xs text-rose-400 hover:text-rose-300 font-medium px-2 py-1 transition-colors"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 rounded-lg text-xs font-semibold text-slate-200 hover:text-white transition-colors cursor-pointer shrink-0"
+              title="Reset all filters"
             >
-              Reset Filters ({activeFiltersCount})
+              <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+              <span>Reset Filters</span>
             </button>
           )}
         </div>

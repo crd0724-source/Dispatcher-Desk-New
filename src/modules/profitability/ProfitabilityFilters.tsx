@@ -115,10 +115,11 @@ export const ProfitabilityFilters: React.FC<ProfitabilityFiltersProps> = ({
               id="btn-clear-profitability-filters"
               type="button"
               onClick={onClearFilters}
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-400 hover:text-slate-200 bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 rounded-lg transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 rounded-lg text-xs font-semibold text-slate-200 hover:text-white transition-colors cursor-pointer shrink-0"
+              title="Reset all filters"
             >
-              <RotateCcw className="w-3 h-3" />
-              <span>Clear</span>
+              <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+              <span>Reset Filters</span>
             </button>
           )}
 

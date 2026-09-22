@@ -61,7 +61,6 @@ export const ConversationList: React.FC<ConversationListProps> = ({
   onTypeFilterChange,
   onRefresh,
 }) => {
-  // Filter conversations
   const filteredConversations = conversations.filter((c) => {
     // Status filter
     if (statusFilter === 'active' && c.status !== 'active' && c.status !== 'escalated') return false;
@@ -277,7 +276,6 @@ export const ConversationList: React.FC<ConversationListProps> = ({
           filteredConversations.map((conv) => {
             const isSelected = conv.id === selectedId;
             const driverName = conv.driver?.full_name || 'Driver';
-            const hasUnread = Boolean(conv.unread_count && conv.unread_count > 0);
             const isResolved = conv.status === 'resolved';
 
             return (
@@ -307,9 +305,6 @@ export const ConversationList: React.FC<ConversationListProps> = ({
                       <User className="w-4 h-4" />
                     )}
                   </div>
-                  {hasUnread && (
-                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-indigo-500 ring-2 ring-slate-900" />
-                  )}
                 </div>
 
                 {/* Card Content */}
@@ -322,9 +317,11 @@ export const ConversationList: React.FC<ConversationListProps> = ({
                     >
                       {driverName}
                     </span>
-                    <span className="text-[10px] text-slate-500 font-mono shrink-0">
-                      {formatRelativeTime(conv.updated_at)}
-                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        {formatRelativeTime(conv.updated_at)}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Load or General Tag */}

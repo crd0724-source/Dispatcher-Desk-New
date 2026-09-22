@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../../../contexts/AuthContext.tsx';
 import { communicationService } from '../../communication/communicationService.ts';
 import { Conversation, ConversationMessage, MessageType } from '../../communication/types.ts';
@@ -80,7 +80,11 @@ export const DriverChatView: React.FC<DriverChatViewProps> = ({
 
       // Ensure general conversation is in the list
       const hasGeneral = driverConvs.some((c) => c.id === generalConv.id);
-      const combined = hasGeneral ? driverConvs : [generalConv, ...driverConvs];
+      const rawCombined = hasGeneral ? driverConvs : [generalConv, ...driverConvs];
+      const combined = rawCombined.map((c) => ({
+        ...c,
+        unread_count: 0,
+      }));
 
       setConversations(combined);
 
@@ -117,18 +121,6 @@ export const DriverChatView: React.FC<DriverChatViewProps> = ({
       try {
         const msgs = await communicationService.listMessages(driverOrgId, conversationId);
         setMessages(msgs);
-
-        // Mark incoming unread dispatcher messages as read
-        const unreadIncoming = msgs.filter(
-          (m) => m.sender_id !== user?.id && !m.read_at
-        );
-        for (const unreadMsg of unreadIncoming) {
-          try {
-            await communicationService.markMessageRead(driverOrgId, unreadMsg.id);
-          } catch (readErr) {
-            console.warn('[DriverChatView] Non-fatal markMessageRead warning:', readErr);
-          }
-        }
       } catch (err: any) {
         console.error('[DriverChatView] Error loading messages:', err);
         setErrorMessage(err.message || 'Failed to load messages.');
@@ -136,7 +128,7 @@ export const DriverChatView: React.FC<DriverChatViewProps> = ({
         setIsLoadingMessages(false);
       }
     },
-    [driverOrgId, user?.id]
+    [driverOrgId]
   );
 
   useEffect(() => {

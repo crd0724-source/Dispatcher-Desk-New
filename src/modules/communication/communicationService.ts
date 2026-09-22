@@ -217,10 +217,6 @@ export class CommunicationService {
       currentUserId = null;
     }
 
-    if (!currentUserId && typeof globalThis.localStorage !== 'undefined') {
-      currentUserId = globalThis.localStorage.getItem('dispatchdesk_current_user_id') || 'mock-driver-user-1';
-    }
-
     if (currentUserId) {
       const mappedDriverId = this.getStorage<string | null>(
         `${DRIVER_IDENTITY_MAP_PREFIX}${organizationId}_${currentUserId}`,
@@ -853,8 +849,13 @@ export class CommunicationService {
     }
 
     let senderId = 'usr-current-sender-1';
-    if (typeof globalThis.localStorage !== 'undefined') {
-      senderId = globalThis.localStorage.getItem('dispatchdesk_current_user_id') || senderId;
+    try {
+      const authUser = (await supabase.auth.getUser())?.data?.user;
+      if (authUser?.id) {
+        senderId = authUser.id;
+      }
+    } catch {
+      // demo fallback
     }
 
     const now = new Date().toISOString();

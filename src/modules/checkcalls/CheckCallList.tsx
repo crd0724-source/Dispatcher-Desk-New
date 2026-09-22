@@ -4,6 +4,7 @@ import {
   CHECK_CALL_TYPE_LABELS,
   CHECK_CALL_STATUS_BADGES,
   isOperationalException,
+  isDeliveryEtaDelayed,
 } from './checkCallTypes.ts';
 import { useTimezone } from '../../contexts/TimezoneContext.tsx';
 import { formatDualTime } from '../../lib/timezones.ts';
@@ -57,8 +58,26 @@ export const CheckCallList: React.FC<CheckCallListProps> = ({
   return (
     <div className="space-y-3">
       {checkCalls.map((call) => {
-        const isException = isOperationalException(call.call_type, call.status);
-        const statusBadge = CHECK_CALL_STATUS_BADGES[call.status] || CHECK_CALL_STATUS_BADGES.on_time;
+        const isEtaLate = isDeliveryEtaDelayed(
+          call.load?.delivery_datetime,
+          call.eta_delivery
+        );
+
+        const effectiveStatus =
+          isEtaLate && call.status === 'on_time'
+            ? 'delayed'
+            : call.status;
+
+        const isException = isOperationalException(
+          call.call_type,
+          call.status,
+          call.load?.delivery_datetime,
+          call.eta_delivery
+        );
+
+        const statusBadge =
+          CHECK_CALL_STATUS_BADGES[effectiveStatus] ||
+          CHECK_CALL_STATUS_BADGES.on_time;
         const callTimeDual = formatDualTime(call.created_at, operationalTimezone, dispatcherTimezone);
 
         return (

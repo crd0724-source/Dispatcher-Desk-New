@@ -10,7 +10,11 @@ import {
   AIUserRole,
 } from './aiTypes.ts';
 import { LoadWithRelations } from '../loads/loadTypes.ts';
-import { CheckCall } from '../checkcalls/checkCallTypes.ts';
+import {
+  CheckCall,
+  isOperationalException,
+  isDeliveryEtaDelayed,
+} from '../checkcalls/checkCallTypes.ts';
 import { AccessorialWithLoad } from '../accessorials/accessorialTypes.ts';
 import { FreightDocument } from '../documents/documentTypes.ts';
 import { LoadActivityEvent } from '../activity/activityTypes.ts';
@@ -113,11 +117,14 @@ export async function buildCopilotContext(options: BuildContextOptions): Promise
     // Check call exception flag
     const loadCalls = allCheckCalls.filter((c: CheckCall) => c.load_id === load.id);
     const latestCall = loadCalls.length > 0 ? loadCalls[0] : null;
-    const isAtRisk =
-      latestCall?.status === 'at_risk' ||
-      latestCall?.status === 'delayed' ||
-      latestCall?.call_type === 'delay' ||
-      latestCall?.call_type === 'breakdown';
+    const isAtRisk = latestCall
+      ? isOperationalException(
+          latestCall.call_type,
+          latestCall.status,
+          load.delivery_datetime,
+          latestCall.eta_delivery
+        )
+      : false;
 
     // RBAC-gated financial string population
     let rateFormatted: string | undefined = undefined;
@@ -164,20 +171,44 @@ export async function buildCopilotContext(options: BuildContextOptions): Promise
   });
 
   // 4. Map compact Check Calls
-  const recentCallsSlice = allCheckCalls.slice(0, maxRecentItems);
+  const targetLoadCalls = specificLoadId
+    ? allCheckCalls.filter((c: CheckCall) => c.load_id === specificLoadId)
+    : [];
+  const baseCallsSlice = allCheckCalls.slice(0, maxRecentItems);
+  const recentCallsSlice = specificLoadId && targetLoadCalls.length > 0
+    ? [
+        ...targetLoadCalls,
+        ...baseCallsSlice.filter((c: CheckCall) => c.load_id !== specificLoadId),
+      ]
+    : baseCallsSlice;
+
   const contextCheckCalls: AIContextCheckCall[] = recentCallsSlice.map((cc: CheckCall) => {
-    const matchedLoad = allLoads.find((l: LoadWithRelations) => l.id === cc.load_id);
-    const isException =
-      cc.status === 'delayed' ||
-      cc.status === 'at_risk' ||
-      cc.call_type === 'delay' ||
-      cc.call_type === 'breakdown';
+    const matchedLoad = allLoads.find(
+      (l: LoadWithRelations) => l.id === cc.load_id
+    );
+
+    const isEtaLate = isDeliveryEtaDelayed(
+      matchedLoad?.delivery_datetime,
+      cc.eta_delivery
+    );
+
+    const effectiveStatus =
+      isEtaLate && cc.status === 'on_time'
+        ? 'delayed'
+        : cc.status;
+
+    const isException = isOperationalException(
+      cc.call_type,
+      cc.status,
+      matchedLoad?.delivery_datetime,
+      cc.eta_delivery
+    );
 
     return {
       id: cc.id,
       loadNumber: matchedLoad?.load_number || 'N/A',
       callType: cc.call_type,
-      status: cc.status,
+      status: effectiveStatus,
       location: cc.location_city && cc.location_state ? `${cc.location_city}, ${cc.location_state}` : 'Location Pending',
       etaPickupFormatted: cc.eta_pickup
         ? formatInTimezone(cc.eta_pickup, operationalTimezone, { includeTime: true, includeDate: true })

@@ -18,10 +18,32 @@ import { truckService } from '../trucks/truckService.ts';
 import { driverService } from '../drivers/driverService.ts';
 import { activityService } from '../activity/activityService.ts';
 import { teamService } from '../team/teamService.ts';
+import { DEFAULT_OPERATIONAL_TIMEZONE } from '../../lib/timezones.ts';
+import { getLocalDateString } from '../calendar/calendarService.ts';
 
 function isUUID(str?: string | null): boolean {
   if (!str) return false;
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
+
+function getEffectiveOperationalTimezone(filters?: LoadFilterCriteria & { operationalTimezone?: string }): string {
+  if (filters?.operationalTimezone && filters.operationalTimezone.trim()) {
+    return filters.operationalTimezone.trim();
+  }
+  if (typeof localStorage !== 'undefined') {
+    const stored = localStorage.getItem('dispatchdesk_ops_tz');
+    if (stored && stored.trim()) {
+      return stored.trim();
+    }
+  }
+  return DEFAULT_OPERATIONAL_TIMEZONE;
+}
+
+function toSafeLocalDateString(datetimeStr: string | null | undefined, timeZone: string): string | null {
+  if (!datetimeStr) return null;
+  const d = new Date(datetimeStr);
+  if (isNaN(d.getTime())) return null;
+  return getLocalDateString(d, timeZone);
 }
 
 export const DEMO_ORGANIZATION_ID = 'demo-org-1';
@@ -568,7 +590,7 @@ class LocalLoadService implements ILoadService {
     };
   }
 
-  async getLoads(organizationId: string, filters?: LoadFilterCriteria): Promise<LoadWithRelations[]> {
+  async getLoads(organizationId: string, filters?: LoadFilterCriteria & { operationalTimezone?: string }): Promise<LoadWithRelations[]> {
     // Eagerly kick off dependencies concurrently so in-flight requests coalesce with external callers (e.g. PipelineView)
     const depPromise = this.getDependencies(organizationId);
     let rawLoads: Load[] = [];
@@ -729,25 +751,26 @@ class LocalLoadService implements ILoadService {
       }
 
       if (filters.dateRange && filters.dateRange !== 'all') {
-        const now = new Date();
-        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-        const todayEnd = todayStart + 86400000;
+        const opTimezone = getEffectiveOperationalTimezone(filters);
+        const todayStr = getLocalDateString(new Date(), opTimezone);
 
         if (filters.dateRange === 'today') {
           result = result.filter((l) => {
             if (!l.pickup_datetime) return false;
-            const pTime = new Date(l.pickup_datetime).getTime();
-            return pTime >= todayStart && pTime < todayEnd;
+            const pDate = toSafeLocalDateString(l.pickup_datetime, opTimezone);
+            return pDate === todayStr;
           });
         } else if (filters.dateRange === 'upcoming') {
           result = result.filter((l) => {
             if (!l.pickup_datetime) return true;
-            return new Date(l.pickup_datetime).getTime() >= todayStart;
+            const pDate = toSafeLocalDateString(l.pickup_datetime, opTimezone);
+            return pDate !== null && pDate >= todayStr;
           });
         } else if (filters.dateRange === 'past') {
           result = result.filter((l) => {
             if (!l.delivery_datetime) return false;
-            return new Date(l.delivery_datetime).getTime() < todayStart;
+            const dDate = toSafeLocalDateString(l.delivery_datetime, opTimezone);
+            return dDate !== null && dDate < todayStr;
           });
         }
       }

@@ -267,7 +267,7 @@ export const DriverPortalView: React.FC = () => {
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 min-h-0 flex flex-col max-w-4xl w-full min-w-0 mx-auto p-4 sm:p-6 space-y-6">
+      <main className="flex-1 min-h-0 overflow-y-auto flex flex-col max-w-4xl w-full min-w-0 mx-auto p-4 sm:p-6 space-y-6">
         {/* Navigation Tab Switcher */}
         {activeTab !== 'messages' && (
           <div className="flex items-center gap-2 p-1.5 bg-slate-900 border border-slate-800 rounded-xl w-full min-w-0">

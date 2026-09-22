@@ -9,6 +9,8 @@ import {
   Clock,
   User,
   Shield,
+  Radio,
+  MapPin,
 } from 'lucide-react';
 import { ConversationMessage, MessageType } from '../types.ts';
 
@@ -18,6 +20,8 @@ interface MessageListProps {
   currentUserId?: string;
   driverName?: string;
   onAcknowledgeMessage?: (messageId: string) => Promise<void>;
+  onLogCheckCall?: (message: ConversationMessage) => void;
+  loggedCheckCallMessageIds?: Set<string>;
 }
 
 function formatMessageTime(isoString: string): string {
@@ -95,6 +99,8 @@ export const MessageList: React.FC<MessageListProps> = ({
   currentUserId,
   driverName = 'Driver',
   onAcknowledgeMessage,
+  onLogCheckCall,
+  loggedCheckCallMessageIds,
 }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -151,6 +157,15 @@ export const MessageList: React.FC<MessageListProps> = ({
         const typeBadge = getMessageTypeBadge(msg.message_type);
         const timeFormatted = formatMessageTime(msg.created_at);
 
+        const isDelayCheckCallCandidate =
+          !isOutgoing &&
+          msg.message_type === 'exception_update' &&
+          Boolean(msg.context?.load_id);
+
+        const isCheckCallLogged =
+          Boolean(msg.context?.check_call_id) ||
+          (loggedCheckCallMessageIds ? loggedCheckCallMessageIds.has(msg.id) : false);
+
         if (msg.message_type === 'system_notice') {
           return (
             <div key={msg.id} className="flex justify-center my-3 px-2">
@@ -204,6 +219,49 @@ export const MessageList: React.FC<MessageListProps> = ({
               <div className="text-xs sm:text-sm whitespace-pre-wrap break-words leading-relaxed text-slate-200">
                 {msg.content}
               </div>
+
+              {/* Driver Delay Action: Log Check Call */}
+              {isDelayCheckCallCandidate && (
+                <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
+                  {isCheckCallLogged ? (
+                    <span
+                      id={`check-call-logged-badge-${msg.id}`}
+                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 shadow-xs"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>✓ Check Call Logged</span>
+                    </span>
+                  ) : (
+                    <button
+                      id={`btn-log-check-call-${msg.id}`}
+                      type="button"
+                      onClick={() => onLogCheckCall?.(msg)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-rose-950/90 hover:bg-rose-900 text-rose-200 border border-rose-700/80 hover:border-rose-600 transition-colors cursor-pointer shadow-xs"
+                      title="Log an operational check call for this driver delay notice"
+                    >
+                      <Radio className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                      <span>Log Check Call</span>
+                    </button>
+                  )}
+                  <div className="flex items-center gap-2">
+                    {typeof msg.context?.latitude === 'number' && typeof msg.context?.longitude === 'number' && (
+                      <span
+                        id={`msg-gps-badge-${msg.id}`}
+                        className="inline-flex items-center gap-1 text-[10px] text-emerald-400 font-mono bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/60"
+                        title={`Driver GPS: ${msg.context.latitude.toFixed(4)}, ${msg.context.longitude.toFixed(4)}`}
+                      >
+                        <MapPin className="w-2.5 h-2.5 shrink-0" />
+                        <span>GPS</span>
+                      </span>
+                    )}
+                    {msg.context?.load_number && (
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        Load #{msg.context.load_number}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Acknowledged / Read State Footer */}
               <div className="mt-2.5 pt-1.5 border-t border-slate-800/60 flex flex-wrap items-center justify-between gap-2 text-[10px]">

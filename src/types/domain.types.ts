@@ -129,7 +129,7 @@ export interface SupportedTimezone {
   id: string; // e.g. 'America/Chicago'
   label: string; // e.g. 'Central Time (CST/CDT)'
   code: string; // e.g. 'CT'
-  region: 'US' | 'Canada' | 'India';
+  region: 'US' | 'Canada' | 'India' | 'Pakistan';
 }
 
 export interface SubscriptionUsageSummary {

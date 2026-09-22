@@ -173,10 +173,37 @@ export const CHECK_CALL_STATUS_BADGES: Record<
 };
 
 /**
- * Checks if a call type represents an operational exception.
+ * Compares scheduled delivery against reported delivery ETA.
+ * Returns true only when reported delivery ETA is strictly after scheduled delivery.
  */
-export function isOperationalException(callType: CheckCallType, status?: CheckCallOperationalStatus): boolean {
-  return callType === 'delay' || callType === 'breakdown' || status === 'delayed' || status === 'at_risk';
+export function isDeliveryEtaDelayed(
+  scheduledDelivery?: string | null,
+  reportedEtaDelivery?: string | null
+): boolean {
+  if (!scheduledDelivery || !reportedEtaDelivery) {
+    return false;
+  }
+  const scheduledMs = new Date(scheduledDelivery).getTime();
+  const etaMs = new Date(reportedEtaDelivery).getTime();
+  if (isNaN(scheduledMs) || isNaN(etaMs)) {
+    return false;
+  }
+  return etaMs > scheduledMs;
+}
+
+/**
+ * Checks if a call type, status, or ETA variance represents an operational exception.
+ */
+export function isOperationalException(
+  callType: CheckCallType,
+  status?: CheckCallOperationalStatus,
+  scheduledDelivery?: string | null,
+  reportedEtaDelivery?: string | null
+): boolean {
+  if (callType === 'delay' || callType === 'breakdown' || status === 'delayed' || status === 'at_risk') {
+    return true;
+  }
+  return isDeliveryEtaDelayed(scheduledDelivery, reportedEtaDelivery);
 }
 
 /**

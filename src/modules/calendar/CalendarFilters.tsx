@@ -232,12 +232,14 @@ export const CalendarFilters: React.FC<CalendarFiltersProps> = ({
 
           {hasActiveDropdownFilters && (
             <button
+              id="calendar-reset-filters-btn"
               type="button"
               onClick={handleResetFilters}
-              className="p-1 text-slate-500 hover:text-rose-400 rounded-md transition-colors"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 rounded-lg text-xs font-semibold text-slate-200 hover:text-white transition-colors cursor-pointer shrink-0"
               title="Reset all filters"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
+              <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+              <span>Reset Filters</span>
             </button>
           )}
         </div>

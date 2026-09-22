@@ -28,6 +28,7 @@ import { MetricCard } from '../../components/common/MetricCard.tsx';
 import { StatusBadge } from '../../components/common/StatusBadge.tsx';
 import { EmptyState } from '../../components/common/EmptyState.tsx';
 import { useAuth } from '../../contexts/AuthContext.tsx';
+import { useTimezone } from '../../contexts/TimezoneContext.tsx';
 import { NavModule } from '../../components/layout/Sidebar.tsx';
 import { loadService } from '../loads/loadService.ts';
 import { checkCallService, isLoadActiveForCheckInTracking } from '../checkcalls/checkCallService.ts';
@@ -43,7 +44,8 @@ import {
 import {
   TrackingStats,
   CheckCall,
-  isOperationalException,
+  LoadTrackingSummary,
+  isDeliveryEtaDelayed,
 } from '../checkcalls/checkCallTypes.ts';
 import { Document, DocumentType, DocumentStatus } from '../../types/domain.types.ts';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase.ts';
@@ -336,6 +338,7 @@ interface DashboardViewProps {
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onNewLoadClick }) => {
   const { activeOrganization, userRole } = useAuth();
+  const { operationalTimezone } = useTimezone();
   const orgId = activeOrganization?.id || '';
   const isOwnerAdmin = userRole === 'owner_admin';
 
@@ -376,6 +379,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onNewL
   });
 
   const [missingCheckInLoads, setMissingCheckInLoads] = useState<LoadWithRelations[]>([]);
+  const [activeTrackingSummaries, setActiveTrackingSummaries] = useState<Record<string, LoadTrackingSummary>>({});
 
   useEffect(() => {
     if (!orgId) return;
@@ -384,12 +388,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onNewL
     const fetchDashData = async () => {
       setIsLoading(true);
       try {
-        // Fetch base datasets once in parallel: loads, dependencies, documents, check_calls
-        const [loadsRes, depsRes, docsRes, callsRes] = await Promise.allSettled([
+        // Fetch base datasets once in parallel: loads, dependencies, documents, check_calls, tracking_stats
+        const [loadsRes, depsRes, docsRes, callsRes, trackingStatsRes] = await Promise.allSettled([
           loadService.getLoads(orgId),
           loadService.getDependencies(orgId),
           fetchDashboardRawDocuments(orgId),
           checkCallService.getCheckCalls(orgId),
+          checkCallService.getTrackingStats(orgId),
         ]);
 
         if (!isMounted) return;
@@ -460,14 +465,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onNewL
           readyToInvoiceLoadsCount,
         };
 
-        // 3. Compute tracking stats and missing check-ins across active loads
+        // 3. Compute missing check-ins across active loads and consume canonical tracking stats
         const activeTrackingLoads = allLoads.filter((l) => isLoadActiveForCheckInTracking(l));
-
-        let onTimeCount = 0;
-        let delayedCount = 0;
-        let atRiskCount = 0;
-        let exceptionsCount = 0;
-        let missingRecentCheckInCount = 0;
         const twentyFourHoursAgoMs = Date.now() - 24 * 3600000;
         const missingCheckIns: LoadWithRelations[] = [];
 
@@ -476,34 +475,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onNewL
           const latest = loadCalls.length > 0 ? loadCalls[0] : null;
 
           if (!latest) {
-            missingRecentCheckInCount++;
             missingCheckIns.push(load);
           } else {
             const lastTime = new Date(latest.created_at).getTime();
             if (lastTime < twentyFourHoursAgoMs) {
-              missingRecentCheckInCount++;
               missingCheckIns.push(load);
-            }
-
-            if (latest.status === 'on_time') onTimeCount++;
-            else if (latest.status === 'delayed') delayedCount++;
-            else if (latest.status === 'at_risk') atRiskCount++;
-
-            if (isOperationalException(latest.call_type, latest.status)) {
-              exceptionsCount++;
             }
           }
         }
 
-        const tStats: TrackingStats = {
-          totalCheckCalls: allCalls.length,
-          activeLoadsTrackingCount: activeTrackingLoads.length,
-          onTimeCount,
-          delayedCount,
-          atRiskCount,
-          exceptionsCount,
-          missingRecentCheckInCount,
-        };
+        const tStats: TrackingStats = trackingStatsRes.status === 'fulfilled'
+          ? trackingStatsRes.value
+          : {
+              totalCheckCalls: allCalls.length,
+              activeLoadsTrackingCount: activeTrackingLoads.length,
+              onTimeCount: 0,
+              delayedCount: 0,
+              atRiskCount: 0,
+              exceptionsCount: 0,
+              missingRecentCheckInCount: missingCheckIns.length,
+            };
 
         // 4. Update state contracts identically
         setTotalLoadsCount(allLoads.length);
@@ -512,6 +503,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onNewL
         );
         setActiveLoads(inFlight);
         setActiveLoadsCount(inFlight.length);
+
+        // Fetch tracking summaries for active/in-flight loads displayed in "Active Dispatches & En Route"
+        const summariesMap: Record<string, LoadTrackingSummary> = {};
+        if (inFlight.length > 0) {
+          const summaryResults = await Promise.allSettled(
+            inFlight.map((load) => checkCallService.getTrackingSummaryForLoad(orgId, load))
+          );
+          inFlight.forEach((load, idx) => {
+            const res = summaryResults[idx];
+            if (res.status === 'fulfilled') {
+              summariesMap[load.id] = res.value;
+            }
+          });
+        }
+        if (!isMounted) return;
+        setActiveTrackingSummaries(summariesMap);
 
         const gross = allLoads.reduce((sum: number, l: LoadWithRelations) => sum + Number(l.rate || 0), 0);
         const loadedMiles = allLoads.reduce((sum: number, l: LoadWithRelations) => sum + Number(l.loaded_miles || 0), 0);
@@ -1058,39 +1065,66 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate, onNewL
                 )
               ) : (
                 <div className="divide-y divide-slate-800/60 font-sans">
-                  {activeLoads.map((load) => (
-                    <div
-                      key={load.id}
-                      onClick={() => onNavigate('pipeline')}
-                      className="py-3 px-2 flex items-center justify-between gap-4 hover:bg-slate-800/40 rounded-lg transition-colors cursor-pointer group"
-                    >
-                      <div className="space-y-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-mono text-xs font-bold text-sky-400 group-hover:text-sky-300 transition-colors">
-                            {load.load_number}
-                          </span>
-                          <StatusBadge status={load.pipeline_status} type="pipeline" size="sm" />
-                          <span className="text-[10px] uppercase font-mono px-1.5 py-0.2 rounded bg-slate-800/80 text-slate-400 border border-slate-700/60">
-                            {load.equipment_type.replace('_', ' ')}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1.5 text-xs text-slate-200 font-medium">
-                          <span className="font-semibold text-slate-100">{load.origin_city}, {load.origin_state}</span>
-                          <ArrowRight className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                          <span className="font-semibold text-slate-100">{load.dest_city}, {load.dest_state}</span>
-                        </div>
-                      </div>
+                  {activeLoads.map((load) => {
+                    const trackingSummary = activeTrackingSummaries[load.id];
+                    const isDelayed = trackingSummary?.currentStatus === 'delayed' || trackingSummary?.hasException === true;
+                    const hasDelayedEta = Boolean(
+                      trackingSummary?.etaDelivery &&
+                      load.delivery_datetime &&
+                      isDeliveryEtaDelayed(load.delivery_datetime, trackingSummary.etaDelivery)
+                    );
+                    const formattedEta = trackingSummary?.etaDelivery
+                      ? new Date(trackingSummary.etaDelivery).toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          timeZone: operationalTimezone,
+                        })
+                      : null;
 
-                      <div className="text-right shrink-0">
-                        <p className="font-mono tabular-nums text-xs sm:text-sm font-bold text-emerald-400">
-                          {formatCurrency(load.rate)}
-                        </p>
-                        <p className="text-[11px] text-slate-400 font-mono tabular-nums">
-                          {load.loaded_miles || 0} mi
-                        </p>
+                    return (
+                      <div
+                        key={load.id}
+                        onClick={() => onNavigate('pipeline')}
+                        className="py-3 px-2 flex items-center justify-between gap-4 hover:bg-slate-800/40 rounded-lg transition-colors cursor-pointer group"
+                      >
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-xs font-bold text-sky-400 group-hover:text-sky-300 transition-colors">
+                              {load.load_number}
+                            </span>
+                            <StatusBadge status={load.pipeline_status} type="pipeline" size="sm" />
+                            {isDelayed && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-950/70 text-amber-300 border border-amber-800/60">
+                                <span>⚠</span> Delayed
+                              </span>
+                            )}
+                            {hasDelayedEta && formattedEta && (
+                              <span className="inline-flex items-center text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-rose-950/60 text-rose-300 border border-rose-800/60">
+                                ETA: {formattedEta}
+                              </span>
+                            )}
+                            <span className="text-[10px] uppercase font-mono px-1.5 py-0.2 rounded bg-slate-800/80 text-slate-400 border border-slate-700/60">
+                              {load.equipment_type.replace('_', ' ')}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs text-slate-200 font-medium">
+                            <span className="font-semibold text-slate-100">{load.origin_city}, {load.origin_state}</span>
+                            <ArrowRight className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                            <span className="font-semibold text-slate-100">{load.dest_city}, {load.dest_state}</span>
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <p className="font-mono tabular-nums text-xs sm:text-sm font-bold text-emerald-400">
+                            {formatCurrency(load.rate)}
+                          </p>
+                          <p className="text-[11px] text-slate-400 font-mono tabular-nums">
+                            {load.loaded_miles || 0} mi
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

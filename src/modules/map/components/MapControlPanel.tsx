@@ -93,11 +93,13 @@ export const MapControlPanel: React.FC<MapControlPanelProps> = ({
           {hasActiveFilters && (
             <button
               id="map-reset-filters-btn"
+              type="button"
               onClick={onResetFilters}
-              className="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium inline-flex items-center gap-1 cursor-pointer transition-colors"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 rounded-lg text-xs font-semibold text-slate-200 hover:text-white transition-colors cursor-pointer shrink-0"
+              title="Reset all filters"
             >
-              <RotateCcw className="w-3 h-3" />
-              <span>Reset</span>
+              <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+              <span>Reset Filters</span>
             </button>
           )}
         </div>
@@ -218,10 +220,12 @@ export const MapControlPanel: React.FC<MapControlPanelProps> = ({
             </p>
             {hasActiveFilters && (
               <button
+                type="button"
                 onClick={onResetFilters}
-                className="mt-3 px-3 py-1 bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30 border border-indigo-500/30 rounded-lg text-xs font-medium cursor-pointer"
+                className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 rounded-lg text-xs font-semibold text-slate-200 hover:text-white transition-colors cursor-pointer"
               >
-                Reset all filters
+                <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+                <span>Reset Filters</span>
               </button>
             )}
           </div>

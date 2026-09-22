@@ -6,7 +6,7 @@ import {
 } from './documentTypes.ts';
 import { PIPELINE_STATUS_OPTIONS } from '../loads/loadTypes.ts';
 import { DocumentType, DocumentStatus, PipelineStatus } from '../../types/domain.types.ts';
-import { Search, Filter, X, Calendar, FileText, CheckCircle2 } from 'lucide-react';
+import { Search, Filter, X, Calendar, FileText, CheckCircle2, RotateCcw } from 'lucide-react';
 
 interface DocumentFiltersProps {
   filters: DocumentFilterCriteria;
@@ -147,10 +147,11 @@ export const DocumentFilters: React.FC<DocumentFiltersProps> = ({
               id="doc-clear-filters-btn"
               type="button"
               onClick={handleClear}
-              className="h-9 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 rounded-lg text-xs font-semibold text-slate-200 hover:text-white transition-colors cursor-pointer shrink-0"
+              title="Reset all filters"
             >
-              <X className="w-3.5 h-3.5" />
-              <span>Clear (<span className="font-mono tabular-nums">{activeFiltersCount}</span>)</span>
+              <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+              <span>Reset Filters</span>
             </button>
           )}
         </div>

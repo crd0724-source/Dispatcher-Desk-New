@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../lib/supabase.ts';
 import { Organization, Profile, UserRole } from '../types/domain.types.ts';
@@ -82,6 +82,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<Profile | null>(null);
   const [memberships, setMemberships] = useState<UserOrgMembership[]>([]);
   const [activeOrganization, setActiveOrganization] = useState<Organization | null>(null);
+  const activeOrganizationRef = useRef<Organization | null>(null);
+  activeOrganizationRef.current = activeOrganization;
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [isDriver, setIsDriver] = useState<boolean>(false);
   const [driverProfile, setDriverProfile] = useState<DriverIdentityProfile | null>(null);
@@ -143,41 +145,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       let memberRows: unknown = null;
       let memberErr: { message?: string } | null = null;
 
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const queryRes = await supabase
-            .from('organization_members')
-            .select(`
-              role,
-              organization:organizations (
-                id,
-                name,
-                slug,
-                dot_number,
-                mc_number,
-                primary_timezone,
-                created_at,
-                updated_at
-              )
-            `)
-            .eq('user_id', currentUser.id);
+      try {
+        const queryRes = await supabase
+          .from('organization_members')
+          .select(`
+            role,
+            created_at,
+            organization:organizations (
+              id,
+              name,
+              slug,
+              dot_number,
+              mc_number,
+              primary_timezone,
+              created_at,
+              updated_at
+            )
+          `)
+          .eq('user_id', currentUser.id)
+          .order('created_at', { ascending: false });
 
-          memberRows = queryRes.data;
-          memberErr = queryRes.error;
-
-          if (!memberErr) break;
-        } catch (fetchErr: any) {
-          memberErr = { message: fetchErr?.message || String(fetchErr) };
-        }
-
-        if (attempt === 0) {
-          await new Promise((resolve) => setTimeout(resolve, 350));
-        }
+        memberRows = queryRes.data;
+        memberErr = queryRes.error;
+      } catch (fetchErr: any) {
+        memberErr = { message: fetchErr?.message || String(fetchErr) };
       }
 
       if (memberErr) {
-        console.warn('Notice fetching org memberships for authenticated user, using fallback workspace:', memberErr.message || memberErr);
-        applyLocalFallback();
+        console.warn('Notice fetching org memberships for authenticated user:', memberErr.message || memberErr);
+        // Do NOT convert authenticated user to demo mode.
+        // Preserve existing authenticated organization context if available.
         return;
       }
 
@@ -200,17 +197,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setDriverProfile(null);
         setMemberships(parsedMemberships);
 
-        // Resolve active organization
+        // Deterministic resolution order:
+        // A. If saved organization ID matches one of the user's CURRENT valid memberships
+        //    (and is not a demo ID like 'demo-org-1'):
         const savedOrgId = localStorage.getItem(LOCAL_ACTIVE_KEY);
-        const matched = parsedMemberships.find((m) => m.organization.id === savedOrgId);
+        const isNotDemo = savedOrgId && !savedOrgId.startsWith('demo-');
+        const matchedSaved = isNotDemo
+          ? parsedMemberships.find((m) => m.organization.id === savedOrgId)
+          : undefined;
 
-        if (matched) {
-          setActiveOrganization(matched.organization);
-          setUserRole(matched.role);
+        // B. If saved organization ID is missing, stale, or a demo ID:
+        //    1. If current in-memory activeOrganization is valid in parsedMemberships, preserve it.
+        //    2. Otherwise, choose a valid real membership deterministically using metadata
+        //       (most recently created organization first).
+        let resolvedMembership: UserOrgMembership;
+        if (matchedSaved) {
+          resolvedMembership = matchedSaved;
         } else {
-          setActiveOrganization(parsedMemberships[0].organization);
-          setUserRole(parsedMemberships[0].role);
-          localStorage.setItem(LOCAL_ACTIVE_KEY, parsedMemberships[0].organization.id);
+          const currentActiveId = activeOrganizationRef.current?.id;
+          const currentMatch = currentActiveId && !currentActiveId.startsWith('demo-')
+            ? parsedMemberships.find((m) => m.organization.id === currentActiveId)
+            : undefined;
+
+          if (currentMatch) {
+            resolvedMembership = currentMatch;
+          } else {
+            const sorted = [...parsedMemberships].sort((a, b) => {
+              const timeA = new Date(a.organization.created_at || 0).getTime();
+              const timeB = new Date(b.organization.created_at || 0).getTime();
+              return timeB - timeA;
+            });
+            resolvedMembership = sorted[0] || parsedMemberships[0];
+          }
+        }
+
+        setActiveOrganization(resolvedMembership.organization);
+        setUserRole(resolvedMembership.role);
+
+        // Only persist an ID that belongs to the authenticated user's current valid memberships
+        if (resolvedMembership.organization.id && !resolvedMembership.organization.id.startsWith('demo-')) {
+          localStorage.setItem(LOCAL_ACTIVE_KEY, resolvedMembership.organization.id);
         }
         return;
       }
@@ -281,7 +307,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         setActiveOrganization(driverOrg);
-        if (driverOrg) {
+        if (driverOrg && !driverOrg.id.startsWith('demo-')) {
           localStorage.setItem(LOCAL_ACTIVE_KEY, driverOrg.id);
         }
         return;
@@ -296,10 +322,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUserRole(null);
       localStorage.removeItem(LOCAL_ACTIVE_KEY);
     } catch (err) {
-      console.warn('Notice loading user data for authenticated user, using fallback workspace:', err);
-      applyLocalFallback();
+      console.warn('Notice loading user data for authenticated user:', err);
+      // For authenticated user, preserve existing authenticated state; do NOT call applyLocalFallback()
     }
-  }, [applyLocalFallback]);
+  }, []);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -341,15 +367,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
-    return () => subscription.unsubscribe();
+    const handleVisibilityOrFocus = async () => {
+      if (document.visibilityState === 'visible' && isSupabaseConfigured) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+            if (expiresAt && (expiresAt - Date.now() < 120000)) {
+              await supabase.auth.refreshSession();
+            }
+          }
+        } catch (e) {
+          console.warn('Proactive session refresh note:', e);
+        }
+      }
+    };
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
+    return () => {
+      subscription.unsubscribe();
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    };
   }, [fetchUserData, applyLocalFallback]);
 
   const setActiveOrganizationId = (orgId: string) => {
     const matched = memberships.find((m) => m.organization.id === orgId);
     if (matched) {
+      if (user && matched.organization.id.startsWith('demo-')) {
+        return;
+      }
       setActiveOrganization(matched.organization);
       setUserRole(matched.role);
-      localStorage.setItem('dispatchdesk_active_org_id', matched.organization.id);
+      if (!matched.organization.id.startsWith('demo-')) {
+        localStorage.setItem(LOCAL_ACTIVE_KEY, matched.organization.id);
+      }
     }
   };
 
@@ -427,8 +481,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return createLocalOrg();
       }
 
-      if (data) {
-        localStorage.setItem(LOCAL_ACTIVE_KEY, data as string);
+      if (data && typeof data === 'string' && !data.startsWith('demo-')) {
+        localStorage.setItem(LOCAL_ACTIVE_KEY, data);
       }
 
       await fetchUserData(currentUser);
@@ -451,7 +505,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsDriver(false);
     setDriverProfile(null);
     setMemberships([]);
-    localStorage.removeItem('dispatchdesk_active_org_id');
+    localStorage.removeItem(LOCAL_ACTIVE_KEY);
     localStorage.removeItem('dispatchdesk_demo_active_driver');
   };
 

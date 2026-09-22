@@ -16,6 +16,9 @@ import { ConversationList } from './components/ConversationList.tsx';
 import { ConversationThread } from './components/ConversationThread.tsx';
 import { Modal } from '../../components/common/Modal.tsx';
 import { EmptyState } from '../../components/common/EmptyState.tsx';
+import { CheckCallModal } from '../checkcalls/CheckCallModal.tsx';
+import { checkCallService } from '../checkcalls/checkCallService.ts';
+import { CheckCall, CreateCheckCallInput, UpdateCheckCallInput } from '../checkcalls/checkCallTypes.ts';
 
 export const CommunicationView: React.FC = () => {
   const { activeOrganization, user } = useAuth();
@@ -31,6 +34,18 @@ export const CommunicationView: React.FC = () => {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+
+  // Check Call Modal state for driver delay notices
+  const [isCheckCallModalOpen, setIsCheckCallModalOpen] = useState(false);
+  const [checkCallLoad, setCheckCallLoad] = useState<LoadWithRelations | null>(null);
+  const [checkCallNotes, setCheckCallNotes] = useState('');
+  const [checkCallSourceMessageId, setCheckCallSourceMessageId] = useState<string | null>(null);
+  const [checkCallLatitude, setCheckCallLatitude] = useState<number | null>(null);
+  const [checkCallLongitude, setCheckCallLongitude] = useState<number | null>(null);
+
+  // Check call tracking state for selected conversation's load
+  const [sessionLoggedMessageIds, setSessionLoggedMessageIds] = useState<Set<string>>(new Set());
+  const [loadCheckCalls, setLoadCheckCalls] = useState<CheckCall[]>([]);
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('');
@@ -237,6 +252,68 @@ export const CommunicationView: React.FC = () => {
   }, [selectedConversationId, fetchMessages]);
 
   // ---------------------------------------------------------------------------
+  // 3b. Fetch Check Calls for Selected Conversation's Load
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    let isCurrent = true;
+    const conversationLoadId = selectedConversation?.load_id;
+
+    // Clear previous conversation's check calls and session IDs immediately upon switching
+    setLoadCheckCalls([]);
+    setSessionLoggedMessageIds(new Set());
+
+    if (orgId && conversationLoadId) {
+      checkCallService
+        .getCheckCalls(orgId, conversationLoadId)
+        .then((calls) => {
+          if (isCurrent) {
+            setLoadCheckCalls(calls);
+          }
+        })
+        .catch((err) => {
+          console.warn('[CommunicationView] Failed to fetch check calls for load:', err);
+          if (isCurrent) {
+            setLoadCheckCalls([]);
+          }
+        });
+    }
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [orgId, selectedConversation?.load_id, selectedConversationId]);
+
+  // ---------------------------------------------------------------------------
+  // 3c. Derive Logged Check Call Message IDs
+  // ---------------------------------------------------------------------------
+  const loggedCheckCallMessageIds = useMemo(() => {
+    const loggedIds = new Set<string>(sessionLoggedMessageIds);
+
+    for (const msg of messages) {
+      const msgLoadId = msg.context?.load_id;
+      if (msg.message_type === 'exception_update' && msgLoadId) {
+        // Condition: cc.load_id === msg.context.load_id
+        //            cc.call_type === 'delay'
+        //            cc.created_at >= msg.created_at minus 60 seconds
+        const msgTime = new Date(msg.created_at).getTime() - 60000;
+
+        const isLogged = loadCheckCalls.some((cc) => {
+          if (cc.load_id !== msgLoadId) return false;
+          if (cc.call_type !== 'delay') return false;
+          const ccTime = new Date(cc.created_at).getTime();
+          return !isNaN(ccTime) && ccTime >= msgTime;
+        });
+
+        if (isLogged) {
+          loggedIds.add(msg.id);
+        }
+      }
+    }
+
+    return loggedIds;
+  }, [messages, loadCheckCalls, sessionLoggedMessageIds]);
+
+  // ---------------------------------------------------------------------------
   // 4. Send Message
   // ---------------------------------------------------------------------------
   const handleSendMessage = async (content: string, messageType: MessageType) => {
@@ -322,6 +399,74 @@ export const CommunicationView: React.FC = () => {
     } catch (err: any) {
       console.error('[CommunicationView] Failed to acknowledge message:', err);
       setError(err.message || 'Failed to acknowledge message.');
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // 6b. Log Check Call from Driver Delay Exception Message
+  // ---------------------------------------------------------------------------
+  const handleOpenCheckCallModal = useCallback(
+    async (msg: ConversationMessage) => {
+      if (!msg.context?.load_id || !orgId) return;
+      setError(null);
+
+      // Resolve load using existing memoized loadMap or fallback to loadService.getLoad
+      let targetLoad = loadMap.get(msg.context.load_id) || null;
+      if (!targetLoad) {
+        try {
+          targetLoad = await loadService.getLoad(orgId, msg.context.load_id);
+        } catch (err) {
+          console.warn('[CommunicationView] Failed to fetch load for check call:', err);
+        }
+      }
+
+      if (!targetLoad) {
+        setError(
+          `Cannot log check call: Load #${msg.context.load_number || msg.context.load_id} could not be resolved.`
+        );
+        return;
+      }
+
+      // Validate latitude and longitude from message context if present
+      const rawLat = msg.context?.latitude;
+      const rawLng = msg.context?.longitude;
+      const validLat =
+        typeof rawLat === 'number' && Number.isFinite(rawLat) && rawLat >= -90 && rawLat <= 90
+          ? rawLat
+          : null;
+      const validLng =
+        typeof rawLng === 'number' && Number.isFinite(rawLng) && rawLng >= -180 && rawLng <= 180
+          ? rawLng
+          : null;
+
+      setCheckCallLatitude(validLat);
+      setCheckCallLongitude(validLng);
+      setCheckCallLoad(targetLoad);
+      setCheckCallNotes(msg.content || '');
+      setCheckCallSourceMessageId(msg.id);
+      setIsCheckCallModalOpen(true);
+    },
+    [loadMap, orgId]
+  );
+
+  const handleCheckCallSubmit = async (data: CreateCheckCallInput | UpdateCheckCallInput) => {
+    if (!orgId) return;
+    try {
+      const createdCall = await checkCallService.createCheckCall(orgId, data as CreateCheckCallInput);
+      if (createdCall) {
+        setLoadCheckCalls((prev) => [createdCall, ...prev.filter((c) => c.id !== createdCall.id)]);
+      }
+      if (checkCallSourceMessageId) {
+        setSessionLoggedMessageIds((prev) => new Set(prev).add(checkCallSourceMessageId));
+      }
+      setIsCheckCallModalOpen(false);
+      setCheckCallSourceMessageId(null);
+      setCheckCallLatitude(null);
+      setCheckCallLongitude(null);
+    } catch (err: any) {
+      console.error('[CommunicationView] Failed to create check call from driver delay message:', err);
+      setError(err?.message || 'Failed to create check call.');
+      throw err;
     }
   };
 
@@ -444,15 +589,44 @@ export const CommunicationView: React.FC = () => {
             onClearError={() => setError(null)}
             onSendMessage={handleSendMessage}
             onToggleStatus={handleToggleStatus}
-            onRefresh={() =>
-              selectedConversationId ? fetchMessages(selectedConversationId) : Promise.resolve()
-            }
+            onRefresh={() => {
+              if (selectedConversationId) {
+                fetchMessages(selectedConversationId);
+                if (selectedConversation?.load_id && orgId) {
+                  checkCallService
+                    .getCheckCalls(orgId, selectedConversation.load_id)
+                    .then(setLoadCheckCalls)
+                    .catch(() => null);
+                }
+              }
+              return Promise.resolve();
+            }}
             onBack={() => setSelectedConversationId(null)}
             onAcknowledgeMessage={handleAcknowledgeMessage}
+            onLogCheckCall={handleOpenCheckCallModal}
+            loggedCheckCallMessageIds={loggedCheckCallMessageIds}
             currentUserId={user?.id}
           />
         </div>
       </div>
+
+      {/* Check Call Modal for Driver Delay Notifications */}
+      <CheckCallModal
+        isOpen={isCheckCallModalOpen}
+        onClose={() => {
+          setIsCheckCallModalOpen(false);
+          setCheckCallSourceMessageId(null);
+          setCheckCallLatitude(null);
+          setCheckCallLongitude(null);
+        }}
+        load={checkCallLoad}
+        initialCallType="delay"
+        initialStatus="delayed"
+        initialNotes={checkCallNotes}
+        initialLatitude={checkCallLatitude}
+        initialLongitude={checkCallLongitude}
+        onSubmit={handleCheckCallSubmit}
+      />
 
       {/* New Conversation Modal */}
       <Modal

@@ -48,8 +48,7 @@ export const WeekCalendarView: React.FC<WeekCalendarViewProps> = ({
     });
 
     events.forEach((ev) => {
-      const evDate = new Date(ev.datetime);
-      const evDateStr = getLocalDateString(evDate, operationalTimezone);
+      const evDateStr = getLocalDateString(ev.datetime, operationalTimezone);
       if (map.has(evDateStr)) {
         map.get(evDateStr)!.push(ev);
       }

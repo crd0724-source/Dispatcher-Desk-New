@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Conversation, ConversationMessage, MessageType } from '../../communication/types.ts';
 import { DriverAssignedLoad } from '../DriverPortalView.tsx';
+import { getCurrentDriverGps } from '../utils/driverLocation.ts';
 import {
   Send,
   Mic,
@@ -96,6 +97,30 @@ export const DriverMessageThread: React.FC<DriverMessageThreadProps> = ({
       contextPayload.load_number = loadContext.load_number;
       contextPayload.origin = `${loadContext.origin_city || ''}, ${loadContext.origin_state || ''}`.trim();
       contextPayload.destination = `${loadContext.dest_city || ''}, ${loadContext.dest_state || ''}`.trim();
+    }
+
+    // Attempt GPS capture ONLY for the Traffic Delay quick action path
+    if (messageType === 'exception_update') {
+      try {
+        const coords = await getCurrentDriverGps(3000);
+        if (
+          coords &&
+          typeof coords.latitude === 'number' &&
+          typeof coords.longitude === 'number' &&
+          Number.isFinite(coords.latitude) &&
+          Number.isFinite(coords.longitude) &&
+          coords.latitude >= -90 &&
+          coords.latitude <= 90 &&
+          coords.longitude >= -180 &&
+          coords.longitude <= 180
+        ) {
+          contextPayload.latitude = coords.latitude;
+          contextPayload.longitude = coords.longitude;
+          contextPayload.location_timestamp = new Date().toISOString();
+        }
+      } catch {
+        // Geolocation failure must never block sending the delay message
+      }
     }
 
     try {
@@ -304,9 +329,15 @@ export const DriverMessageThread: React.FC<DriverMessageThreadProps> = ({
                   </p>
 
                   {/* Context snippet if attached */}
-                  {msg.context?.load_number && (
-                    <div className={`mt-2 pt-2 text-[11px] border-t ${isOutbound ? 'border-indigo-500/50 text-indigo-100' : 'border-slate-700 text-slate-400'}`}>
-                      Ref: Load #{msg.context.load_number}
+                  {(msg.context?.load_number || (typeof msg.context?.latitude === 'number' && typeof msg.context?.longitude === 'number')) && (
+                    <div className={`mt-2 pt-2 text-[11px] border-t flex items-center justify-between gap-2 ${isOutbound ? 'border-indigo-500/50 text-indigo-100' : 'border-slate-700 text-slate-400'}`}>
+                      {msg.context?.load_number ? <span>Ref: Load #{msg.context.load_number}</span> : <span />}
+                      {typeof msg.context?.latitude === 'number' && typeof msg.context?.longitude === 'number' && (
+                        <span className="inline-flex items-center gap-1 font-mono text-[10px] opacity-90">
+                          <MapPin className="w-2.5 h-2.5 shrink-0" />
+                          <span>GPS attached</span>
+                        </span>
+                      )}
                     </div>
                   )}
 

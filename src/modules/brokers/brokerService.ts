@@ -514,8 +514,42 @@ class BrokerService {
         .single();
 
       if (error) {
+        if (error.code === 'PGRST303' || error.message?.includes('JWT expired')) {
+          console.warn('[BrokerService] JWT expired during createBroker, attempting session refresh and retry...');
+          const { error: refreshErr } = await supabase.auth.refreshSession();
+          if (!refreshErr) {
+            const retryRes = await supabase
+              .from('brokers')
+              .insert({
+                organization_id: orgId,
+                company_name: input.company_name.trim(),
+                mc_number: cleanMc,
+                dot_number: cleanDot,
+                contact_name: input.contact_name?.trim() || null,
+                contact_email: input.contact_email?.trim() || null,
+                contact_phone: input.contact_phone?.trim() || null,
+                payment_terms_days: paymentTerms,
+                credit_status: input.credit_status || 'approved',
+                notes: input.notes?.trim() || null,
+              })
+              .select()
+              .single();
+
+            if (!retryRes.error && retryRes.data) {
+              const created = retryRes.data as Broker;
+              return {
+                ...created,
+                performance: this.calculatePerformance(orgId, created.id, created.payment_terms_days),
+              };
+            }
+          }
+        }
         console.error('[BrokerService] Supabase createBroker error:', error);
-        throw new Error(error.message || 'Failed to create broker in database.');
+        throw new Error(
+          error.code === 'PGRST303' || error.message?.includes('JWT expired')
+            ? 'Your authentication session has expired. Please refresh the page to sign in again.'
+            : (error.message || 'Failed to create broker in database.')
+        );
       }
 
       if (data) {
@@ -622,8 +656,46 @@ class BrokerService {
         .single();
 
       if (error) {
+        if (error.code === 'PGRST303' || error.message?.includes('JWT expired')) {
+          console.warn('[BrokerService] JWT expired during updateBroker, attempting session refresh and retry...');
+          const { error: refreshErr } = await supabase.auth.refreshSession();
+          if (!refreshErr) {
+            const retryRes = await supabase
+              .from('brokers')
+              .update({
+                ...(input.company_name !== undefined ? { company_name: input.company_name.trim() } : {}),
+                ...(input.mc_number !== undefined ? { mc_number: input.mc_number ? cleanIdentifier(input.mc_number) || null : null } : {}),
+                ...(input.dot_number !== undefined ? { dot_number: input.dot_number ? cleanIdentifier(input.dot_number) || null : null } : {}),
+                ...(input.contact_name !== undefined ? { contact_name: input.contact_name?.trim() || null } : {}),
+                ...(input.contact_email !== undefined ? { contact_email: input.contact_email?.trim() || null } : {}),
+                ...(input.contact_phone !== undefined ? { contact_phone: input.contact_phone?.trim() || null } : {}),
+                ...(input.payment_terms_days !== undefined
+                  ? { payment_terms_days: Math.max(0, Math.min(120, Math.round(Number(input.payment_terms_days) || 30))) }
+                  : {}),
+                ...(input.credit_status !== undefined ? { credit_status: input.credit_status } : {}),
+                ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', brokerId)
+              .eq('organization_id', orgId)
+              .select()
+              .single();
+
+            if (!retryRes.error && retryRes.data) {
+              const updated = retryRes.data as Broker;
+              return {
+                ...updated,
+                performance: this.calculatePerformance(orgId, updated.id, updated.payment_terms_days),
+              };
+            }
+          }
+        }
         console.error('[BrokerService] Supabase updateBroker error:', error);
-        throw new Error(error.message || 'Failed to update broker in database.');
+        throw new Error(
+          error.code === 'PGRST303' || error.message?.includes('JWT expired')
+            ? 'Your authentication session has expired. Please refresh the page to sign in again.'
+            : (error.message || 'Failed to update broker in database.')
+        );
       }
 
       if (data) {
