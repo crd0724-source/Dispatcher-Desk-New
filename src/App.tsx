@@ -49,6 +49,7 @@ const MainApp: React.FC = () => {
     userRole,
     isDriver,
     isLoading,
+    isResolvingUserData,
   } = useAuth();
 
   const isEmailVerified = !user?.email || Boolean(user?.email_confirmed_at || (user as any)?.confirmed_at);
@@ -184,6 +185,7 @@ const MainApp: React.FC = () => {
       user &&
       isEmailVerified &&
       !isLoading &&
+      !isResolvingUserData &&
       !isDriver &&
       userRole !== 'driver' &&
       memberships.length === 0 &&
@@ -196,6 +198,7 @@ const MainApp: React.FC = () => {
     user,
     isEmailVerified,
     isLoading,
+    isResolvingUserData,
     isDriver,
     userRole,
     memberships.length,

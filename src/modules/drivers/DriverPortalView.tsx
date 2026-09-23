@@ -62,6 +62,47 @@ export const DriverPortalView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dispatches' | 'messages'>('dispatches');
   const [chatInitialConversationId, setChatInitialConversationId] = useState<string | null>(null);
   const [openingChatLoadId, setOpeningChatLoadId] = useState<string | null>(null);
+  const [unreadMessagesCount, setUnreadMessagesCount] = useState<number>(0);
+
+  // Global unread messages count polling for driver
+  useEffect(() => {
+    if (!driverOrgId || !user?.id) {
+      setUnreadMessagesCount(0);
+      return;
+    }
+
+    let isMounted = true;
+
+    const fetchDriverUnread = async () => {
+      try {
+        const driverId =
+          driverProfile?.id ||
+          (await communicationService.resolveCurrentDriverId(driverOrgId));
+
+        if (!driverId || !isMounted) return;
+
+        const summary = await communicationService.getUnreadMessageCountForDriver(
+          driverOrgId,
+          driverId,
+          user.id
+        );
+
+        if (isMounted) {
+          setUnreadMessagesCount(summary.total);
+        }
+      } catch (err) {
+        console.warn('[DriverPortal] Failed to fetch unread messages count:', err);
+      }
+    };
+
+    fetchDriverUnread();
+    const intervalId = setInterval(fetchDriverUnread, 20000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
+  }, [driverOrgId, driverProfile?.id, user?.id]);
 
   const handleOpenLoadChat = async (load: DriverAssignedLoad) => {
     const targetOrgId = driverOrgId || (isSupabaseConfigured ? null : activeOrganization?.id);
@@ -288,6 +329,14 @@ export const DriverPortalView: React.FC = () => {
             >
               <MessageSquare className="w-4 h-4 shrink-0" />
               <span className="truncate">Messages</span>
+              {unreadMessagesCount > 0 && (
+                <span
+                  id="driver-portal-messages-unread-badge"
+                  className="px-1.5 py-0.5 text-[10px] font-bold font-mono rounded-full bg-indigo-600 text-white min-w-[1.125rem] text-center shrink-0 leading-none"
+                >
+                  {unreadMessagesCount}
+                </span>
+              )}
             </button>
           </div>
         )}

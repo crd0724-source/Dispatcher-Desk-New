@@ -28,6 +28,7 @@ import {
   UpdateCheckCallInput,
   LoadTrackingSummary,
   CHECK_CALL_STATUS_BADGES,
+  CHECK_CALL_STATUS_LABELS,
   CHECK_CALL_TYPE_LABELS,
   isOperationalException,
 } from '../checkcalls/checkCallTypes.ts';
@@ -82,6 +83,7 @@ import {
   Bell,
   Trash2,
   Download,
+  RefreshCw,
 } from 'lucide-react';
 
 interface LoadDetailModalProps {
@@ -141,6 +143,11 @@ export const LoadDetailModal: React.FC<LoadDetailModalProps> = ({
   // Billing & Settlement Generator State
   const [isBillingModalOpen, setIsBillingModalOpen] = useState(false);
   const [billingModalType, setBillingModalType] = useState<BillingDocumentType>('broker_invoice');
+
+  // Check Call Deletion & Feedback State
+  const [checkCallToDelete, setCheckCallToDelete] = useState<CheckCall | null>(null);
+  const [isDeletingCheckCall, setIsDeletingCheckCall] = useState(false);
+  const [checkCallFeedback, setCheckCallFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const handleOpenInvoiceGenerator = () => {
     setBillingModalType('broker_invoice');
@@ -285,13 +292,32 @@ export const LoadDetailModal: React.FC<LoadDetailModalProps> = ({
     setIsCheckCallModalOpen(true);
   };
 
-  const handleDeleteCheckCall = async (call: CheckCall) => {
-    if (!load) return;
+  const handleDeleteCheckCall = (call: CheckCall) => {
+    setCheckCallToDelete(call);
+  };
+
+  const handleConfirmDeleteCheckCall = async () => {
+    if (!load || !checkCallToDelete || isDeletingCheckCall) return;
+    setIsDeletingCheckCall(true);
     try {
-      await checkCallService.deleteCheckCall(load.organization_id, call.id);
+      await checkCallService.deleteCheckCall(load.organization_id, checkCallToDelete.id);
       await fetchTracking();
-    } catch (err) {
+      const typeLabel = CHECK_CALL_TYPE_LABELS[checkCallToDelete.call_type] || checkCallToDelete.call_type;
+      setCheckCallFeedback({
+        type: 'success',
+        text: `Check call record "${typeLabel}" on Load #${load.load_number} deleted successfully.`,
+      });
+      setTimeout(() => setCheckCallFeedback(null), 4000);
+      setCheckCallToDelete(null);
+    } catch (err: unknown) {
       console.error('Error deleting check call:', err);
+      const msg = err instanceof Error ? err.message : 'Failed to delete check call record.';
+      setCheckCallFeedback({
+        type: 'error',
+        text: msg,
+      });
+    } finally {
+      setIsDeletingCheckCall(false);
     }
   };
 
@@ -1178,6 +1204,34 @@ export const LoadDetailModal: React.FC<LoadDetailModalProps> = ({
             </div>
           </div>
 
+          {/* Tracking Feedback Banner */}
+          {checkCallFeedback && (
+            <div
+              id="load-tracking-feedback-banner"
+              className={`p-3 rounded-lg border flex items-center justify-between text-xs transition-all ${
+                checkCallFeedback.type === 'success'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                {checkCallFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                )}
+                <span>{checkCallFeedback.text}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCheckCallFeedback(null)}
+                className="text-slate-400 hover:text-slate-200 cursor-pointer text-base leading-none"
+              >
+                &times;
+              </button>
+            </div>
+          )}
+
           {/* Timeline Feed */}
           <div className="space-y-3 pt-2">
             <h5 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
@@ -1472,6 +1526,107 @@ export const LoadDetailModal: React.FC<LoadDetailModalProps> = ({
         initialType={billingModalType}
         onStatusChange={onStatusChange}
       />
+
+      {/* Check Call Delete Confirmation Modal */}
+      {checkCallToDelete && (
+        <Modal
+          id="delete-load-check-call-modal"
+          isOpen={Boolean(checkCallToDelete)}
+          onClose={() => {
+            if (!isDeletingCheckCall) setCheckCallToDelete(null);
+          }}
+          title="Delete Check Call Record"
+          subtitle={`Are you sure you want to remove this milestone from Load #${load.load_number}?`}
+          maxWidth="md"
+        >
+          <div className="p-6 space-y-4">
+            <div className="flex items-start gap-3 p-3.5 rounded-xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-200 leading-relaxed">
+              <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+              <div>
+                <strong className="text-rose-100 font-semibold block mb-0.5">
+                  Confirm Permanent Deletion
+                </strong>
+                Deleting this check call permanently removes the milestone and timestamp from this load's dispatch timeline.
+              </div>
+            </div>
+
+            {/* Check Call Details Summary */}
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Load Reference:</span>
+                <span className="font-semibold text-indigo-300">
+                  #{load.load_number}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Milestone Type:</span>
+                <span className="font-semibold text-slate-100">
+                  {CHECK_CALL_TYPE_LABELS[checkCallToDelete.call_type] || checkCallToDelete.call_type}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Tracking Status:</span>
+                <span className="font-medium text-slate-200">
+                  {CHECK_CALL_STATUS_LABELS[checkCallToDelete.status] || checkCallToDelete.status}
+                </span>
+              </div>
+              {(checkCallToDelete.location_city || checkCallToDelete.location_state) && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Location:</span>
+                  <span className="text-slate-200">
+                    {[checkCallToDelete.location_city, checkCallToDelete.location_state].filter(Boolean).join(', ')}
+                  </span>
+                </div>
+              )}
+              {checkCallToDelete.created_at && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Recorded At:</span>
+                  <span className="text-slate-300">
+                    {new Date(checkCallToDelete.created_at).toLocaleString()}
+                  </span>
+                </div>
+              )}
+              {checkCallToDelete.notes && (
+                <div className="pt-2 border-t border-slate-800/80 text-[11px] text-slate-400">
+                  <span className="font-medium text-slate-300">Notes: </span>
+                  {checkCallToDelete.notes}
+                </div>
+              )}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setCheckCallToDelete(null)}
+                disabled={isDeletingCheckCall}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                id="btn-confirm-delete-load-check-call"
+                type="button"
+                onClick={handleConfirmDeleteCheckCall}
+                disabled={isDeletingCheckCall}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-900/30 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingCheckCall ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Check Call</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </Modal>
   );
 };

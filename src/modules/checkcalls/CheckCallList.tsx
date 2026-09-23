@@ -147,11 +147,7 @@ export const CheckCallList: React.FC<CheckCallListProps> = ({
                     {onDelete && (
                       <button
                         type="button"
-                        onClick={() => {
-                          if (window.confirm('Delete this check call record?')) {
-                            onDelete(call);
-                          }
-                        }}
+                        onClick={() => onDelete(call)}
                         className="p-1.5 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer"
                         title="Delete Check Call"
                       >

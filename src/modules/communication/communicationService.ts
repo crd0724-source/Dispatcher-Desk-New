@@ -24,6 +24,11 @@ import {
   CreateLoadConversationOptions,
 } from './types.ts';
 
+export interface UnreadMessageSummary {
+  total: number;
+  byConversation: Record<string, number>;
+}
+
 function isUUID(str?: string | null): boolean {
   if (!str) return false;
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
@@ -1056,6 +1061,172 @@ export class CommunicationService {
       };
       this.saveOrgMessages(organizationId, messages);
     }
+  }
+
+  /**
+   * Get unread message counts across the organization for a user (excluding caller's own sent messages).
+   * Strict tenant scoping on organization_id, read_at IS NULL, and deleted_at IS NULL.
+   */
+  async getUnreadMessageCountForOrg(
+    organizationId: string,
+    currentUserId: string
+  ): Promise<UnreadMessageSummary> {
+    if (!organizationId) {
+      return { total: 0, byConversation: {} };
+    }
+
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      try {
+        let query = supabase
+          .from('conversation_messages')
+          .select('conversation_id')
+          .eq('organization_id', organizationId)
+          .is('read_at', null)
+          .is('deleted_at', null);
+
+        if (currentUserId) {
+          query = query.neq('sender_id', currentUserId);
+        }
+
+        const { data, error } = await query;
+        if (error) {
+          console.warn('[CommunicationService] Supabase getUnreadMessageCountForOrg error, falling back:', error);
+        } else if (data) {
+          const byConversation: Record<string, number> = {};
+          let total = 0;
+          for (const row of data) {
+            const convId = row.conversation_id;
+            if (convId) {
+              byConversation[convId] = (byConversation[convId] || 0) + 1;
+              total++;
+            }
+          }
+          return { total, byConversation };
+        }
+      } catch (err) {
+        console.warn('[CommunicationService] Network error getUnreadMessageCountForOrg, falling back:', err);
+      }
+    }
+
+    // Fallback/test runner storage
+    const messages = this.getOrgMessages(organizationId);
+    const byConversation: Record<string, number> = {};
+    let total = 0;
+
+    for (const m of messages) {
+      if (
+        !m.deleted_at &&
+        !m.read_at &&
+        (!currentUserId || m.sender_id !== currentUserId)
+      ) {
+        const convId = m.conversation_id;
+        if (convId) {
+          byConversation[convId] = (byConversation[convId] || 0) + 1;
+          total++;
+        }
+      }
+    }
+
+    return { total, byConversation };
+  }
+
+  /**
+   * Get unread message counts for a specific driver (e.g. driver portal or driver-scoped threads).
+   * Strictly scopes to conversations belonging to the specified driver, filtering
+   * read_at IS NULL, deleted_at IS NULL, and excluding caller's own sent messages.
+   * Fully respects database RLS policies.
+   */
+  async getUnreadMessageCountForDriver(
+    organizationId: string,
+    driverId: string,
+    currentUserId: string
+  ): Promise<UnreadMessageSummary> {
+    if (!organizationId || !driverId) {
+      return { total: 0, byConversation: {} };
+    }
+
+    if (isSupabaseConfigured && isUUID(organizationId)) {
+      try {
+        // First resolve conversations for this driver within the active organization
+        const { data: convData, error: convError } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('organization_id', organizationId)
+          .eq('driver_id', driverId)
+          .is('deleted_at', null);
+
+        if (convError) {
+          console.warn('[CommunicationService] Supabase getUnreadMessageCountForDriver conversations error, falling back:', convError);
+        } else if (convData) {
+          const driverConvIds = convData.map((c) => c.id).filter(Boolean);
+          if (driverConvIds.length === 0) {
+            return { total: 0, byConversation: {} };
+          }
+
+          let query = supabase
+            .from('conversation_messages')
+            .select('conversation_id')
+            .eq('organization_id', organizationId)
+            .in('conversation_id', driverConvIds)
+            .is('read_at', null)
+            .is('deleted_at', null);
+
+          if (currentUserId) {
+            query = query.neq('sender_id', currentUserId);
+          }
+
+          const { data: msgData, error: msgError } = await query;
+          if (msgError) {
+            console.warn('[CommunicationService] Supabase getUnreadMessageCountForDriver messages error, falling back:', msgError);
+          } else if (msgData) {
+            const byConversation: Record<string, number> = {};
+            let total = 0;
+            for (const row of msgData) {
+              const convId = row.conversation_id;
+              if (convId) {
+                byConversation[convId] = (byConversation[convId] || 0) + 1;
+                total++;
+              }
+            }
+            return { total, byConversation };
+          }
+        }
+      } catch (err) {
+        console.warn('[CommunicationService] Network error getUnreadMessageCountForDriver, falling back:', err);
+      }
+    }
+
+    // Fallback/test runner storage
+    const driverConvIds = new Set(
+      this.getOrgConversations(organizationId)
+        .filter((c) => c.driver_id === driverId && !c.deleted_at)
+        .map((c) => c.id)
+    );
+
+    if (driverConvIds.size === 0) {
+      return { total: 0, byConversation: {} };
+    }
+
+    const messages = this.getOrgMessages(organizationId);
+    const byConversation: Record<string, number> = {};
+    let total = 0;
+
+    for (const m of messages) {
+      if (
+        driverConvIds.has(m.conversation_id) &&
+        !m.deleted_at &&
+        !m.read_at &&
+        (!currentUserId || m.sender_id !== currentUserId)
+      ) {
+        const convId = m.conversation_id;
+        if (convId) {
+          byConversation[convId] = (byConversation[convId] || 0) + 1;
+          total++;
+        }
+      }
+    }
+
+    return { total, byConversation };
   }
 
   // ---------------------------------------------------------------------------

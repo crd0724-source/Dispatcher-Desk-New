@@ -54,14 +54,18 @@ export const DriverMessageThread: React.FC<DriverMessageThreadProps> = ({
   const [selectedType, setSelectedType] = useState<MessageType>('text');
   const [acknowledgingId, setAcknowledgingId] = useState<string | null>(null);
   const [reopening, setReopening] = useState(false);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const hasText = draftText.trim().length > 0;
   const isResolved = conversation.status === 'resolved';
 
-  // Scroll to bottom when messages update
+  // Scroll to bottom directly when messages update
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
   }, [messages.length]);
 
   const handleSend = async (e?: React.FormEvent) => {
@@ -273,7 +277,10 @@ export const DriverMessageThread: React.FC<DriverMessageThreadProps> = ({
       </div>
 
       {/* Messages Scroll Area */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 space-y-4 w-full min-w-0">
+      <div
+        ref={messagesContainerRef}
+        className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 space-y-4 w-full min-w-0"
+      >
         {isLoadingMessages && messages.length === 0 ? (
           <div className="py-16 text-center space-y-2">
             <RefreshCw className="w-6 h-6 text-indigo-400 animate-spin mx-auto" />

@@ -23,6 +23,7 @@ import { ContextualCopilotModal } from '../ai/ContextualCopilotModal.tsx';
 import { MetricCard } from '../../components/common/MetricCard.tsx';
 import { TaskModal } from '../tasks/TaskModal.tsx';
 import { TaskCategory, TaskPriority, DispatcherTask } from '../tasks/taskTypes.ts';
+import { Modal } from '../../components/common/Modal.tsx';
 import {
   Radio,
   Plus,
@@ -40,6 +41,7 @@ import {
   Sparkles,
   Bell,
   CheckSquare,
+  Trash2,
 } from 'lucide-react';
 
 export const CheckCallsView: React.FC = () => {
@@ -86,6 +88,11 @@ export const CheckCallsView: React.FC = () => {
   // Copilot State
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
   const [copilotLoadId, setCopilotLoadId] = useState<string | undefined>(undefined);
+
+  // Safe Delete & Feedback State
+  const [checkCallToDelete, setCheckCallToDelete] = useState<CheckCallWithRelations | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const fetchTrackingData = useCallback(async () => {
     if (!orgId) return;
@@ -136,13 +143,33 @@ export const CheckCallsView: React.FC = () => {
     setIsCheckCallModalOpen(true);
   };
 
-  const handleDeleteCheckCall = async (call: CheckCallWithRelations) => {
-    if (!orgId) return;
+  const handleDeleteCheckCall = (call: CheckCallWithRelations) => {
+    setCheckCallToDelete(call);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!orgId || !checkCallToDelete || isDeleting) return;
+    setIsDeleting(true);
     try {
-      await checkCallService.deleteCheckCall(orgId, call.id);
+      await checkCallService.deleteCheckCall(orgId, checkCallToDelete.id);
       await fetchTrackingData();
-    } catch (err) {
+      const typeLabel = CHECK_CALL_TYPE_LABELS[checkCallToDelete.call_type] || checkCallToDelete.call_type;
+      const loadNum = checkCallToDelete.load?.load_number ? ` for Load #${checkCallToDelete.load.load_number}` : '';
+      setFeedbackMessage({
+        type: 'success',
+        text: `Check call record "${typeLabel}"${loadNum} deleted successfully.`,
+      });
+      setTimeout(() => setFeedbackMessage(null), 4000);
+      setCheckCallToDelete(null);
+    } catch (err: unknown) {
       console.error('Error deleting check call:', err);
+      const msg = err instanceof Error ? err.message : 'Failed to delete check call record.';
+      setFeedbackMessage({
+        type: 'error',
+        text: msg,
+      });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -213,6 +240,34 @@ export const CheckCallsView: React.FC = () => {
 
   return (
     <div id="check-calls-view" className="space-y-6">
+      {/* Feedback Banner */}
+      {feedbackMessage && (
+        <div
+          id="check-calls-feedback-banner"
+          className={`p-3.5 rounded-xl text-xs flex items-center justify-between transition-all shadow-xs ${
+            feedbackMessage.type === 'success'
+              ? 'bg-emerald-950/60 border border-emerald-800/70 text-emerald-200'
+              : 'bg-rose-950/60 border border-rose-800/70 text-rose-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {feedbackMessage.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            )}
+            <span>{feedbackMessage.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setFeedbackMessage(null)}
+            className="text-slate-400 hover:text-slate-200 cursor-pointer text-base leading-none"
+          >
+            &times;
+          </button>
+        </div>
+      )}
+
       {/* Workspace Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -587,6 +642,107 @@ export const CheckCallsView: React.FC = () => {
           }
         }}
       />
+
+      {/* Delete Confirmation Modal */}
+      {checkCallToDelete && (
+        <Modal
+          id="delete-check-call-modal"
+          isOpen={Boolean(checkCallToDelete)}
+          onClose={() => {
+            if (!isDeleting) setCheckCallToDelete(null);
+          }}
+          title="Delete Check Call Record"
+          subtitle="Are you sure you want to remove this tracking milestone?"
+          maxWidth="md"
+        >
+          <div className="p-6 space-y-4">
+            <div className="flex items-start gap-3 p-3.5 rounded-xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-200 leading-relaxed">
+              <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+              <div>
+                <strong className="text-rose-100 font-semibold block mb-0.5">
+                  Confirm Permanent Deletion
+                </strong>
+                Deleting this check call permanently removes the GPS coordinates, arrival timestamps, and status milestone from the audit tracking history.
+              </div>
+            </div>
+
+            {/* Check Call Details Summary */}
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Load Reference:</span>
+                <span className="font-semibold text-indigo-300">
+                  {checkCallToDelete.load?.load_number ? `#${checkCallToDelete.load.load_number}` : 'Unassigned'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Milestone Type:</span>
+                <span className="font-semibold text-slate-100">
+                  {CHECK_CALL_TYPE_LABELS[checkCallToDelete.call_type] || checkCallToDelete.call_type}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Tracking Status:</span>
+                <span className="font-medium text-slate-200">
+                  {CHECK_CALL_STATUS_LABELS[checkCallToDelete.status] || checkCallToDelete.status}
+                </span>
+              </div>
+              {(checkCallToDelete.location_city || checkCallToDelete.location_state) && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Location:</span>
+                  <span className="text-slate-200">
+                    {[checkCallToDelete.location_city, checkCallToDelete.location_state].filter(Boolean).join(', ')}
+                  </span>
+                </div>
+              )}
+              {checkCallToDelete.created_at && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Recorded At:</span>
+                  <span className="text-slate-300">
+                    {new Date(checkCallToDelete.created_at).toLocaleString()}
+                  </span>
+                </div>
+              )}
+              {checkCallToDelete.notes && (
+                <div className="pt-2 border-t border-slate-800/80 text-[11px] text-slate-400">
+                  <span className="font-medium text-slate-300">Notes: </span>
+                  {checkCallToDelete.notes}
+                </div>
+              )}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setCheckCallToDelete(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                id="confirm-delete-check-call-btn"
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-900/30 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Check Call</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };

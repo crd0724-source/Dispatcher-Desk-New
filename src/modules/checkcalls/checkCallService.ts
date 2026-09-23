@@ -605,12 +605,17 @@ class CheckCallService implements ICheckCallService {
 
     if (isSupabaseConfigured && isUUID(checkCallId)) {
       try {
-        await (supabase.from('check_calls' as any) as any)
+        const { error } = await (supabase.from('check_calls' as any) as any)
           .delete()
           .eq('id', checkCallId)
           .eq('organization_id', organizationId);
+        if (error) {
+          console.error('Supabase deleteCheckCall failed:', error);
+          throw new Error(error.message || 'Failed to delete check call from database.');
+        }
       } catch (err) {
-        console.warn('Supabase deleteCheckCall failed:', err);
+        console.error('Supabase deleteCheckCall exception:', err);
+        throw err;
       }
     }
 

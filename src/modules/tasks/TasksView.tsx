@@ -118,6 +118,12 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenLoadDetail }) => {
   const [completeTaskTarget, setCompleteTaskTarget] = useState<DispatcherTask | null>(null);
   const [completionNotes, setCompletionNotes] = useState<string>('');
 
+  // Safe Delete & Cancel State
+  const [taskToDelete, setTaskToDelete] = useState<DispatcherTask | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  const [isCancelling, setIsCancelling] = useState<boolean>(false);
+  const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   // Linked Load detail inspection
   const [selectedLoad, setSelectedLoad] = useState<LoadWithRelations | null>(null);
   const [isLoadDetailOpen, setIsLoadDetailOpen] = useState<boolean>(false);
@@ -383,7 +389,8 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenLoadDetail }) => {
 
   const handleConfirmCancel = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!orgId || !cancelTaskTarget || !canMutate) return;
+    if (!orgId || !cancelTaskTarget || !canMutate || isCancelling) return;
+    setIsCancelling(true);
     try {
       await taskService.cancelTask(
         orgId,
@@ -393,11 +400,24 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenLoadDetail }) => {
         actorId,
         userRole
       );
+      const title = cancelTaskTarget.title;
       setCancelTaskTarget(null);
       setCancelReason('');
-      fetchTasksData();
-    } catch (err) {
+      await fetchTasksData();
+      setFeedbackMessage({
+        type: 'success',
+        text: `Task "${title}" was cancelled successfully.`,
+      });
+      setTimeout(() => setFeedbackMessage(null), 4000);
+    } catch (err: unknown) {
       console.error('Error cancelling task:', err);
+      const msg = err instanceof Error ? err.message : 'Failed to cancel task.';
+      setFeedbackMessage({
+        type: 'error',
+        text: msg,
+      });
+    } finally {
+      setIsCancelling(false);
     }
   };
 
@@ -423,15 +443,33 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenLoadDetail }) => {
     }
   };
 
-  const handleDeleteTask = async (task: DispatcherTask) => {
+  const handleDeleteTask = (task: DispatcherTask) => {
     if (!orgId || userRole !== 'owner_admin') return;
-    if (confirm(`Permanently delete task "${task.title}"?`)) {
-      try {
-        await taskService.deleteTask(orgId, task.id, userRole);
-        fetchTasksData();
-      } catch (err) {
-        console.error('Error deleting task:', err);
-      }
+    setTaskToDelete(task);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!orgId || !taskToDelete || userRole !== 'owner_admin' || isDeleting) return;
+    setIsDeleting(true);
+    try {
+      await taskService.deleteTask(orgId, taskToDelete.id, userRole);
+      const title = taskToDelete.title;
+      setTaskToDelete(null);
+      await fetchTasksData();
+      setFeedbackMessage({
+        type: 'success',
+        text: `Task "${title}" permanently deleted.`,
+      });
+      setTimeout(() => setFeedbackMessage(null), 4000);
+    } catch (err: unknown) {
+      console.error('Error deleting task:', err);
+      const msg = err instanceof Error ? err.message : 'Failed to delete task.';
+      setFeedbackMessage({
+        type: 'error',
+        text: msg,
+      });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -471,6 +509,34 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenLoadDetail }) => {
 
   return (
     <div id="tasks-view" className="space-y-6">
+      {/* Feedback Banner */}
+      {feedbackMessage && (
+        <div
+          id="tasks-feedback-banner"
+          className={`p-3.5 rounded-xl text-xs flex items-center justify-between transition-all shadow-xs ${
+            feedbackMessage.type === 'success'
+              ? 'bg-emerald-950/60 border border-emerald-800/70 text-emerald-200'
+              : 'bg-rose-950/60 border border-rose-800/70 text-rose-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {feedbackMessage.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            )}
+            <span>{feedbackMessage.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setFeedbackMessage(null)}
+            className="text-slate-400 hover:text-slate-200 cursor-pointer text-base leading-none"
+          >
+            &times;
+          </button>
+        </div>
+      )}
+
       {/* View Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -1125,11 +1191,12 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenLoadDetail }) => {
                         {/* Cancel Button */}
                         <button
                           type="button"
+                          disabled={isCancelling}
                           onClick={() => {
                             setCancelTaskTarget(task);
                             setCancelReason('');
                           }}
-                          className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
+                          className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
                           title="Cancel Task"
                         >
                           <XCircle className="w-3.5 h-3.5" />
@@ -1139,8 +1206,9 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenLoadDetail }) => {
                         {userRole === 'owner_admin' && (
                           <button
                             type="button"
+                            disabled={isDeleting}
                             onClick={() => handleDeleteTask(task)}
-                            className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
+                            className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
                             title="Delete Task"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -1299,7 +1367,9 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenLoadDetail }) => {
         <Modal
           id="cancel-task-modal"
           isOpen={Boolean(cancelTaskTarget)}
-          onClose={() => setCancelTaskTarget(null)}
+          onClose={() => {
+            if (!isCancelling) setCancelTaskTarget(null);
+          }}
           title="Cancel Operational Task"
           subtitle={`Void reminder for: ${cancelTaskTarget.title}`}
           maxWidth="md"
@@ -1310,10 +1380,11 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenLoadDetail }) => {
               <input
                 type="text"
                 required
+                disabled={isCancelling}
                 placeholder="e.g. Load cancelled by broker / Check-in received via automated GPS"
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-rose-500"
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-rose-500 disabled:opacity-50"
               />
             </div>
 
@@ -1321,15 +1392,25 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenLoadDetail }) => {
               <button
                 type="button"
                 onClick={() => setCancelTaskTarget(null)}
-                className="px-4 py-2 text-slate-400 hover:text-slate-200 bg-slate-800 rounded-lg cursor-pointer"
+                disabled={isCancelling}
+                className="px-4 py-2 text-slate-400 hover:text-slate-200 bg-slate-800 rounded-lg cursor-pointer disabled:opacity-50"
               >
                 Keep Task
               </button>
               <button
+                id="btn-confirm-cancel-task"
                 type="submit"
-                className="px-4 py-2 font-bold text-white bg-rose-600 hover:bg-rose-500 rounded-lg transition-colors cursor-pointer"
+                disabled={isCancelling || !cancelReason.trim()}
+                className="px-4 py-2 font-bold text-white bg-rose-600 hover:bg-rose-500 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
               >
-                Confirm Cancellation
+                {isCancelling ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Cancelling...</span>
+                  </>
+                ) : (
+                  <span>Confirm Cancellation</span>
+                )}
               </button>
             </div>
           </form>
@@ -1462,6 +1543,101 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenLoadDetail }) => {
           load={selectedLoad}
           canEdit={canMutate}
         />
+      )}
+
+      {/* Modal 6: Permanently Delete Task Modal */}
+      {taskToDelete && (
+        <Modal
+          id="delete-task-modal"
+          isOpen={Boolean(taskToDelete)}
+          onClose={() => {
+            if (!isDeleting) setTaskToDelete(null);
+          }}
+          title="Permanently Delete Task"
+          subtitle={`Are you sure you want to remove "${taskToDelete.title}"?`}
+          maxWidth="md"
+        >
+          <div className="p-6 space-y-4">
+            <div className="flex items-start gap-3 p-3.5 rounded-xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-200 leading-relaxed">
+              <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+              <div>
+                <strong className="text-rose-100 font-semibold block mb-0.5">
+                  Confirm Permanent Deletion
+                </strong>
+                Deleting this task permanently removes the task record, operational due timestamps, and associated reminders from the task schedule. This action cannot be undone.
+              </div>
+            </div>
+
+            {/* Task Details Summary */}
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Task Title:</span>
+                <span className="font-semibold text-slate-100 max-w-[240px] truncate text-right">
+                  {taskToDelete.title}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Category:</span>
+                <span className="font-medium text-slate-200">
+                  {TASK_CATEGORY_CONFIG[taskToDelete.category]?.label || taskToDelete.category}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Priority:</span>
+                <span className="font-semibold text-amber-400">
+                  {TASK_PRIORITY_CONFIG[taskToDelete.priority]?.label || taskToDelete.priority}
+                </span>
+              </div>
+              {taskToDelete.load_number && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Linked Load:</span>
+                  <span className="font-semibold text-indigo-300">
+                    Load #{taskToDelete.load_number}
+                  </span>
+                </div>
+              )}
+              {taskToDelete.assigned_to_name && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Assignee:</span>
+                  <span className="text-slate-300">
+                    {taskToDelete.assigned_to_name}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setTaskToDelete(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Keep Task
+              </button>
+              <button
+                id="btn-confirm-delete-task"
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-900/30 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Permanently Delete</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

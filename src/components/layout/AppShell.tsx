@@ -7,6 +7,7 @@ import { Building, Plus } from 'lucide-react';
 import { BillingAlertBanner } from '../../modules/billing/components/BillingAlertBanner.tsx';
 import { subscriptionService } from '../../modules/billing/subscriptionService.ts';
 import { SubscriptionUsageSummary } from '../../types/domain.types.ts';
+import { communicationService } from '../../modules/communication/communicationService.ts';
 
 interface AppShellProps {
   activeModule: NavModule;
@@ -25,6 +26,7 @@ export const AppShell: React.FC<AppShellProps> = ({
 }) => {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [globalUsage, setGlobalUsage] = useState<SubscriptionUsageSummary | null>(null);
+  const [unreadCommsCount, setUnreadCommsCount] = useState<number>(0);
   const { user, activeOrganization, memberships, isLoading } = useAuth();
 
   useEffect(() => {
@@ -35,6 +37,38 @@ export const AppShell: React.FC<AppShellProps> = ({
         .catch(() => {});
     }
   }, [activeOrganization?.id, activeModule]);
+
+  // Global unread communication badge polling (every 20 seconds)
+  useEffect(() => {
+    if (!activeOrganization?.id || !user?.id) {
+      setUnreadCommsCount(0);
+      return;
+    }
+
+    let isMounted = true;
+
+    const fetchUnread = async () => {
+      try {
+        const summary = await communicationService.getUnreadMessageCountForOrg(
+          activeOrganization.id,
+          user.id
+        );
+        if (isMounted) {
+          setUnreadCommsCount(summary.total);
+        }
+      } catch (err) {
+        console.warn('[AppShell] Failed to fetch unread communication count:', err);
+      }
+    };
+
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 20000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [activeOrganization?.id, user?.id]);
 
   if (isLoading) {
     return (
@@ -88,6 +122,7 @@ export const AppShell: React.FC<AppShellProps> = ({
         isOpen={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
         onOpenAuthModal={onOpenAuthModal}
+        unreadCommunicationCount={unreadCommsCount}
       />
 
       {/* Main Content Area */}

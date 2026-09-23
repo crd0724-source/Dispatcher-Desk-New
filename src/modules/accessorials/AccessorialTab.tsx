@@ -12,6 +12,7 @@ import { AccessorialModal } from './AccessorialModal.tsx';
 import { ContextualCopilotModal } from '../ai/ContextualCopilotModal.tsx';
 import { TaskModal } from '../tasks/TaskModal.tsx';
 import { TaskCategory, TaskPriority } from '../tasks/taskTypes.ts';
+import { Modal } from '../../components/common/Modal.tsx';
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import { formatCurrency } from '../../lib/calculations.ts';
 import {
@@ -24,6 +25,8 @@ import {
   RefreshCw,
   AlertTriangle,
   Sparkles,
+  CheckCircle2,
+  Trash2,
 } from 'lucide-react';
 
 export interface AccessorialTabProps {
@@ -41,6 +44,9 @@ export const AccessorialTab: React.FC<AccessorialTabProps> = ({ load }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedClaimForEdit, setSelectedClaimForEdit] = useState<AccessorialWithLoad | null>(null);
+  const [claimToDelete, setClaimToDelete] = useState<AccessorialWithLoad | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Task Modal state
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
@@ -92,16 +98,33 @@ export const AccessorialTab: React.FC<AccessorialTabProps> = ({ load }) => {
     }
   };
 
-  const handleDelete = async (claim: AccessorialWithLoad) => {
-    if (!canDelete) return;
+  const confirmDelete = async () => {
+    if (!claimToDelete || !canDelete || isDeleting) return;
+    setIsDeleting(true);
     const actorName = profile?.full_name || user?.email?.split('@')[0] || 'Admin';
     const actorId = user?.id || 'usr-alex-1';
 
     try {
-      await accessorialService.deleteAccessorial(orgId, claim.id, actorName, actorId);
-      setClaims((prev) => prev.filter((c) => c.id !== claim.id));
-    } catch (err) {
-      console.error('Error deleting accessorial:', err);
+      await accessorialService.deleteAccessorial(orgId, claimToDelete.id, actorName, actorId);
+      setClaims((prev) => prev.filter((c) => c.id !== claimToDelete.id));
+      const typeLabel = ACCESSORIAL_TYPE_CONFIG[claimToDelete.type]?.label || claimToDelete.type;
+      const amountStr = formatCurrency(claimToDelete.amount);
+      setFeedbackMessage({
+        type: 'success',
+        text: `Accessorial claim "${typeLabel}" (${amountStr}) deleted successfully.`,
+      });
+      setTimeout(() => setFeedbackMessage(null), 4000);
+      setClaimToDelete(null);
+      await fetchLoadClaims();
+    } catch (err: unknown) {
+      console.error('Error deleting accessorial claim:', err);
+      const msg = err instanceof Error ? err.message : 'Failed to delete accessorial claim.';
+      setFeedbackMessage({
+        type: 'error',
+        text: msg,
+      });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -160,6 +183,34 @@ export const AccessorialTab: React.FC<AccessorialTabProps> = ({ load }) => {
 
   return (
     <div className="space-y-4">
+      {/* Feedback Banner */}
+      {feedbackMessage && (
+        <div
+          id="accessorial-tab-feedback-banner"
+          className={`p-3 rounded-lg border flex items-center justify-between text-xs transition-all ${
+            feedbackMessage.type === 'success'
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+              : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {feedbackMessage.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            )}
+            <span>{feedbackMessage.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setFeedbackMessage(null)}
+            className="text-slate-400 hover:text-slate-200 cursor-pointer text-base leading-none"
+          >
+            &times;
+          </button>
+        </div>
+      )}
+
       {/* Mini Summary Banner */}
       <div className="p-3.5 bg-slate-900/90 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -231,7 +282,7 @@ export const AccessorialTab: React.FC<AccessorialTabProps> = ({ load }) => {
           setSelectedClaimForEdit(claim);
           setIsModalOpen(true);
         }}
-        onDelete={handleDelete}
+        onDelete={(claim) => setClaimToDelete(claim)}
         onStatusChange={handleStatusChange}
         onCreateTask={handleCreateTask}
       />
@@ -279,6 +330,97 @@ export const AccessorialTab: React.FC<AccessorialTabProps> = ({ load }) => {
         initialAction="detention_escalation"
         titleContext="Broker Detention Escalation"
       />
+
+      {/* Delete Confirmation Modal */}
+      {claimToDelete && (
+        <Modal
+          id="delete-accessorial-modal"
+          isOpen={Boolean(claimToDelete)}
+          onClose={() => {
+            if (!isDeleting) setClaimToDelete(null);
+          }}
+          title="Delete Accessorial Claim"
+          subtitle={`Are you sure you want to remove this ${ACCESSORIAL_TYPE_CONFIG[claimToDelete.type]?.label || 'accessorial'} claim?`}
+          maxWidth="md"
+        >
+          <div className="p-6 space-y-4">
+            <div className="flex items-start gap-3 p-3.5 rounded-xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-200 leading-relaxed">
+              <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+              <div>
+                <strong className="text-rose-100 font-semibold block mb-0.5">
+                  Confirm Permanent Removal
+                </strong>
+                Are you sure you want to delete this accessorial record? This will remove the charge from the load's ledger and audit trail.
+              </div>
+            </div>
+
+            {/* Accessorial Details Summary */}
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Claim Type:</span>
+                <span className="font-semibold text-slate-100">
+                  {ACCESSORIAL_TYPE_CONFIG[claimToDelete.type]?.label || claimToDelete.type}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Claim Amount:</span>
+                <span className="font-mono font-bold text-amber-400">
+                  {formatCurrency(claimToDelete.amount)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Load Reference:</span>
+                <span className="font-semibold text-indigo-300">
+                  #{claimToDelete.load?.load_number || load.load_number}
+                </span>
+              </div>
+              {claimToDelete.broker_name && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Broker:</span>
+                  <span className="text-slate-200">{claimToDelete.broker_name}</span>
+                </div>
+              )}
+              {claimToDelete.notes && (
+                <div className="pt-2 border-t border-slate-800/80 text-[11px] text-slate-400">
+                  <span className="font-medium text-slate-300">Notes: </span>
+                  {claimToDelete.notes}
+                </div>
+              )}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setClaimToDelete(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                id="btn-confirm-delete-accessorial"
+                type="button"
+                onClick={confirmDelete}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-900/30 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Claim</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };

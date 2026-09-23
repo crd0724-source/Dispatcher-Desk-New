@@ -17,6 +17,7 @@ import { DocumentUploadModal } from './DocumentUploadModal.tsx';
 import { DocumentDetailModal } from './DocumentDetailModal.tsx';
 import { RateConExtractionModal } from './RateConExtractionModal.tsx';
 import { LoadDetailModal } from '../loads/LoadDetailModal.tsx';
+import { Modal } from '../../components/common/Modal.tsx';
 import { MetricCard } from '../../components/common/MetricCard.tsx';
 import { TaskModal } from '../tasks/TaskModal.tsx';
 import { TaskCategory, TaskPriority } from '../tasks/taskTypes.ts';
@@ -46,6 +47,7 @@ import {
   UserCheck,
   PackageCheck,
   Upload,
+  Trash2,
 } from 'lucide-react';
 import { NavModule } from '../../components/layout/Sidebar.tsx';
 
@@ -99,6 +101,16 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({ onNavigate }) => {
   const [uploadPreselectLoadId, setUploadPreselectLoadId] = useState<string | undefined>(undefined);
   const [selectedDoc, setSelectedDoc] = useState<FreightDocument | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [documentToDelete, setDocumentToDelete] = useState<FreightDocument | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast(null);
+    }, 4000);
+  };
 
   // Task Modal state
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
@@ -171,9 +183,26 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({ onNavigate }) => {
   };
 
   const handleDeleteDocument = async (doc: FreightDocument) => {
-    if (!orgId) return;
-    await documentService.deleteDocument(orgId, doc.id);
-    await loadData();
+    if (!orgId || isDeleting) return;
+    setIsDeleting(true);
+    try {
+      await documentService.deleteDocument(orgId, doc.id);
+      await loadData();
+      if (selectedDoc?.id === doc.id) {
+        setIsDetailModalOpen(false);
+        setSelectedDoc(null);
+      }
+      setDocumentToDelete(null);
+      const docLabel = DOCUMENT_TYPE_LABELS[doc.doc_type] || doc.doc_type;
+      const docName = doc.file_name || docLabel;
+      showToast(`Document "${docName}" was successfully deleted.`);
+    } catch (err: unknown) {
+      console.error('Failed to delete document:', err);
+      const msg = err instanceof Error ? err.message : 'Failed to delete document record.';
+      showToast(msg, 'error');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const handleOpenLoadDetail = async (loadId: string) => {
@@ -228,6 +257,25 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({ onNavigate }) => {
 
   return (
     <div id="documents-view" className="space-y-6">
+      {/* Toast Notification */}
+      {toast && (
+        <div
+          id="documents-toast"
+          className={`fixed bottom-5 right-5 z-50 p-4 rounded-xl border shadow-2xl flex items-center gap-3 transition-all animate-in slide-in-from-bottom-2 duration-200 ${
+            toast.type === 'success'
+              ? 'bg-emerald-950/95 border-emerald-800 text-emerald-100'
+              : 'bg-rose-950/95 border-rose-800 text-rose-100'
+          }`}
+        >
+          {toast.type === 'success' ? (
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+          ) : (
+            <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+          )}
+          <span className="text-xs font-medium">{toast.message}</span>
+        </div>
+      )}
+
       {/* Top Header & Actions Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -423,9 +471,8 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({ onNavigate }) => {
         onVerifyDocument={async (doc) => {
           await handleStatusChange(doc, 'verified');
         }}
-        onDeleteDocument={async (doc) => {
-          setSelectedDoc(doc);
-          setIsDetailModalOpen(true);
+        onDeleteDocument={(doc) => {
+          setDocumentToDelete(doc);
         }}
         onViewLoad={(loadId) => handleOpenLoadDetail(loadId)}
         userRole={userRole}
@@ -534,6 +581,97 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({ onNavigate }) => {
           canEdit={userRole === 'owner_admin' || userRole === 'dispatcher'}
           onDocumentUpdated={loadData}
         />
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {documentToDelete && (
+        <Modal
+          id="delete-document-modal"
+          isOpen={Boolean(documentToDelete)}
+          onClose={() => {
+            if (!isDeleting) setDocumentToDelete(null);
+          }}
+          title="Confirm Document Deletion"
+          subtitle={`Permanently delete ${DOCUMENT_TYPE_LABELS[documentToDelete.doc_type] || 'paperwork'} from vault?`}
+          maxWidth="md"
+        >
+          <div className="p-6 space-y-4">
+            {/* Warning Banner */}
+            <div className="flex items-start gap-3 p-3.5 rounded-xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-200 leading-relaxed">
+              <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+              <div>
+                <strong className="text-rose-100 font-semibold block mb-0.5">
+                  Permanent Document Deletion
+                </strong>
+                Deleting this file will permanently remove the storage object and purge audit verification records from your workspace.
+              </div>
+            </div>
+
+            {/* Document Details Summary */}
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Document Type:</span>
+                <span className="font-semibold text-slate-100">
+                  {DOCUMENT_TYPE_LABELS[documentToDelete.doc_type] || documentToDelete.doc_type}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">File Name:</span>
+                <span
+                  className="font-mono text-slate-200 truncate max-w-[220px]"
+                  title={documentToDelete.file_name || 'Paperwork file'}
+                >
+                  {documentToDelete.file_name || 'Paperwork file'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Associated Load:</span>
+                <span className="font-semibold text-indigo-300">
+                  {documentToDelete.load_number ? `#${documentToDelete.load_number}` : 'Unassigned'}
+                </span>
+              </div>
+              {documentToDelete.created_at && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Uploaded Date:</span>
+                  <span className="text-slate-300">
+                    {new Date(documentToDelete.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setDocumentToDelete(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                id="confirm-delete-document-btn"
+                type="button"
+                onClick={() => handleDeleteDocument(documentToDelete)}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-900/30 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Document</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

@@ -321,6 +321,14 @@ export const ConversationList: React.FC<ConversationListProps> = ({
                       <span className="text-[10px] text-slate-500 font-mono">
                         {formatRelativeTime(conv.updated_at)}
                       </span>
+                      {conv.unread_count && conv.unread_count > 0 ? (
+                        <span
+                          id={`conv-unread-badge-${conv.id}`}
+                          className="px-1.5 py-0.2 text-[10px] font-bold font-mono rounded-full bg-indigo-600 text-white min-w-[1.125rem] text-center"
+                        >
+                          {conv.unread_count}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
 

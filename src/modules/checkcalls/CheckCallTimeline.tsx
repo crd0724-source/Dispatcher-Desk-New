@@ -155,11 +155,7 @@ export const CheckCallTimeline: React.FC<CheckCallTimelineProps> = ({
                       {onDelete && (
                         <button
                           type="button"
-                          onClick={() => {
-                            if (window.confirm('Delete this check call record?')) {
-                              onDelete(item);
-                            }
-                          }}
+                          onClick={() => onDelete(item)}
                           className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 rounded transition-colors cursor-pointer"
                           title="Delete Check Call"
                         >

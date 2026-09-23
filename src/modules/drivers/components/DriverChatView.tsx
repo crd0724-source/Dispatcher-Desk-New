@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../../../contexts/AuthContext.tsx';
-import { communicationService } from '../../communication/communicationService.ts';
+import { communicationService, UnreadMessageSummary } from '../../communication/communicationService.ts';
 import { Conversation, ConversationMessage, MessageType } from '../../communication/types.ts';
 import { DriverAssignedLoad } from '../DriverPortalView.tsx';
 import { DriverConversationList } from './DriverConversationList.tsx';
@@ -51,89 +51,160 @@ export const DriverChatView: React.FC<DriverChatViewProps> = ({
   }, [loads]);
 
   // Load conversations and resolve authoritative driver identity
-  const fetchConversations = useCallback(async () => {
-    if (!driverOrgId) {
-      setIsLoadingConvs(false);
-      return;
-    }
-
-    setIsLoadingConvs(true);
-    setErrorMessage(null);
-
-    try {
-      // Step 1: Authoritative driver resolution (Never from arbitrary user input)
-      const resolvedDriverId = await communicationService.resolveCurrentDriverId(driverOrgId);
-      if (!resolvedDriverId) {
-        throw new Error('Unable to resolve authoritative driver profile for active session.');
+  const fetchConversations = useCallback(
+    async (isBackground = false) => {
+      if (!driverOrgId) {
+        if (!isBackground) setIsLoadingConvs(false);
+        return;
       }
-      setAuthoritativeDriverId(resolvedDriverId);
 
-      // Step 2: Ensure driver's general conversation exists
-      const generalConv = await communicationService.getOrCreateCurrentDriverConversation(
-        driverOrgId
-      );
+      if (!isBackground) {
+        setIsLoadingConvs(true);
+        setErrorMessage(null);
+      }
 
-      // Step 3: List all conversations for the authoritative driver
-      const driverConvs = await communicationService.listConversations(driverOrgId, {
-        driverId: resolvedDriverId,
-      });
-
-      // Ensure general conversation is in the list
-      const hasGeneral = driverConvs.some((c) => c.id === generalConv.id);
-      const rawCombined = hasGeneral ? driverConvs : [generalConv, ...driverConvs];
-      const combined = rawCombined.map((c) => ({
-        ...c,
-        unread_count: 0,
-      }));
-
-      setConversations(combined);
-
-      // Default selection handling
-      if (initialConversationId) {
-        const found = combined.find((c) => c.id === initialConversationId);
-        if (found) {
-          setSelectedConversationId(found.id);
-          setMobileView('thread');
-        } else {
-          setSelectedConversationId(generalConv.id);
+      try {
+        // Step 1: Authoritative driver resolution (Never from arbitrary user input)
+        const resolvedDriverId = await communicationService.resolveCurrentDriverId(driverOrgId);
+        if (!resolvedDriverId) {
+          throw new Error('Unable to resolve authoritative driver profile for active session.');
         }
-      } else if (!selectedConversationId) {
-        setSelectedConversationId(generalConv.id);
+        setAuthoritativeDriverId(resolvedDriverId);
+
+        // Step 2 & 3: Concurrently fetch general conversation, driver conversations, and unread counts
+        const [generalConv, driverConvs, unreadSummary] = await Promise.all([
+          communicationService.getOrCreateCurrentDriverConversation(driverOrgId),
+          communicationService.listConversations(driverOrgId, {
+            driverId: resolvedDriverId,
+          }),
+          user?.id
+            ? communicationService.getUnreadMessageCountForDriver(
+                driverOrgId,
+                resolvedDriverId,
+                user.id
+              )
+            : Promise.resolve<UnreadMessageSummary>({ total: 0, byConversation: {} }),
+        ]);
+
+        // Ensure general conversation is in the list
+        const hasGeneral = driverConvs.some((c) => c.id === generalConv.id);
+        const rawCombined = hasGeneral ? driverConvs : [generalConv, ...driverConvs];
+        const combined = rawCombined.map((c) => ({
+          ...c,
+          unread_count: unreadSummary.byConversation[c.id] || 0,
+        }));
+
+        setConversations(combined);
+
+        // Default selection handling
+        if (!isBackground) {
+          if (initialConversationId) {
+            const found = combined.find((c) => c.id === initialConversationId);
+            if (found) {
+              setSelectedConversationId(found.id);
+              setMobileView('thread');
+            } else {
+              setSelectedConversationId(generalConv.id);
+            }
+          } else if (!selectedConversationId) {
+            setSelectedConversationId(generalConv.id);
+          }
+        }
+      } catch (err: any) {
+        console.error('[DriverChatView] Failed to fetch conversations:', err);
+        if (!isBackground) {
+          setErrorMessage(err.message || 'Failed to initialize driver communications.');
+        }
+      } finally {
+        if (!isBackground) {
+          setIsLoadingConvs(false);
+        }
       }
-    } catch (err: any) {
-      console.error('[DriverChatView] Failed to fetch conversations:', err);
-      setErrorMessage(err.message || 'Failed to initialize driver communications.');
-    } finally {
-      setIsLoadingConvs(false);
-    }
-  }, [driverOrgId, initialConversationId, selectedConversationId]);
+    },
+    [driverOrgId, initialConversationId, selectedConversationId, user?.id]
+  );
 
   useEffect(() => {
     fetchConversations();
+    const intervalId = setInterval(() => {
+      fetchConversations(true);
+    }, 20000);
+    return () => clearInterval(intervalId);
   }, [fetchConversations]);
+
+  const messagesLoadedForConvRef = useRef<string | null>(null);
 
   // Fetch messages when selected conversation changes
   const fetchMessages = useCallback(
     async (conversationId: string) => {
       if (!driverOrgId || !conversationId) return;
 
-      setIsLoadingMessages(true);
+      const isInitial = messagesLoadedForConvRef.current !== conversationId;
+      if (isInitial) {
+        setIsLoadingMessages(true);
+      }
       try {
         const msgs = await communicationService.listMessages(driverOrgId, conversationId);
         setMessages(msgs);
+        messagesLoadedForConvRef.current = conversationId;
+
+        // Auto-mark incoming unread messages as read
+        const unreadIncoming = msgs.filter(
+          (m) => !m.read_at && m.sender_id !== user?.id
+        );
+        if (unreadIncoming.length > 0) {
+          Promise.all(
+            unreadIncoming.map((m) =>
+              communicationService.markMessageRead(driverOrgId, m.id).catch(() => null)
+            )
+          ).catch(() => null);
+
+          // Optimistically clear ONLY the selected conversation's local unread count
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.id === conversationId ? { ...c, unread_count: 0 } : c
+            )
+          );
+        }
       } catch (err: any) {
         console.error('[DriverChatView] Error loading messages:', err);
-        setErrorMessage(err.message || 'Failed to load messages.');
+        if (isInitial) {
+          setErrorMessage(err.message || 'Failed to load messages.');
+        }
       } finally {
-        setIsLoadingMessages(false);
+        if (isInitial) {
+          setIsLoadingMessages(false);
+        }
       }
     },
-    [driverOrgId]
+    [driverOrgId, user?.id]
   );
 
   useEffect(() => {
     if (selectedConversationId) {
       fetchMessages(selectedConversationId);
+      const intervalId = setInterval(() => {
+        fetchMessages(selectedConversationId);
+      }, 10000);
+
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible') {
+          fetchMessages(selectedConversationId);
+        }
+      };
+
+      const handleFocus = () => {
+        fetchMessages(selectedConversationId);
+      };
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      window.addEventListener('focus', handleFocus);
+
+      return () => {
+        clearInterval(intervalId);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.removeEventListener('focus', handleFocus);
+      };
     } else {
       setMessages([]);
     }
@@ -172,10 +243,7 @@ export const DriverChatView: React.FC<DriverChatViewProps> = ({
       await fetchMessages(selectedConversationId);
 
       // Refresh conversations list to update latest preview/timestamp
-      const updatedConvs = await communicationService.listConversations(driverOrgId, {
-        driverId: authoritativeDriverId || undefined,
-      });
-      setConversations(updatedConvs);
+      await fetchConversations(true);
     } catch (err: any) {
       console.error('[DriverChatView] Error sending message:', err);
       setErrorMessage(err.message || 'Failed to send message.');

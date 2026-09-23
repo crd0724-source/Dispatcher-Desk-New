@@ -63,6 +63,7 @@ interface SidebarProps {
   isOpen: boolean;
   onCloseMobile: () => void;
   onOpenAuthModal?: () => void;
+  unreadCommunicationCount?: number;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -72,6 +73,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isOpen,
   onCloseMobile,
   onOpenAuthModal,
+  unreadCommunicationCount,
 }) => {
   const { user, signOut } = useAuth();
   const isOwnerAdmin = userRole === 'owner_admin';
@@ -90,6 +92,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Driver Comms',
       icon: MessageSquare,
       sub: 'In-App Dispatch Chat',
+      badge:
+        unreadCommunicationCount && unreadCommunicationCount > 0
+          ? String(unreadCommunicationCount)
+          : undefined,
     },
     { id: 'checkcalls' as NavModule, label: 'Load Tracking', icon: Radio, sub: 'Live Check Calls' },
     { id: 'accessorials' as NavModule, label: 'Accessorials & Detention', icon: Timer, sub: 'Detention Clocks' },

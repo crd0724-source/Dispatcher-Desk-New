@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { MessageSquare, Plus, AlertCircle, X, Package, User } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext.tsx';
 import {
@@ -121,14 +121,23 @@ export const CommunicationView: React.FC = () => {
       setError(null);
 
       try {
-        const rawConversations = await communicationService.listConversations(orgId, {
-          limit: 100,
-        });
+        const [rawConversations, unreadSummary] = await Promise.all([
+          communicationService.listConversations(orgId, {
+            limit: 100,
+          }),
+          communicationService.getUnreadMessageCountForOrg(
+            orgId,
+            user?.id || ''
+          ),
+        ]);
 
-        // Enrich with driver and load relations + fetch last message
+        // Enrich with driver and load relations + fetch last message + unread count
         const enriched = await Promise.all(
           rawConversations.map(async (c) => {
-            const enrichedConv = { ...c };
+            const enrichedConv = {
+              ...c,
+              unread_count: unreadSummary.byConversation[c.id] || 0,
+            };
 
             // Driver enrichment
             const driverObj = driverMap.get(c.driver_id);
@@ -196,17 +205,23 @@ export const CommunicationView: React.FC = () => {
         setIsLoadingConversations(false);
       }
     },
-    [orgId, driverMap, loadMap]
+    [orgId, driverMap, loadMap, user?.id]
   );
 
   useEffect(() => {
     fetchConversations(false);
+    const interval = setInterval(() => {
+      fetchConversations(true);
+    }, 20000);
+    return () => clearInterval(interval);
   }, [fetchConversations]);
 
   // Currently selected conversation object
   const selectedConversation = useMemo(() => {
     return conversations.find((c) => c.id === selectedConversationId) || null;
   }, [conversations, selectedConversationId]);
+
+  const messagesLoadedForConvRef = useRef<string | null>(null);
 
   // ---------------------------------------------------------------------------
   // 3. Fetch Messages for Selected Conversation
@@ -215,14 +230,18 @@ export const CommunicationView: React.FC = () => {
     async (conversationId: string) => {
       if (!orgId || !conversationId) return;
 
-      setIsLoadingMessages(true);
-      setError(null);
+      const isInitial = messagesLoadedForConvRef.current !== conversationId;
+      if (isInitial) {
+        setIsLoadingMessages(true);
+        setError(null);
+      }
 
       try {
         const msgs = await communicationService.listMessages(orgId, conversationId, {
           limit: 100,
         });
         setMessages(msgs);
+        messagesLoadedForConvRef.current = conversationId;
 
         // Auto-mark incoming unread messages as read
         const unreadIncoming = msgs.filter(
@@ -232,12 +251,25 @@ export const CommunicationView: React.FC = () => {
           Promise.all(
             unreadIncoming.map((m) => communicationService.markMessageRead(orgId, m.id).catch(() => null))
           ).catch(() => null);
+
+          // Optimistically update ONLY the selected conversation's local unread_count to 0
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.id === conversationId
+                ? { ...c, unread_count: 0 }
+                : c
+            )
+          );
         }
       } catch (err: any) {
         console.error('[CommunicationView] Error fetching messages:', err);
-        setError(err.message || 'Failed to load messages.');
+        if (isInitial) {
+          setError(err.message || 'Failed to load messages.');
+        }
       } finally {
-        setIsLoadingMessages(false);
+        if (isInitial) {
+          setIsLoadingMessages(false);
+        }
       }
     },
     [orgId, user?.id]
@@ -246,6 +278,10 @@ export const CommunicationView: React.FC = () => {
   useEffect(() => {
     if (selectedConversationId) {
       fetchMessages(selectedConversationId);
+      const intervalId = setInterval(() => {
+        fetchMessages(selectedConversationId);
+      }, 10000);
+      return () => clearInterval(intervalId);
     } else {
       setMessages([]);
     }

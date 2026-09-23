@@ -204,6 +204,12 @@ app.use(
                     driverIdentity.organizationId
                   );
                   if (!isOwner) {
+                    res.setHeader(
+                      'Cache-Control',
+                      'no-store, no-cache, must-revalidate, proxy-revalidate'
+                    );
+                    res.setHeader('Pragma', 'no-cache');
+                    res.setHeader('Expires', '0');
                     return res.status(200).json([]);
                   }
                 }
@@ -255,6 +261,15 @@ app.use(
         const lower = key.toLowerCase();
         if (['content-encoding', 'transfer-encoding', 'content-length'].includes(lower)) continue;
         res.setHeader(key, val);
+      }
+
+      if (isMessagesPath && req.method === 'GET') {
+        res.setHeader(
+          'Cache-Control',
+          'no-store, no-cache, must-revalidate, proxy-revalidate'
+        );
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
       }
 
       const arrayBuffer = await response.arrayBuffer();
@@ -359,10 +374,7 @@ export function isLocalOrDemoOrganization(organizationId?: string | null): boole
     s.startsWith('demo-') ||
     s.startsWith('demo_') ||
     s.startsWith('local-') ||
-    s.startsWith('local_') ||
-    s.startsWith('org-') ||
-    s.startsWith('org_') ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
+    s.startsWith('local_')
   );
 }
 

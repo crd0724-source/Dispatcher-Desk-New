@@ -1,6 +1,6 @@
 import React from 'react';
 import { MapStopPoint } from '../mapTypes.ts';
-import { CHECK_CALL_TYPE_SHORT_LABELS, isOperationalException, formatTimeSince } from '../../checkcalls/checkCallTypes.ts';
+import { CHECK_CALL_TYPE_SHORT_LABELS, CHECK_CALL_STATUS_BADGES, isOperationalException, formatTimeSince } from '../../checkcalls/checkCallTypes.ts';
 import { MapPin, Navigation, Clock, Building2, UserCheck, Radio, AlertTriangle } from 'lucide-react';
 
 /**
@@ -86,6 +86,15 @@ export function createStopPopupHtml(stop: MapStopPoint, loadNumber: string): str
       ? `${checkCall.location_city}, ${checkCall.location_state}` 
       : stop.locationName;
     const callLabel = CHECK_CALL_TYPE_SHORT_LABELS[checkCall.call_type] || 'Status Update';
+    const statusBadge =
+      CHECK_CALL_STATUS_BADGES[checkCall.status] ||
+      CHECK_CALL_STATUS_BADGES.on_time;
+    const precisionLabel =
+      stop.precision === 'exact'
+        ? 'Exact GPS Fix'
+        : stop.precision === 'city'
+        ? 'City Centroid'
+        : 'State/other fallback';
 
     return `
       <div class="p-3 min-w-[240px] max-w-[280px] text-slate-100 font-sans text-xs">
@@ -100,6 +109,17 @@ export function createStopPopupHtml(stop: MapStopPoint, loadNumber: string): str
         <div class="py-2 space-y-1.5">
           <div class="text-sm font-semibold text-slate-200">
             ${locText}
+          </div>
+          <div class="text-[10px] text-slate-400">
+            GPS: <span class="font-mono text-slate-300">${stop.lat.toFixed(4)}, ${stop.lng.toFixed(4)}</span>
+            <span class="text-slate-500">(${precisionLabel})</span>
+          </div>
+          <div class="flex items-center justify-between text-[11px] text-slate-300">
+            <span class="text-slate-400">Status:</span>
+            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border ${statusBadge.bg} ${statusBadge.text} ${statusBadge.border}">
+              <span class="w-1.5 h-1.5 rounded-full ${statusBadge.dot}"></span>
+              <span>${statusBadge.label}</span>
+            </span>
           </div>
           <div class="flex items-center justify-between text-[11px] text-slate-300">
             <span class="text-slate-400">Call Type:</span>

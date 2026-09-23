@@ -37,6 +37,7 @@ interface AuthContextType {
   isDriver: boolean;
   driverProfile: DriverIdentityProfile | null;
   isLoading: boolean;
+  isResolvingUserData: boolean;
   isConfigured: boolean;
   setActiveOrganizationId: (orgId: string) => void;
   createOrganization: (name: string, slug?: string, timezone?: string) => Promise<string | null>;
@@ -88,6 +89,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isDriver, setIsDriver] = useState<boolean>(false);
   const [driverProfile, setDriverProfile] = useState<DriverIdentityProfile | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isResolvingUserData, setIsResolvingUserData] = useState<boolean>(false);
 
   const applyLocalFallback = useCallback(() => {
     // Check if demo driver is active
@@ -330,6 +332,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (!isSupabaseConfigured) {
       applyLocalFallback();
+      setIsResolvingUserData(false);
       setIsLoading(false);
       return;
     }
@@ -340,16 +343,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setSession(session);
         setUser(session?.user ?? null);
         if (session?.user) {
-          fetchUserData(session.user).finally(() => setIsLoading(false));
+          setIsResolvingUserData(true);
+          fetchUserData(session.user).finally(() => {
+            setIsResolvingUserData(false);
+            setIsLoading(false);
+          });
         } else {
           // Initialize default workspace for guest/demo browsing
           applyLocalFallback();
+          setIsResolvingUserData(false);
           setIsLoading(false);
         }
       })
       .catch((err) => {
         console.warn('Session check note:', err?.message || err);
         applyLocalFallback();
+        setIsResolvingUserData(false);
         setIsLoading(false);
       });
 
@@ -359,10 +368,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchUserData(session.user).finally(() => setIsLoading(false));
+        setIsResolvingUserData(true);
+        fetchUserData(session.user).finally(() => {
+          setIsResolvingUserData(false);
+          setIsLoading(false);
+        });
       } else {
         setProfile(null);
         applyLocalFallback();
+        setIsResolvingUserData(false);
         setIsLoading(false);
       }
     });
@@ -485,7 +499,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.setItem(LOCAL_ACTIVE_KEY, data);
       }
 
-      await fetchUserData(currentUser);
+      setIsResolvingUserData(true);
+      try {
+        await fetchUserData(currentUser);
+      } finally {
+        setIsResolvingUserData(false);
+      }
       return (data as string) || createLocalOrg();
     } catch (err) {
       console.warn('Create organization notice, saving to local workspace:', err);
@@ -494,6 +513,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
+    setIsResolvingUserData(false);
     if (isSupabaseConfigured) {
       await supabase.auth.signOut();
     }
@@ -505,6 +525,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsDriver(false);
     setDriverProfile(null);
     setMemberships([]);
+    setIsResolvingUserData(false);
     localStorage.removeItem(LOCAL_ACTIVE_KEY);
     localStorage.removeItem('dispatchdesk_demo_active_driver');
   };
@@ -520,8 +541,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
     if (resolvedUser) {
-      setUser(resolvedUser);
-      await fetchUserData(resolvedUser);
+      setIsResolvingUserData(true);
+      try {
+        setUser(resolvedUser);
+        await fetchUserData(resolvedUser);
+      } finally {
+        setIsResolvingUserData(false);
+      }
+    } else {
+      setIsResolvingUserData(false);
     }
   };
 
@@ -538,9 +566,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const { data: sessionData } = await supabase.auth.getSession();
       if (sessionData.session?.user) {
+        setIsResolvingUserData(true);
         setUser(sessionData.session.user);
         setSession(sessionData.session);
-        await fetchUserData(sessionData.session.user);
+        try {
+          await fetchUserData(sessionData.session.user);
+        } finally {
+          setIsResolvingUserData(false);
+        }
       } else {
         await refreshUserData();
       }
@@ -569,6 +602,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isDriver,
         driverProfile,
         isLoading,
+        isResolvingUserData,
         isConfigured: isSupabaseConfigured,
         setActiveOrganizationId,
         createOrganization,

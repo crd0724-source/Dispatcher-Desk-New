@@ -150,6 +150,14 @@ export const DriverConversationList: React.FC<DriverConversationListProps> = ({
                         <Clock className="w-2.5 h-2.5" />
                         {formatTimestamp(conv.updated_at || conv.created_at)}
                       </span>
+                      {conv.unread_count && conv.unread_count > 0 ? (
+                        <span
+                          id={`driver-conv-unread-${conv.id}`}
+                          className="px-1.5 py-0.5 text-[10px] font-bold font-mono rounded-full bg-indigo-600 text-white min-w-[1.125rem] text-center leading-none"
+                        >
+                          {conv.unread_count}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
 
@@ -215,6 +223,14 @@ export const DriverConversationList: React.FC<DriverConversationListProps> = ({
                         <Clock className="w-2.5 h-2.5" />
                         {formatTimestamp(conv.updated_at || conv.created_at)}
                       </span>
+                      {conv.unread_count && conv.unread_count > 0 ? (
+                        <span
+                          id={`driver-conv-unread-${conv.id}`}
+                          className="px-1.5 py-0.5 text-[10px] font-bold font-mono rounded-full bg-indigo-600 text-white min-w-[1.125rem] text-center leading-none"
+                        >
+                          {conv.unread_count}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
 
