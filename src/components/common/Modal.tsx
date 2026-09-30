@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 
 interface ModalProps {
@@ -11,6 +11,33 @@ interface ModalProps {
   maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl';
 }
 
+// Module-level reference-counted body scroll lock manager.
+// Safely supports nested, concurrent, and re-mounting modals across React lifecycles and auth transitions.
+let activeModalCount = 0;
+let originalBodyOverflow: string | null = null;
+
+const acquireBodyScrollLock = () => {
+  if (typeof document === 'undefined') return;
+  if (activeModalCount === 0) {
+    originalBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+  }
+  activeModalCount++;
+};
+
+const releaseBodyScrollLock = () => {
+  if (typeof document === 'undefined') return;
+  activeModalCount = Math.max(0, activeModalCount - 1);
+  if (activeModalCount === 0) {
+    if (originalBodyOverflow !== null) {
+      document.body.style.overflow = originalBodyOverflow;
+      originalBodyOverflow = null;
+    } else {
+      document.body.style.overflow = '';
+    }
+  }
+};
+
 export const Modal: React.FC<ModalProps> = ({
   id,
   isOpen,
@@ -20,20 +47,29 @@ export const Modal: React.FC<ModalProps> = ({
   children,
   maxWidth = 'lg',
 }) => {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
+    if (!isOpen) return;
+
+    let isLocked = true;
+    acquireBodyScrollLock();
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
     };
-    if (isOpen) {
-      const originalOverflow = document.body.style.overflow;
-      document.body.style.overflow = 'hidden';
-      window.addEventListener('keydown', handleKeyDown);
-      return () => {
-        document.body.style.overflow = originalOverflow;
-        window.removeEventListener('keydown', handleKeyDown);
-      };
-    }
-  }, [isOpen, onClose]);
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      if (isLocked) {
+        isLocked = false;
+        releaseBodyScrollLock();
+      }
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

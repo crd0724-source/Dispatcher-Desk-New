@@ -274,11 +274,25 @@ class BrokerService {
       if (isSupabaseConfigured && isUUID(orgId)) {
         if (orgId !== DEMO_ORGANIZATION_ID) {
           try {
-            const { data, error } = await supabase
+            let { data, error } = await supabase
               .from('brokers')
               .select('*')
               .eq('organization_id', orgId)
               .order('company_name', { ascending: true });
+
+            // If a transient network glitch or gateway error occurred, retry once before reporting failure
+            if (error && (error.message?.includes('500') || error.message?.includes('<html') || error.message?.includes('Failed to fetch') || !(error as any).code)) {
+              console.warn('[BrokerService] Transient error on listBrokers, retrying in 300ms...');
+              await new Promise((r) => setTimeout(r, 300));
+              const retryRes = await supabase
+                .from('brokers')
+                .select('*')
+                .eq('organization_id', orgId)
+                .order('company_name', { ascending: true });
+              data = retryRes.data;
+              error = retryRes.error;
+            }
+
             if (error) {
               console.error('[BrokerService] Supabase listBrokers error for real org:', error);
               brokers = [];

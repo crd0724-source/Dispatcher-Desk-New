@@ -150,11 +150,25 @@ class ClientService implements IClientService {
       if (isSupabaseConfigured && isUUID(organizationId)) {
         if (organizationId !== DEMO_ORGANIZATION_ID) {
           try {
-            const { data, error } = await supabase
+            let { data, error } = await supabase
               .from('clients')
               .select('*')
               .eq('organization_id', organizationId)
               .order('company_name', { ascending: true });
+
+            // If a transient network glitch or gateway error occurred, retry once before reporting failure
+            if (error && (error.message?.includes('500') || error.message?.includes('<html') || error.message?.includes('Failed to fetch') || !(error as any).code)) {
+              console.warn('[ClientService] Transient error on getClients, retrying in 300ms...');
+              await new Promise((r) => setTimeout(r, 300));
+              const retryRes = await supabase
+                .from('clients')
+                .select('*')
+                .eq('organization_id', organizationId)
+                .order('company_name', { ascending: true });
+              data = retryRes.data;
+              error = retryRes.error;
+            }
+
             if (error) {
               console.error('[ClientService] Supabase getClients error for real org:', error);
               return [];

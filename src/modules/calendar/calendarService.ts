@@ -51,9 +51,13 @@ export class CalendarService {
     const now = new Date();
     const nowMs = now.getTime();
 
-    // 1. Derive Pickup Events
+    // 1. Derive Active Pickup Events (Only visible when pickup is the active milestone)
     loads.forEach((load) => {
-      if (load.pickup_datetime) {
+      const shouldShowPickup =
+        Boolean(load.pickup_datetime) &&
+        !['in_transit', 'delivered', 'invoiced', 'paid', 'cancelled'].includes(load.pipeline_status);
+
+      if (shouldShowPickup && load.pickup_datetime) {
         const effectivePickup = normalizeCalendarDatetime(load.pickup_datetime, operationalTz, '08:00') || load.pickup_datetime;
         const pickupMs = new Date(effectivePickup).getTime();
         const isPast = pickupMs < nowMs;
@@ -93,8 +97,12 @@ export class CalendarService {
         });
       }
 
-      // 2. Derive Delivery Events
-      if (load.delivery_datetime) {
+      // 2. Derive Active Delivery Events (Only visible when in_transit as the active milestone)
+      const shouldShowDelivery =
+        Boolean(load.delivery_datetime) &&
+        load.pipeline_status === 'in_transit';
+
+      if (shouldShowDelivery && load.delivery_datetime) {
         const effectiveDelivery = normalizeCalendarDatetime(load.delivery_datetime, operationalTz, '17:00') || load.delivery_datetime;
         const deliveryMs = new Date(effectiveDelivery).getTime();
         const isPast = deliveryMs < nowMs;

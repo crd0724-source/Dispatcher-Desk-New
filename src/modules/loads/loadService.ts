@@ -416,6 +416,9 @@ export interface ILoadService {
  * Organization -> Client -> Truck -> Driver -> Load & Broker -> Load
  */
 class LocalLoadService implements ILoadService {
+  private inFlightGetLoads = new Map<string, Promise<LoadWithRelations[]>>();
+  private inFlightGetDependencies = new Map<string, Promise<[Truck[], Driver[], Client[], Broker[], TeamMember[]]>>();
+
   private ensureInitialized(organizationId: string): {
     loads: Load[];
     clients: Client[];
@@ -590,194 +593,229 @@ class LocalLoadService implements ILoadService {
     };
   }
 
-  async getLoads(organizationId: string, filters?: LoadFilterCriteria & { operationalTimezone?: string }): Promise<LoadWithRelations[]> {
-    // Eagerly kick off dependencies concurrently so in-flight requests coalesce with external callers (e.g. PipelineView)
-    const depPromise = this.getDependencies(organizationId);
-    let rawLoads: Load[] = [];
-    let rawAssignments: LoadTeamAssignment[] = [];
+  getLoads(organizationId: string, filters?: LoadFilterCriteria & { operationalTimezone?: string }): Promise<LoadWithRelations[]> {
+    if (!organizationId) return Promise.resolve([]);
 
-    if (isSupabaseConfigured && isUUID(organizationId)) {
-      if (organizationId !== DEMO_ORGANIZATION_ID) {
-        try {
-          const { data, error } = await supabase
-            .from('loads')
-            .select('*')
-            .eq('organization_id', organizationId)
-            .order('created_at', { ascending: false });
+    const inFlightKey = `${organizationId}:${JSON.stringify(filters || {})}`;
+    const inFlight = this.inFlightGetLoads.get(inFlightKey);
+    if (inFlight) {
+      return inFlight;
+    }
 
-          if (error) {
-            console.error('[LoadService] Supabase getLoads query error for real org:', error);
-            rawLoads = [];
-          } else {
-            rawLoads = (data || []) as Load[];
+    const request = (async () => {
+      // Eagerly kick off dependencies concurrently so in-flight requests coalesce with external callers (e.g. PipelineView)
+      const depPromise = this.getDependencies(organizationId);
+      let rawLoads: Load[] = [];
+      let rawAssignments: LoadTeamAssignment[] = [];
+
+      if (isSupabaseConfigured && isUUID(organizationId)) {
+        if (organizationId !== DEMO_ORGANIZATION_ID) {
+          try {
+            let { data, error } = await supabase
+              .from('loads')
+              .select('*')
+              .eq('organization_id', organizationId)
+              .order('created_at', { ascending: false });
+
+            // If a transient network glitch or gateway error occurred, retry once before reporting failure
+            if (error && (error.message?.includes('500') || error.message?.includes('<html') || error.message?.includes('Failed to fetch') || error.details?.includes('Failed to fetch') || !(error as any).code)) {
+              console.warn('[LoadService] Transient network error on getLoads, retrying in 300ms...');
+              await new Promise((r) => setTimeout(r, 300));
+              const retryRes = await supabase
+                .from('loads')
+                .select('*')
+                .eq('organization_id', organizationId)
+                .order('created_at', { ascending: false });
+              data = retryRes.data;
+              error = retryRes.error;
+            }
+
+            if (error) {
+              console.error('[LoadService] Supabase getLoads query error for real org:', error);
+              // Fallback to locally cached loads for this org if available
+              const cachedKey = `${LOADS_STORAGE_PREFIX}${organizationId}`;
+              rawLoads = loadFromStorage<Load[]>(cachedKey, []);
+            } else {
+              rawLoads = (data || []) as Load[];
+              if (rawLoads.length > 0) {
+                saveToStorage(`${LOADS_STORAGE_PREFIX}${organizationId}`, rawLoads);
+              }
+            }
+          } catch (fetchErr) {
+            console.error('[LoadService] Supabase getLoads network error for real org:', fetchErr);
+            const cachedKey = `${LOADS_STORAGE_PREFIX}${organizationId}`;
+            rawLoads = loadFromStorage<Load[]>(cachedKey, []);
           }
-        } catch (fetchErr) {
-          console.error('[LoadService] Supabase getLoads network error for real org:', fetchErr);
-          rawLoads = [];
-        }
-      } else {
-        // Demo organization flow
-        try {
-          const { data, error } = await supabase
-            .from('loads')
-            .select('*')
-            .eq('organization_id', organizationId)
-            .order('created_at', { ascending: false });
+        } else {
+          // Demo organization flow
+          try {
+            const { data, error } = await supabase
+              .from('loads')
+              .select('*')
+              .eq('organization_id', organizationId)
+              .order('created_at', { ascending: false });
 
-          if (error) {
-            console.warn('[LoadService] Supabase getLoads query warning, using local fallback:', error);
+            if (error) {
+              console.warn('[LoadService] Supabase getLoads query warning, using local fallback:', error);
+              const init = this.ensureInitialized(organizationId);
+              rawLoads = init.loads;
+              rawAssignments = init.assignments;
+            } else {
+              rawLoads = (data || []) as Load[];
+              // If Supabase returned zero records for demo org, backfill with local initialized records for demo continuity
+              if (rawLoads.length === 0) {
+                const init = this.ensureInitialized(organizationId);
+                if (init.loads.length > 0) {
+                  rawLoads = init.loads;
+                  rawAssignments = init.assignments;
+                }
+              }
+            }
+          } catch (fetchErr) {
+            console.warn('[LoadService] Supabase getLoads network warning, using local fallback:', fetchErr);
             const init = this.ensureInitialized(organizationId);
             rawLoads = init.loads;
             rawAssignments = init.assignments;
-          } else {
-            rawLoads = (data || []) as Load[];
-            // If Supabase returned zero records for demo org, backfill with local initialized records for demo continuity
-            if (rawLoads.length === 0) {
-              const init = this.ensureInitialized(organizationId);
-              if (init.loads.length > 0) {
-                rawLoads = init.loads;
-                rawAssignments = init.assignments;
-              }
+          }
+        }
+
+        // Attempt to fetch load_team_assignments from Supabase if we got loads from Supabase
+        if (rawAssignments.length === 0) {
+          try {
+            const { data: assignData, error: assignError } = await supabase
+              .from('load_team_assignments')
+              .select('*')
+              .eq('organization_id', organizationId);
+
+            if (!assignError && assignData && assignData.length > 0) {
+              rawAssignments = assignData as LoadTeamAssignment[];
             }
+          } catch (err) {
+            console.warn('[LoadService] Supabase load_team_assignments fetch skipped/failed, using fallback:', err);
           }
-        } catch (fetchErr) {
-          console.warn('[LoadService] Supabase getLoads network warning, using local fallback:', fetchErr);
-          const init = this.ensureInitialized(organizationId);
-          rawLoads = init.loads;
-          rawAssignments = init.assignments;
         }
+      } else if (!isUUID(organizationId) || organizationId === DEMO_ORGANIZATION_ID) {
+        const init = this.ensureInitialized(organizationId);
+        rawLoads = init.loads;
+        rawAssignments = init.assignments;
       }
 
-      // Attempt to fetch load_team_assignments from Supabase if we got loads from Supabase
-      if (rawAssignments.length === 0) {
-        try {
-          const { data: assignData, error: assignError } = await supabase
-            .from('load_team_assignments')
-            .select('*')
-            .eq('organization_id', organizationId);
+      const [trucks, drivers, clients, brokers, teamMembers] = await depPromise;
+      let result = rawLoads.map((l) => this.joinRelations(l, clients, brokers, trucks, drivers, teamMembers, rawAssignments));
 
-          if (!assignError && assignData && assignData.length > 0) {
-            rawAssignments = assignData as LoadTeamAssignment[];
-          }
-        } catch (err) {
-          console.warn('[LoadService] Supabase load_team_assignments fetch skipped/failed, using fallback:', err);
+      if (filters) {
+        if (filters.search && filters.search.trim()) {
+          const query = filters.search.toLowerCase().trim();
+          result = result.filter((l) => {
+            const loadNum = l.load_number.toLowerCase();
+            const origin = `${l.origin_city}, ${l.origin_state}`.toLowerCase();
+            const dest = `${l.dest_city}, ${l.dest_state}`.toLowerCase();
+            const commodity = (l.commodity || '').toLowerCase();
+            const clientName = (l.client?.company_name || '').toLowerCase();
+            const brokerName = (l.broker?.company_name || '').toLowerCase();
+            const truckNum = (l.truck?.truck_number || '').toLowerCase();
+            const driverName = (l.driver?.full_name || '').toLowerCase();
+            const assigneeName = (l.dispatcher_profile?.full_name || '').toLowerCase();
+            const assigneeRole = (l.dispatcher_profile?.role || '').toLowerCase();
+            const teamMatches = (l.assigned_team || []).some(
+              (m) =>
+                (m.full_name || '').toLowerCase().includes(query) ||
+                (m.role || '').toLowerCase().includes(query) ||
+                (m.email && m.email.toLowerCase().includes(query))
+            );
+
+            return (
+              loadNum.includes(query) ||
+              origin.includes(query) ||
+              dest.includes(query) ||
+              commodity.includes(query) ||
+              clientName.includes(query) ||
+              brokerName.includes(query) ||
+              truckNum.includes(query) ||
+              driverName.includes(query) ||
+              assigneeName.includes(query) ||
+              assigneeRole.includes(query) ||
+              teamMatches
+            );
+          });
         }
-      }
-    } else if (!isUUID(organizationId) || organizationId === DEMO_ORGANIZATION_ID) {
-      const init = this.ensureInitialized(organizationId);
-      rawLoads = init.loads;
-      rawAssignments = init.assignments;
-    }
 
-    const [trucks, drivers, clients, brokers, teamMembers] = await depPromise;
-    let result = rawLoads.map((l) => this.joinRelations(l, clients, brokers, trucks, drivers, teamMembers, rawAssignments));
+        if (filters.clientId && filters.clientId !== 'all') {
+          result = result.filter((l) => l.client_id === filters.clientId);
+        }
 
-    if (filters) {
-      if (filters.search && filters.search.trim()) {
-        const query = filters.search.toLowerCase().trim();
-        result = result.filter((l) => {
-          const loadNum = l.load_number.toLowerCase();
-          const origin = `${l.origin_city}, ${l.origin_state}`.toLowerCase();
-          const dest = `${l.dest_city}, ${l.dest_state}`.toLowerCase();
-          const commodity = (l.commodity || '').toLowerCase();
-          const clientName = (l.client?.company_name || '').toLowerCase();
-          const brokerName = (l.broker?.company_name || '').toLowerCase();
-          const truckNum = (l.truck?.truck_number || '').toLowerCase();
-          const driverName = (l.driver?.full_name || '').toLowerCase();
-          const assigneeName = (l.dispatcher_profile?.full_name || '').toLowerCase();
-          const assigneeRole = (l.dispatcher_profile?.role || '').toLowerCase();
-          const teamMatches = (l.assigned_team || []).some(
-            (m) =>
-              (m.full_name || '').toLowerCase().includes(query) ||
-              (m.role || '').toLowerCase().includes(query) ||
-              (m.email && m.email.toLowerCase().includes(query))
-          );
+        if (filters.brokerId && filters.brokerId !== 'all') {
+          result = result.filter((l) => l.broker_id === filters.brokerId);
+        }
 
-          return (
-            loadNum.includes(query) ||
-            origin.includes(query) ||
-            dest.includes(query) ||
-            commodity.includes(query) ||
-            clientName.includes(query) ||
-            brokerName.includes(query) ||
-            truckNum.includes(query) ||
-            driverName.includes(query) ||
-            assigneeName.includes(query) ||
-            assigneeRole.includes(query) ||
-            teamMatches
-          );
-        });
-      }
-
-      if (filters.clientId && filters.clientId !== 'all') {
-        result = result.filter((l) => l.client_id === filters.clientId);
-      }
-
-      if (filters.brokerId && filters.brokerId !== 'all') {
-        result = result.filter((l) => l.broker_id === filters.brokerId);
-      }
-
-      const assignedFilter = filters.assignedMemberId || filters.dispatcherId;
-      if (assignedFilter && assignedFilter !== 'all') {
-        if (assignedFilter === 'unassigned') {
-          result = result.filter(
-            (l) => (!l.assigned_team || l.assigned_team.length === 0) &&
-                   (!l.assigned_team_assignments || l.assigned_team_assignments.length === 0)
-          );
-        } else if (assignedFilter === 'me') {
-          const targetUserId = filters.currentUserId;
-          if (targetUserId) {
+        const assignedFilter = filters.assignedMemberId || filters.dispatcherId;
+        if (assignedFilter && assignedFilter !== 'all') {
+          if (assignedFilter === 'unassigned') {
+            result = result.filter(
+              (l) => (!l.assigned_team || l.assigned_team.length === 0) &&
+                     (!l.assigned_team_assignments || l.assigned_team_assignments.length === 0)
+            );
+          } else if (assignedFilter === 'me') {
+            const targetUserId = filters.currentUserId;
+            if (targetUserId) {
+              result = result.filter(
+                (l) =>
+                  (l.assigned_team && l.assigned_team.some((m) => m.user_id === targetUserId)) ||
+                  (l.assigned_team_assignments && l.assigned_team_assignments.some((a) => a.user_id === targetUserId))
+              );
+            }
+          } else {
             result = result.filter(
               (l) =>
-                (l.assigned_team && l.assigned_team.some((m) => m.user_id === targetUserId)) ||
-                (l.assigned_team_assignments && l.assigned_team_assignments.some((a) => a.user_id === targetUserId))
+                (l.assigned_team && l.assigned_team.some((m) => m.user_id === assignedFilter)) ||
+                (l.assigned_team_assignments && l.assigned_team_assignments.some((a) => a.user_id === assignedFilter))
             );
           }
-        } else {
-          result = result.filter(
-            (l) =>
-              (l.assigned_team && l.assigned_team.some((m) => m.user_id === assignedFilter)) ||
-              (l.assigned_team_assignments && l.assigned_team_assignments.some((a) => a.user_id === assignedFilter))
-          );
+        }
+
+        if (filters.equipmentType && filters.equipmentType !== 'all') {
+          result = result.filter((l) => l.equipment_type === filters.equipmentType);
+        }
+
+        if (filters.status && filters.status !== 'all') {
+          result = result.filter((l) => l.pipeline_status === filters.status);
+        }
+
+        if (filters.dateRange && filters.dateRange !== 'all') {
+          const opTimezone = getEffectiveOperationalTimezone(filters);
+          const todayStr = getLocalDateString(new Date(), opTimezone);
+
+          if (filters.dateRange === 'today') {
+            result = result.filter((l) => {
+              if (!l.pickup_datetime) return false;
+              const pDate = toSafeLocalDateString(l.pickup_datetime, opTimezone);
+              return pDate === todayStr;
+            });
+          } else if (filters.dateRange === 'upcoming') {
+            result = result.filter((l) => {
+              if (!l.pickup_datetime) return true;
+              const pDate = toSafeLocalDateString(l.pickup_datetime, opTimezone);
+              return pDate !== null && pDate >= todayStr;
+            });
+          } else if (filters.dateRange === 'past') {
+            result = result.filter((l) => {
+              if (!l.delivery_datetime) return false;
+              const dDate = toSafeLocalDateString(l.delivery_datetime, opTimezone);
+              return dDate !== null && dDate < todayStr;
+            });
+          }
         }
       }
 
-      if (filters.equipmentType && filters.equipmentType !== 'all') {
-        result = result.filter((l) => l.equipment_type === filters.equipmentType);
-      }
+      // Sort newest first by created_at or pickup_datetime
+      return result.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    })();
 
-      if (filters.status && filters.status !== 'all') {
-        result = result.filter((l) => l.pipeline_status === filters.status);
-      }
-
-      if (filters.dateRange && filters.dateRange !== 'all') {
-        const opTimezone = getEffectiveOperationalTimezone(filters);
-        const todayStr = getLocalDateString(new Date(), opTimezone);
-
-        if (filters.dateRange === 'today') {
-          result = result.filter((l) => {
-            if (!l.pickup_datetime) return false;
-            const pDate = toSafeLocalDateString(l.pickup_datetime, opTimezone);
-            return pDate === todayStr;
-          });
-        } else if (filters.dateRange === 'upcoming') {
-          result = result.filter((l) => {
-            if (!l.pickup_datetime) return true;
-            const pDate = toSafeLocalDateString(l.pickup_datetime, opTimezone);
-            return pDate !== null && pDate >= todayStr;
-          });
-        } else if (filters.dateRange === 'past') {
-          result = result.filter((l) => {
-            if (!l.delivery_datetime) return false;
-            const dDate = toSafeLocalDateString(l.delivery_datetime, opTimezone);
-            return dDate !== null && dDate < todayStr;
-          });
-        }
-      }
-    }
-
-    // Sort newest first by created_at or pickup_datetime
-    return result.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    this.inFlightGetLoads.set(inFlightKey, request);
+    request.finally(() => {
+      this.inFlightGetLoads.delete(inFlightKey);
+    });
+    return request;
   }
 
   async getLoad(organizationId: string, id: string): Promise<LoadWithRelations | null> {
@@ -792,16 +830,35 @@ class LocalLoadService implements ILoadService {
       if (organizationId !== DEMO_ORGANIZATION_ID) {
         if (!isUUID(id)) return null;
         try {
-          const { data, error } = await supabase
+          let { data, error } = await supabase
             .from('loads')
             .select('*')
             .eq('id', id)
             .eq('organization_id', organizationId)
             .maybeSingle();
 
+          if (error && (error.message?.includes('Failed to fetch') || error.details?.includes('Failed to fetch') || !error.code)) {
+            console.warn('[LoadService] Transient network error on getLoadById, retrying in 300ms...');
+            await new Promise((r) => setTimeout(r, 300));
+            const retryRes = await supabase
+              .from('loads')
+              .select('*')
+              .eq('id', id)
+              .eq('organization_id', organizationId)
+              .maybeSingle();
+            data = retryRes.data;
+            error = retryRes.error;
+          }
+
           if (error) {
             console.error('[LoadService] Supabase getLoadById error for real org:', error);
-            throw new Error(error.message || 'Failed to fetch load from database.');
+            const cachedLoads = loadFromStorage<Load[]>(`${LOADS_STORAGE_PREFIX}${organizationId}`, []);
+            const found = cachedLoads.find((l) => l.id === id);
+            if (found) {
+              rawLoad = found;
+            } else {
+              throw new Error(error.message || 'Failed to fetch load from database.');
+            }
           }
           if (data) {
             rawLoad = data as Load;
@@ -2452,13 +2509,27 @@ class LocalLoadService implements ILoadService {
   }
 
   async getDependencies(organizationId: string): Promise<[Truck[], Driver[], Client[], Broker[], TeamMember[]]> {
-    return Promise.all([
+    if (!organizationId) {
+      return [[], [], [], [], []];
+    }
+    const inFlight = this.inFlightGetDependencies.get(organizationId);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const request = Promise.all([
       this.getTrucks(organizationId),
       this.getDrivers(organizationId),
       this.getClients(organizationId),
       this.getBrokers(organizationId),
       teamService.getTeamMembers(organizationId),
     ]);
+
+    this.inFlightGetDependencies.set(organizationId, request);
+    request.finally(() => {
+      this.inFlightGetDependencies.delete(organizationId);
+    });
+    return request;
   }
 
   async generateNextLoadNumber(organizationId: string): Promise<string> {

@@ -367,11 +367,24 @@ class TeamService implements ITeamService {
       if (isSupabaseConfigured && isUUID(organizationId)) {
         if (organizationId !== DEMO_ORGANIZATION_ID) {
           try {
-            const { data: memberRows, error: memberErr } = await supabase
+            let { data: memberRows, error: memberErr } = await supabase
               .from('organization_members')
               .select('*')
               .eq('organization_id', organizationId)
               .order('created_at', { ascending: true });
+
+            // If a transient network glitch or gateway error occurred, retry once before reporting failure
+            if (memberErr && (memberErr.message?.includes('500') || memberErr.message?.includes('<html') || memberErr.message?.includes('Failed to fetch') || !(memberErr as any).code)) {
+              console.warn('[TeamService] Transient error on organization_members query, retrying in 300ms...');
+              await new Promise((r) => setTimeout(r, 300));
+              const retryRes = await supabase
+                .from('organization_members')
+                .select('*')
+                .eq('organization_id', organizationId)
+                .order('created_at', { ascending: true });
+              memberRows = retryRes.data;
+              memberErr = retryRes.error;
+            }
 
             if (memberErr) {
               console.error('[TeamService] Error querying organization_members for real org:', memberErr);

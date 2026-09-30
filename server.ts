@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import { PDFParse } from 'pdf-parse';
@@ -133,8 +134,20 @@ app.use(
       const forwardHeaders: Record<string, string> = {};
       for (const [key, value] of Object.entries(req.headers)) {
         const lower = key.toLowerCase();
-        // Skip host and hop-by-hop headers
-        if (['host', 'connection', 'content-length', 'content-encoding'].includes(lower)) continue;
+        // Skip host, hop-by-hop headers, and foreign cookie/origin headers that trigger Cloud Run / upstream proxy drops
+        if ([
+          'host',
+          'connection',
+          'content-length',
+          'content-encoding',
+          'accept-encoding',
+          'cookie',
+          'origin',
+          'referer',
+          'x-cloud-trace-context',
+          'forwarded',
+          'via'
+        ].includes(lower)) continue;
         if (typeof value === 'string') {
           forwardHeaders[key] = value;
         } else if (Array.isArray(value)) {
@@ -259,8 +272,26 @@ app.use(
 
       for (const [key, val] of response.headers.entries()) {
         const lower = key.toLowerCase();
-        if (['content-encoding', 'transfer-encoding', 'content-length'].includes(lower)) continue;
-        res.setHeader(key, val);
+        // Prevent Cloudflare cookies, alt-svc, and hop-by-hop headers from breaking Cloud Run GFE
+        if ([
+          'content-encoding',
+          'transfer-encoding',
+          'content-length',
+          'connection',
+          'keep-alive',
+          'alt-svc',
+          'set-cookie',
+          'server',
+          'cf-ray',
+          'cf-cache-status',
+          'expect-ct',
+          'strict-transport-security'
+        ].includes(lower)) continue;
+        try {
+          res.setHeader(key, val);
+        } catch {
+          // Ignore invalid header for proxying
+        }
       }
 
       if (isMessagesPath && req.method === 'GET') {
@@ -273,7 +304,19 @@ app.use(
       }
 
       const arrayBuffer = await response.arrayBuffer();
-      res.send(Buffer.from(arrayBuffer));
+      const rawBuffer = Buffer.from(arrayBuffer);
+      const isHtml = (response.headers.get('content-type') || '').includes('text/html') ||
+                     (rawBuffer.length > 0 && rawBuffer.subarray(0, 50).toString('utf-8').toLowerCase().includes('<html'));
+
+      if (isHtml && response.status >= 500) {
+        return res.status(502).json({
+          error: 'Upstream gateway error',
+          status: response.status,
+          message: 'Upstream service temporarily returned an HTML error'
+        });
+      }
+
+      res.send(rawBuffer);
     } catch (err: any) {
       console.warn('Supabase proxy forwarding warning:', err?.message || err);
       res.status(502).json({
@@ -283,6 +326,334 @@ app.use(
     }
   }
 );
+
+// Constants for driver chat attachment uploads (Phase 1 & Voice Recording)
+const BUCKET_ALLOWED_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]);
+
+const ALLOWED_AUDIO_MIME_TYPES = new Set([
+  'audio/webm',
+  'audio/mp4',
+  'audio/ogg',
+]);
+
+const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB bucket ceiling
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function sanitizeAttachmentFilename(originalName: string): string {
+  const base = path.basename(originalName || 'attachment').trim();
+  const rawExt = path.extname(base).toLowerCase();
+  const cleanExt = rawExt.replace(/[^a-z0-9.]/g, '').slice(0, 10);
+  const nameWithoutExt = base.slice(0, base.length - rawExt.length);
+  const cleanBase = nameWithoutExt.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50) || 'attachment';
+  const timestamp = Date.now();
+  const randomPart = crypto.randomUUID().slice(0, 8);
+  return `${timestamp}_${randomPart}_${cleanBase}${cleanExt}`;
+}
+
+// POST /api/driver/chat/upload
+// Secure endpoint for Driver Portal chat attachments and voice recordings (Phase 1)
+app.post(
+  '/api/driver/chat/upload',
+  express.raw({ type: '*/*', limit: '30mb' }),
+  async (req, res) => {
+    try {
+      // 1. Authentication: Require Bearer JWT
+      const authHeader = req.headers['authorization'] || '';
+      const token = (typeof authHeader === 'string' ? authHeader : authHeader[0] || '')
+        .replace(/^Bearer\s+/i, '')
+        .trim();
+
+      if (!token) {
+        return res.status(401).json({ error: 'Authentication required: missing Bearer token' });
+      }
+
+      // 2. Resolve canonical driver identity (never trust client-supplied IDs)
+      const driverIdentity = await resolveDriverIdentity(token);
+      if (!driverIdentity) {
+        return res.status(401).json({ error: 'Unauthorized: Driver identity could not be verified' });
+      }
+
+      // 3. Content-Type check: Must be multipart/form-data
+      const contentType = req.headers['content-type'] || '';
+      if (!contentType.includes('multipart/form-data')) {
+        return res.status(400).json({ error: 'Request Content-Type must be multipart/form-data' });
+      }
+
+      if (!req.body || !Buffer.isBuffer(req.body) || req.body.length === 0) {
+        return res.status(400).json({ error: 'Empty multipart request payload' });
+      }
+
+      // 4. Parse multipart payload via Web Standard FormData
+      const webReq = new Request('http://localhost' + req.url, {
+        method: 'POST',
+        headers: req.headers as Record<string, string>,
+        body: req.body as any,
+        duplex: 'half',
+      } as any);
+
+      let formData: FormData;
+      try {
+        formData = await webReq.formData();
+      } catch (err: any) {
+        return res.status(400).json({
+          error: 'Failed to parse multipart form-data payload: ' + (err?.message || 'Invalid format'),
+        });
+      }
+
+      const conversationId = formData.get('conversationId');
+      const loadId = formData.get('loadId');
+      const fileEntry = formData.get('file');
+
+      // 5. Validation: Required fields
+      if (!conversationId || typeof conversationId !== 'string') {
+        return res.status(400).json({ error: 'Missing required field: conversationId' });
+      }
+      if (!UUID_REGEX.test(conversationId)) {
+        return res.status(400).json({ error: 'Invalid conversationId format (must be UUID)' });
+      }
+
+      if (loadId && (typeof loadId !== 'string' || !UUID_REGEX.test(loadId))) {
+        return res.status(400).json({ error: 'Invalid loadId format (must be UUID)' });
+      }
+
+      if (!fileEntry || typeof fileEntry === 'string') {
+        return res.status(400).json({ error: 'Missing required field: file' });
+      }
+
+      const file = fileEntry as File;
+
+      // 6. Authorization: Validate conversation ownership
+      const isOwner = await isConversationOwnedByDriver(
+        conversationId,
+        driverIdentity.driverId,
+        driverIdentity.organizationId
+      );
+      if (!isOwner) {
+        return res.status(403).json({ error: 'Forbidden: Conversation does not belong to driver' });
+      }
+
+      const admin = getSupabaseAdmin();
+
+      // 7. Authorization: Validate loadId association if provided
+      if (loadId) {
+        const { data: loadRow } = await admin
+          .from('loads')
+          .select('id, organization_id, driver_id')
+          .eq('id', loadId)
+          .eq('organization_id', driverIdentity.organizationId)
+          .maybeSingle();
+
+        if (!loadRow) {
+          return res.status(400).json({ error: 'Specified load does not exist in organization' });
+        }
+
+        if (loadRow.driver_id !== driverIdentity.driverId) {
+          return res.status(403).json({ error: 'Driver is not assigned to the specified load' });
+        }
+
+        const { data: convRow } = await admin
+          .from('conversations')
+          .select('id, load_id')
+          .eq('id', conversationId)
+          .eq('organization_id', driverIdentity.organizationId)
+          .maybeSingle();
+
+        if (convRow?.load_id && convRow.load_id !== loadId) {
+          return res.status(400).json({ error: 'Load ID does not match the conversation load' });
+        }
+      }
+
+      // 8. File extraction and size validation
+      const arrayBuffer = await file.arrayBuffer();
+      const fileBuffer = Buffer.from(arrayBuffer);
+
+      if (fileBuffer.length > MAX_ATTACHMENT_SIZE_BYTES) {
+        return res.status(400).json({
+          error: 'File size exceeds the 25 MB limit',
+          code: 'FILE_SIZE_EXCEEDED',
+        });
+      }
+
+      if (fileBuffer.length === 0) {
+        return res.status(400).json({ error: 'Uploaded file is empty (0 bytes)' });
+      }
+
+      // 9. MIME type validation
+      const rawMimeType = (file.type || 'application/octet-stream').toLowerCase().trim();
+      const normalizedMimeType = rawMimeType.split(';')[0].trim();
+
+      const isAllowedAudio = ALLOWED_AUDIO_MIME_TYPES.has(normalizedMimeType);
+      const isAllowedBucketDoc = BUCKET_ALLOWED_MIME_TYPES.has(normalizedMimeType);
+
+      if (!isAllowedAudio && !isAllowedBucketDoc) {
+        return res.status(400).json({
+          error: `Unsupported file type "${rawMimeType}". Allowed types: PDF, JPEG, PNG, WEBP, DOCX, and Audio (WEBM, MP4, OGG).`,
+          code: 'UNSUPPORTED_MIME_TYPE',
+        });
+      }
+
+      // 10. Sanitized path construction (anti-traversal)
+      const rawFileName = (file instanceof File ? file.name : '') || 'attachment';
+      const uniqueFileName = sanitizeAttachmentFilename(rawFileName);
+      const storagePath = `${driverIdentity.organizationId}/chat/${conversationId}/${uniqueFileName}`;
+
+      // 11. Upload to freight-documents via service-role admin client
+      const { error: uploadError } = await admin.storage
+        .from('freight-documents')
+        .upload(storagePath, fileBuffer, {
+          contentType: normalizedMimeType,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.error('[DriverChatUpload] Storage upload error:', uploadError.message);
+        return res.status(500).json({ error: 'Failed to upload attachment to storage' });
+      }
+
+      // 12. Generate short-lived signed URL for immediate client preview
+      const { data: signedUrlData, error: signedUrlError } = await admin.storage
+        .from('freight-documents')
+        .createSignedUrl(storagePath, 3600);
+
+      if (signedUrlError || !signedUrlData?.signedUrl) {
+        console.warn('[DriverChatUpload] Signed URL generation warning:', signedUrlError?.message);
+      }
+
+      const signedUrl = signedUrlData?.signedUrl || null;
+
+      let mediaType: 'image' | 'document' | 'audio' = 'document';
+      if (isAllowedAudio) {
+        mediaType = 'audio';
+      } else if (normalizedMimeType.startsWith('image/')) {
+        mediaType = 'image';
+      }
+
+      // 13. Return metadata payload
+      return res.status(200).json({
+        success: true,
+        attachment: {
+          storage_path: storagePath,
+          file_name: uniqueFileName,
+          file_size: fileBuffer.length,
+          mime_type: normalizedMimeType,
+          signed_url: signedUrl,
+          media_type: mediaType,
+        },
+      });
+    } catch (err: any) {
+      console.error('[DriverChatUpload] Unexpected error:', err);
+      return res.status(500).json({
+        error: 'An unexpected error occurred while processing attachment upload',
+      });
+    }
+  }
+);
+
+// GET /api/chat/attachment-url?path=<storage_path>
+// Secure endpoint to refresh short-lived signed URLs for historical chat attachments
+app.get('/api/chat/attachment-url', async (req, res) => {
+  try {
+    // 1. Authentication: Require Bearer JWT
+    const authHeader = req.headers['authorization'] || '';
+    const token = (typeof authHeader === 'string' ? authHeader : authHeader[0] || '')
+      .replace(/^Bearer\s+/i, '')
+      .trim();
+
+    if (!token) {
+      return res.status(401).json({ error: 'Authentication required: missing Bearer token' });
+    }
+
+    // 2. Validate path parameter
+    const rawPath = req.query.path;
+    if (!rawPath || typeof rawPath !== 'string') {
+      return res.status(400).json({ error: 'Missing or invalid query parameter: path' });
+    }
+
+    const trimmedPath = rawPath.trim();
+    // Security check: Prevent path traversal, absolute path trickery, or escaping freight-documents
+    if (
+      !trimmedPath ||
+      trimmedPath.includes('..') ||
+      trimmedPath.includes('\\') ||
+      trimmedPath.startsWith('/')
+    ) {
+      return res.status(400).json({ error: 'Malformed or illegal storage path' });
+    }
+
+    // Normalized path parts: {organizationId}/chat/{conversationId}/{filename}
+    const pathParts = trimmedPath.split('/');
+    if (pathParts.length < 4 || pathParts[1] !== 'chat') {
+      return res.status(400).json({ error: 'Invalid chat attachment storage path structure' });
+    }
+
+    const [targetOrgId, , conversationId] = pathParts;
+    if (!UUID_REGEX.test(conversationId)) {
+      return res.status(400).json({ error: 'Invalid conversation ID format in storage path' });
+    }
+
+    const admin = getSupabaseAdmin();
+
+    // 3. Authenticate actor (Driver or Dispatcher/Office User)
+    // Check if actor is a Driver first
+    const driverIdentity = await resolveDriverIdentity(token);
+
+    if (driverIdentity) {
+      // Driver Access Rules:
+      // - Must belong to driver's organization
+      if (driverIdentity.organizationId !== targetOrgId) {
+        return res.status(403).json({ error: 'Forbidden: Storage path does not belong to driver organization' });
+      }
+
+      // - Must own the conversation
+      const isOwner = await isConversationOwnedByDriver(
+        conversationId,
+        driverIdentity.driverId,
+        driverIdentity.organizationId
+      );
+      if (!isOwner) {
+        return res.status(403).json({ error: 'Forbidden: Conversation does not belong to driver' });
+      }
+    } else {
+      // Dispatcher / Office User Access Rules:
+      const { data: { user }, error: authError } = await admin.auth.getUser(token);
+      if (authError || !user) {
+        return res.status(401).json({ error: 'Unauthorized: Invalid authentication session' });
+      }
+
+      // Check organization membership for this user in targetOrgId
+      const orgAccess = await verifyOrgAccess(user.id, targetOrgId);
+      if (!orgAccess) {
+        return res.status(403).json({ error: 'Forbidden: User is not authorized to access organization attachments' });
+      }
+    }
+
+    // 4. Generate fresh signed URL from the freight-documents bucket
+    const { data: signedData, error: signedError } = await admin.storage
+      .from('freight-documents')
+      .createSignedUrl(trimmedPath, 3600);
+
+    if (signedError || !signedData?.signedUrl) {
+      console.error('[ChatAttachmentUrl] Failed to generate signed URL:', signedError?.message);
+      return res.status(500).json({ error: 'Failed to generate attachment access URL' });
+    }
+
+    return res.status(200).json({
+      signed_url: signedData.signedUrl,
+      expires_in: 3600,
+    });
+  } catch (err: any) {
+    console.error('[ChatAttachmentUrl] Unexpected error:', err);
+    return res.status(500).json({
+      error: 'An unexpected error occurred while resolving attachment URL',
+    });
+  }
+});
 
 // Lazy Billing Orchestrator instance
 let billingOrchestratorInstance: BillingOrchestrator | null = null;
@@ -441,28 +812,20 @@ export async function verifyOrgAccess(userId: string, organizationId: string): P
     }
 
     // 2. Check driver identity in drivers table (drivers have user_id bound to auth.uid())
-    const { data: driverData, error: driverError } = await admin
+    const driverQuery = admin
       .from('drivers')
       .select('id, status')
       .eq('organization_id', organizationId)
-      .eq('user_id', userId)
-      .neq('status', 'inactive')
-      .maybeSingle();
+      .eq('user_id', userId);
 
-    if (!driverError && driverData) {
+    const { data: driverData, error: driverError } = await (
+      typeof (driverQuery as any).neq === 'function'
+        ? (driverQuery as any).neq('status', 'inactive').maybeSingle()
+        : driverQuery.maybeSingle()
+    );
+
+    if (!driverError && driverData && driverData.status !== 'inactive') {
       return { role: 'driver' };
-    }
-
-    // 3. Check if user is an authenticated member of ANY organization (e.g. platform dispatcher/admin)
-    const { data: anyMemberData } = await admin
-      .from('organization_members')
-      .select('role')
-      .eq('user_id', userId)
-      .limit(1)
-      .maybeSingle();
-
-    if (anyMemberData?.role) {
-      return { role: anyMemberData.role };
     }
 
     return null;

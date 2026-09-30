@@ -62,18 +62,124 @@ const getRefreshedToken = async (): Promise<string | null> => {
   return refreshSessionPromise;
 };
 
+const DIRECT_SUPABASE_URL = (supabaseUrl && !supabaseUrl.includes('your-project'))
+  ? supabaseUrl.replace(/\/$/, '')
+  : 'https://ombipqikqaawcbnhrhuy.supabase.co';
+
+const getAlternateUrl = (url: string): string | null => {
+  if (typeof window === 'undefined' || !window.location?.origin) return null;
+  const proxyBase = `${window.location.origin}/api/supabase`;
+
+  if (url.startsWith(proxyBase)) {
+    return url.replace(proxyBase, DIRECT_SUPABASE_URL);
+  }
+  if (url.startsWith('/api/supabase')) {
+    return url.replace('/api/supabase', DIRECT_SUPABASE_URL);
+  }
+  if (url.startsWith(DIRECT_SUPABASE_URL)) {
+    return url.replace(DIRECT_SUPABASE_URL, proxyBase);
+  }
+  return null;
+};
+
+let preferDirectEndpoint = false;
+
+/**
+ * Executes a fetch request with automatic retries on transient network errors
+ * (e.g. "TypeError: Failed to fetch") and transparent fallback between the
+ * same-origin proxy (/api/supabase) and direct Supabase endpoint.
+ */
+const executeWithNetworkRetry = async (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  attempt = 0
+): Promise<Response> => {
+  let urlStr = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input || '');
+
+  // If direct endpoint was previously preferred due to a proxy failure, route directly
+  if (preferDirectEndpoint && urlStr.includes('/api/supabase')) {
+    const directUrl = getAlternateUrl(urlStr);
+    if (directUrl) {
+      urlStr = directUrl;
+      input = directUrl;
+    }
+  }
+
+  try {
+    const response = await fetch(input, init);
+
+    const isProxyUrl = Boolean(
+      urlStr.includes('/api/supabase') ||
+      (typeof window !== 'undefined' && window.location?.origin && urlStr.startsWith(`${window.location.origin}/api/supabase`))
+    );
+
+    const contentType = response.headers.get('content-type') || '';
+    const isHtmlResponse = contentType.includes('text/html');
+
+    // If proxy returns 5xx Server Error (500, 502, 503, 504) or an HTML error page, attempt direct endpoint fallback
+    if (isProxyUrl && (response.status >= 500 || isHtmlResponse)) {
+      const altUrl = getAlternateUrl(urlStr);
+      if (altUrl) {
+        console.warn(`[Supabase] Proxy returned HTTP ${response.status} (${contentType || 'no-type'}). Falling back to direct endpoint:`, altUrl);
+        try {
+          const directResponse = await fetch(altUrl, init);
+          if (directResponse.ok || directResponse.status < 500) {
+            preferDirectEndpoint = true;
+            return directResponse;
+          }
+        } catch (altErr) {
+          console.warn('[Supabase] Direct endpoint fallback failed:', altErr);
+        }
+      }
+    }
+
+    return response;
+  } catch (err: any) {
+    const isNetworkError =
+      err?.name === 'TypeError' ||
+      String(err?.message || '').toLowerCase().includes('failed to fetch') ||
+      String(err || '').toLowerCase().includes('failed to fetch');
+
+    if (isNetworkError && attempt < 2) {
+      const altUrl = getAlternateUrl(urlStr);
+      if (altUrl) {
+        console.warn(`[Supabase] Network fetch error on attempt ${attempt + 1}. Trying alternate endpoint:`, altUrl);
+        await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+        try {
+          const altResponse = await executeWithNetworkRetry(altUrl, init, attempt + 1);
+          if (altResponse.ok || altResponse.status < 500) {
+            preferDirectEndpoint = true;
+            return altResponse;
+          }
+        } catch (altErr) {
+          console.warn('[Supabase] Alternate endpoint also failed, retrying original:', altErr);
+        }
+      }
+
+      await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+      return await executeWithNetworkRetry(input, init, attempt + 1);
+    }
+
+    throw err;
+  }
+};
+
 /**
  * Custom fetch wrapper for Supabase client:
- * Automatically catches PostgREST PGRST303 ("JWT expired") responses,
- * performs an authenticated session refresh, and transparently retries the query
- * with the fresh access token so operations like creating/updating brokers and loads
- * succeed uninterrupted even after idle periods.
+ * 1. Automatically catches network glitches and falls back between proxy and direct endpoint.
+ * 2. Catches PostgREST PGRST303 ("JWT expired") responses, refreshes token, and retries request.
  */
 const customFetch: typeof fetch = async (input, init) => {
   const urlStr = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input || '');
   const isAuthTokenEndpoint = urlStr.includes('/auth/v1/token');
 
-  const response = await fetch(input, init);
+  let response: Response;
+  try {
+    response = await executeWithNetworkRetry(input, init);
+  } catch (fetchErr) {
+    console.warn('[Supabase] Fetch execution error after retries:', fetchErr);
+    throw fetchErr;
+  }
 
   // Check for expired JWT on non-auth requests
   if (response.status === 401 && !isAuthTokenEndpoint && clientRef) {
@@ -90,7 +196,7 @@ const customFetch: typeof fetch = async (input, init) => {
           headers.set('Authorization', `Bearer ${newToken}`);
 
           // Retry request with fresh access token
-          return await fetch(input, {
+          return await executeWithNetworkRetry(input, {
             ...init,
             headers,
           });

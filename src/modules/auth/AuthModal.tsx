@@ -137,8 +137,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           return;
         }
 
-        await refreshUserData(data?.user);
         onClose();
+        await refreshUserData(data?.user);
         if (onSuccessSignIn) {
           onSuccessSignIn();
         }
@@ -219,8 +219,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           console.warn('Profile upsert note during OTP verification:', profileErr);
         }
 
-        await refreshUserData(verifiedUser);
         onClose();
+        await refreshUserData(verifiedUser);
         // 4. Trigger existing organization creation & Guide flow ONLY after successful verification
         if (onSuccessSignUp) {
           onSuccessSignUp();

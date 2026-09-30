@@ -177,11 +177,25 @@ class TruckService implements ITruckService {
       if (isSupabaseConfigured && isUUID(organizationId)) {
         if (organizationId !== DEMO_ORGANIZATION_ID) {
           try {
-            const { data, error } = await supabase
+            let { data, error } = await supabase
               .from('trucks')
               .select('*')
               .eq('organization_id', organizationId)
               .order('created_at', { ascending: false });
+
+            // If a transient network glitch or gateway error occurred, retry once before reporting failure
+            if (error && (error.message?.includes('500') || error.message?.includes('<html') || error.message?.includes('Failed to fetch') || !(error as any).code)) {
+              console.warn('[TruckService] Transient error on getTrucks, retrying in 300ms...');
+              await new Promise((r) => setTimeout(r, 300));
+              const retryRes = await supabase
+                .from('trucks')
+                .select('*')
+                .eq('organization_id', organizationId)
+                .order('created_at', { ascending: false });
+              data = retryRes.data;
+              error = retryRes.error;
+            }
+
             if (error) {
               console.error('[TruckService] Supabase getTrucks error for real org:', error);
               rawTrucks = [];

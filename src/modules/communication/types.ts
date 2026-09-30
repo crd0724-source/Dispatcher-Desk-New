@@ -122,3 +122,12 @@ export interface CreateLoadConversationOptions {
   initialStatus?: ConversationStatus;
   type?: 'load' | 'emergency';
 }
+
+export interface MessageAttachmentContext {
+  storage_path: string;
+  file_name: string;
+  file_size: number;
+  mime_type: string;
+  media_type: 'image' | 'document' | 'audio';
+  signed_url?: string | null;
+}

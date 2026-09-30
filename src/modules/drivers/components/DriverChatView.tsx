@@ -5,7 +5,7 @@ import { Conversation, ConversationMessage, MessageType } from '../../communicat
 import { DriverAssignedLoad } from '../DriverPortalView.tsx';
 import { DriverConversationList } from './DriverConversationList.tsx';
 import { DriverMessageThread } from './DriverMessageThread.tsx';
-import { MessageSquare, AlertCircle, ArrowLeft, RefreshCw, ShieldCheck } from 'lucide-react';
+import { MessageSquare, AlertCircle, ArrowLeft, ShieldCheck } from 'lucide-react';
 
 interface DriverChatViewProps {
   loads: DriverAssignedLoad[];
@@ -72,7 +72,7 @@ export const DriverChatView: React.FC<DriverChatViewProps> = ({
         setAuthoritativeDriverId(resolvedDriverId);
 
         // Step 2 & 3: Concurrently fetch general conversation, driver conversations, and unread counts
-        const [generalConv, driverConvs, unreadSummary] = await Promise.all([
+        const [, driverConvs, unreadSummary] = await Promise.all([
           communicationService.getOrCreateCurrentDriverConversation(driverOrgId),
           communicationService.listConversations(driverOrgId, {
             driverId: resolvedDriverId,
@@ -86,17 +86,18 @@ export const DriverChatView: React.FC<DriverChatViewProps> = ({
             : Promise.resolve<UnreadMessageSummary>({ total: 0, byConversation: {} }),
         ]);
 
-        // Ensure general conversation is in the list
-        const hasGeneral = driverConvs.some((c) => c.id === generalConv.id);
-        const rawCombined = hasGeneral ? driverConvs : [generalConv, ...driverConvs];
-        const combined = rawCombined.map((c) => ({
+        // Keep only load-specific operational conversations for the Driver Portal
+        const loadOnlyConvs = driverConvs.filter(
+          (c) => c.type === 'load' || Boolean(c.load_id)
+        );
+        const combined = loadOnlyConvs.map((c) => ({
           ...c,
           unread_count: unreadSummary.byConversation[c.id] || 0,
         }));
 
         setConversations(combined);
 
-        // Default selection handling
+        // Selection handling: Never fall back to General Dispatch
         if (!isBackground) {
           if (initialConversationId) {
             const found = combined.find((c) => c.id === initialConversationId);
@@ -104,10 +105,9 @@ export const DriverChatView: React.FC<DriverChatViewProps> = ({
               setSelectedConversationId(found.id);
               setMobileView('thread');
             } else {
-              setSelectedConversationId(generalConv.id);
+              setSelectedConversationId(null);
+              setMobileView('list');
             }
-          } else if (!selectedConversationId) {
-            setSelectedConversationId(generalConv.id);
           }
         }
       } catch (err: any) {
@@ -121,7 +121,7 @@ export const DriverChatView: React.FC<DriverChatViewProps> = ({
         }
       }
     },
-    [driverOrgId, initialConversationId, selectedConversationId, user?.id]
+    [driverOrgId, initialConversationId, user?.id]
   );
 
   useEffect(() => {
@@ -307,23 +307,14 @@ export const DriverChatView: React.FC<DriverChatViewProps> = ({
     return conversations.filter((c) => c.status === activeFilter);
   }, [conversations, activeFilter]);
 
-  // General conversation & individual thread hierarchy determination
-  const generalConversation = useMemo(
-    () => conversations.find((c) => c.type === 'general'),
-    [conversations]
-  );
+  // Back to conversation list handler
+  const handleBackToList = () => {
+    setSelectedConversationId(null);
+    setMobileView('list');
 
-  const isIndividualThread = Boolean(
-    selectedConversation &&
-    generalConversation &&
-    selectedConversation.id !== generalConversation.id
-  );
-
-  const handleBackToGeneralChat = () => {
-    if (!generalConversation) return;
-
-    setSelectedConversationId(generalConversation.id);
-    setMobileView('thread');
+    if (onClearInitialConversation) {
+      onClearInitialConversation();
+    }
   };
 
   // Fallback state: Missing organization
@@ -349,34 +340,22 @@ export const DriverChatView: React.FC<DriverChatViewProps> = ({
   }
 
   return (
-    <div id="driver-chat-container" className="flex-1 min-h-0 flex flex-col gap-2 sm:gap-4 w-full min-w-0">
-      {/* Top Breadcrumb & Security Indicator */}
-      <div className="flex items-center justify-between gap-2 bg-slate-900/60 border border-slate-800 px-3 sm:px-4 py-1.5 sm:py-3 rounded-xl w-full min-w-0 shrink-0">
+    <div id="driver-chat-container" className="flex-1 min-h-0 h-full flex flex-col gap-2 sm:gap-4 w-full min-w-0">
+      {/* Top Breadcrumb & Security Indicator - Hidden on mobile when viewing thread to prevent redundant back controls */}
+      <div className={`${mobileView === 'thread' ? 'hidden md:flex' : 'flex'} items-center justify-between gap-2 bg-slate-900/60 border border-slate-800 px-3 sm:px-4 py-1.5 sm:py-3 rounded-xl w-full min-w-0 shrink-0`}>
         <div className="flex items-center gap-2 min-w-0 flex-1 flex-nowrap">
-          {isIndividualThread ? (
+          {onBackToDispatches && (
             <button
-              id="driver-chat-back-general-btn"
+              id="driver-chat-back-dispatches-btn"
               type="button"
-              onClick={handleBackToGeneralChat}
+              onClick={onBackToDispatches}
               className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1 min-h-[32px] transition cursor-pointer shrink-0"
             >
               <ArrowLeft className="w-3.5 h-3.5 shrink-0" />
-              <span>Back to General Chat</span>
+              <span>Back to Dispatches</span>
             </button>
-          ) : (
-            onBackToDispatches && (
-              <button
-                id="driver-chat-back-dispatches-btn"
-                type="button"
-                onClick={onBackToDispatches}
-                className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1 min-h-[32px] transition cursor-pointer shrink-0"
-              >
-                <ArrowLeft className="w-3.5 h-3.5 shrink-0" />
-                <span>Back to Dispatches</span>
-              </button>
-            )
           )}
-          <span className="text-slate-600 hidden sm:inline">•</span>
+          {onBackToDispatches && <span className="text-slate-600 hidden sm:inline">•</span>}
           <div className="flex items-center gap-1.5 text-xs text-slate-300 min-w-0 shrink-0">
             <MessageSquare className="w-4 h-4 text-indigo-400 shrink-0" />
             <span className="font-bold text-white truncate">
@@ -399,7 +378,7 @@ export const DriverChatView: React.FC<DriverChatViewProps> = ({
       )}
 
       {/* Responsive Viewport (Desktop split, Mobile single-pane) */}
-      <div className="flex-1 min-h-0 md:h-[70vh] md:min-h-[500px] max-h-[800px] flex rounded-xl overflow-hidden w-full min-w-0">
+      <div className="flex-1 min-h-0 h-full md:h-[calc(100vh-10rem)] md:min-h-[500px] md:max-h-[850px] flex rounded-xl overflow-hidden w-full min-w-0">
         {/* Desktop Left / Mobile List Pane */}
         <div
           className={`${
@@ -433,11 +412,7 @@ export const DriverChatView: React.FC<DriverChatViewProps> = ({
               onSendMessage={handleSendMessage}
               onAcknowledgeMessage={handleAcknowledgeMessage}
               onReopenConversation={handleReopenConversation}
-              onBackToList={
-                isIndividualThread
-                  ? handleBackToGeneralChat
-                  : () => setMobileView('list')
-              }
+              onBackToList={handleBackToList}
               currentUserId={user?.id}
               isSending={isSending}
             />

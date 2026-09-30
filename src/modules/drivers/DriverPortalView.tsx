@@ -277,9 +277,10 @@ export const DriverPortalView: React.FC = () => {
             <span className="font-bold text-sm sm:text-base text-white tracking-tight block leading-tight truncate">
               {driverName}
             </span>
-            <span className="text-[11px] text-indigo-400 font-medium flex items-center gap-1 truncate">
+            <span className="text-[11px] text-indigo-400 font-medium flex items-center gap-1 min-w-0">
               <Building2 className="w-3 h-3 shrink-0" />
-              <span className="truncate">{carrierName} • Mobile Portal</span>
+              <span className="truncate">{carrierName}</span>
+              <span className="hidden sm:inline text-indigo-400/80 shrink-0">• Driver Portal</span>
             </span>
           </div>
         </div>
@@ -308,10 +309,16 @@ export const DriverPortalView: React.FC = () => {
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 min-h-0 overflow-y-auto flex flex-col max-w-4xl w-full min-w-0 mx-auto p-4 sm:p-6 space-y-6">
+      <main
+        className={`flex-1 min-h-0 flex flex-col max-w-4xl w-full min-w-0 mx-auto ${
+          activeTab === 'messages'
+            ? 'p-0 sm:p-4 overflow-hidden'
+            : 'p-3 sm:p-6 space-y-4 sm:space-y-6 overflow-y-auto'
+        }`}
+      >
         {/* Navigation Tab Switcher */}
         {activeTab !== 'messages' && (
-          <div className="flex items-center gap-2 p-1.5 bg-slate-900 border border-slate-800 rounded-xl w-full min-w-0">
+          <div className="flex items-center gap-2 p-1.5 bg-slate-900 border border-slate-800 rounded-xl w-full min-w-0 shrink-0">
             <button
               id="driver-portal-tab-dispatches"
               type="button"
@@ -351,7 +358,7 @@ export const DriverPortalView: React.FC = () => {
         ) : (
           <>
             {/* Identity & Account Permanence Banner */}
-            <div className="bg-gradient-to-r from-slate-900 to-indigo-950/40 border border-indigo-900/60 rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="bg-gradient-to-r from-slate-900 to-indigo-950/40 border border-indigo-900/60 rounded-xl p-3.5 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80">
@@ -366,7 +373,7 @@ export const DriverPortalView: React.FC = () => {
                   Your login is securely bound to your driver profile. Future dispatches assigned to you by your dispatcher will appear here automatically without any repeated invitations or registration flows.
                 </p>
               </div>
-              <div className="text-[11px] text-slate-400 shrink-0 bg-slate-950/60 px-3 py-2 rounded-lg border border-slate-800">
+              <div className="text-[11px] text-slate-400 shrink-0 bg-slate-950/60 px-3 py-1.5 sm:py-2 rounded-lg border border-slate-800">
                 Status: <strong className="text-emerald-400 capitalize">{driverProfile?.status || 'Active'}</strong>
               </div>
             </div>

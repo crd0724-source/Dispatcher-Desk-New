@@ -1,7 +1,7 @@
 import React from 'react';
 import { Conversation } from '../../communication/types.ts';
 import { DriverAssignedLoad } from '../DriverPortalView.tsx';
-import { MessageSquare, Package, Clock, CheckCircle2, ChevronRight, RefreshCw, Filter } from 'lucide-react';
+import { MessageSquare, Package, Clock, RefreshCw, Filter } from 'lucide-react';
 
 interface DriverConversationListProps {
   conversations: Conversation[];
@@ -24,8 +24,7 @@ export const DriverConversationList: React.FC<DriverConversationListProps> = ({
   isLoading,
   onRefresh,
 }) => {
-  // Separate General and Load conversations
-  const generalConvs = conversations.filter((c) => c.type === 'general');
+  // Load-specific operational conversations only
   const loadConvs = conversations.filter((c) => c.type === 'load' || Boolean(c.load_id));
 
   const formatTimestamp = (dateStr: string) => {
@@ -56,7 +55,7 @@ export const DriverConversationList: React.FC<DriverConversationListProps> = ({
             Conversations
           </h3>
           <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-semibold shrink-0">
-            {conversations.length}
+            {loadConvs.length}
           </span>
         </div>
         <button
@@ -93,157 +92,91 @@ export const DriverConversationList: React.FC<DriverConversationListProps> = ({
 
       {/* Conversations Scrollable List */}
       <div className="flex-1 overflow-y-auto divide-y divide-slate-800/70 p-2 space-y-1 w-full min-w-0">
-        {isLoading && conversations.length === 0 ? (
+        {isLoading && loadConvs.length === 0 ? (
           <div className="py-12 text-center space-y-2">
             <RefreshCw className="w-6 h-6 text-indigo-400 animate-spin mx-auto" />
             <p className="text-xs text-slate-400">Loading conversation channels...</p>
           </div>
-        ) : conversations.length === 0 ? (
+        ) : loadConvs.length === 0 ? (
           <div className="py-12 text-center px-4 space-y-2">
             <MessageSquare className="w-8 h-8 text-slate-600 mx-auto" />
             <p className="text-xs font-medium text-slate-300">No {activeFilter !== 'all' ? activeFilter : ''} conversations</p>
             <p className="text-[11px] text-slate-500">
-              General dispatch chat and assigned load threads will appear here.
+              Assigned load communication threads will appear here.
             </p>
           </div>
         ) : (
-          <>
-            {/* General Dispatch Channel(s) */}
-            {generalConvs.map((conv) => {
-              const isSelected = selectedConversationId === conv.id;
-              const isResolved = conv.status === 'resolved';
+          loadConvs.map((conv) => {
+            const isSelected = selectedConversationId === conv.id;
+            const isResolved = conv.status === 'resolved';
+            const loadData = conv.load_id ? loadsMap[conv.load_id] || conv.load : null;
+            const loadNumber = loadData?.load_number || conv.load?.load_number || (conv.load_id ? `Load #${conv.load_id.slice(0, 8)}` : 'Load Dispatch');
 
-              return (
-                <div
-                  key={conv.id}
-                  id={`driver-conv-item-${conv.id}`}
-                  onClick={() => onSelectConversation(conv)}
-                  className={`p-3 rounded-xl transition cursor-pointer border ${
-                    isSelected
-                      ? 'bg-indigo-950/50 border-indigo-500/70 shadow-sm'
-                      : 'bg-slate-900/60 hover:bg-slate-800/60 border-slate-800/60'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 flex items-center justify-center shrink-0">
-                        <MessageSquare className="w-3.5 h-3.5" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-white">General Dispatch</span>
-                          {isResolved ? (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
-                              Resolved
-                            </span>
-                          ) : (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/70">
-                              Active
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-slate-400">Direct dispatcher communication</p>
-                      </div>
+            const routeSummary = loadData?.origin_city && loadData?.dest_city
+              ? `${loadData.origin_city}, ${loadData.origin_state || ''} → ${loadData.dest_city}, ${loadData.dest_state || ''}`
+              : null;
+
+            return (
+              <div
+                key={conv.id}
+                id={`driver-conv-item-${conv.id}`}
+                onClick={() => onSelectConversation(conv)}
+                className={`p-3 rounded-xl transition cursor-pointer border ${
+                  isSelected
+                    ? 'bg-indigo-950/50 border-indigo-500/70 shadow-sm'
+                    : 'bg-slate-900/60 hover:bg-slate-800/60 border-slate-800/60'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 flex items-center justify-center shrink-0">
+                      <Package className="w-3.5 h-3.5" />
                     </div>
-                    <div className="text-right shrink-0 flex flex-col items-end gap-1">
-                      <span className="text-[10px] text-slate-500 flex items-center gap-0.5 justify-end">
-                        <Clock className="w-2.5 h-2.5" />
-                        {formatTimestamp(conv.updated_at || conv.created_at)}
-                      </span>
-                      {conv.unread_count && conv.unread_count > 0 ? (
-                        <span
-                          id={`driver-conv-unread-${conv.id}`}
-                          className="px-1.5 py-0.5 text-[10px] font-bold font-mono rounded-full bg-indigo-600 text-white min-w-[1.125rem] text-center leading-none"
-                        >
-                          {conv.unread_count}
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  {conv.last_message?.content && (
-                    <div className="mt-2 text-[11px] text-slate-300 truncate bg-slate-950/40 p-1.5 rounded border border-slate-800/40">
-                      <span className="text-slate-500 font-medium mr-1">Latest:</span>
-                      {conv.last_message.content}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-
-            {/* Load-linked Channels */}
-            {loadConvs.map((conv) => {
-              const isSelected = selectedConversationId === conv.id;
-              const isResolved = conv.status === 'resolved';
-              const loadData = conv.load_id ? loadsMap[conv.load_id] || conv.load : null;
-              const loadNumber = loadData?.load_number || conv.load?.load_number || (conv.load_id ? `Load #${conv.load_id.slice(0, 8)}` : 'Load Dispatch');
-
-              const routeSummary = loadData?.origin_city && loadData?.dest_city
-                ? `${loadData.origin_city}, ${loadData.origin_state || ''} → ${loadData.dest_city}, ${loadData.dest_state || ''}`
-                : null;
-
-              return (
-                <div
-                  key={conv.id}
-                  id={`driver-conv-item-${conv.id}`}
-                  onClick={() => onSelectConversation(conv)}
-                  className={`p-3 rounded-xl transition cursor-pointer border ${
-                    isSelected
-                      ? 'bg-indigo-950/50 border-indigo-500/70 shadow-sm'
-                      : 'bg-slate-900/60 hover:bg-slate-800/60 border-slate-800/60'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 flex items-center justify-center shrink-0">
-                        <Package className="w-3.5 h-3.5" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-white">{loadNumber}</span>
-                          {isResolved ? (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
-                              Resolved
-                            </span>
-                          ) : (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/70">
-                              Active
-                            </span>
-                          )}
-                        </div>
-                        {routeSummary && (
-                          <p className="text-[11px] text-slate-300 font-medium truncate max-w-[200px]">
-                            {routeSummary}
-                          </p>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-white">{loadNumber}</span>
+                        {isResolved ? (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                            Resolved
+                          </span>
+                        ) : (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/70">
+                            Active
+                          </span>
                         )}
                       </div>
-                    </div>
-                    <div className="text-right shrink-0 flex flex-col items-end gap-1">
-                      <span className="text-[10px] text-slate-500 flex items-center gap-0.5 justify-end">
-                        <Clock className="w-2.5 h-2.5" />
-                        {formatTimestamp(conv.updated_at || conv.created_at)}
-                      </span>
-                      {conv.unread_count && conv.unread_count > 0 ? (
-                        <span
-                          id={`driver-conv-unread-${conv.id}`}
-                          className="px-1.5 py-0.5 text-[10px] font-bold font-mono rounded-full bg-indigo-600 text-white min-w-[1.125rem] text-center leading-none"
-                        >
-                          {conv.unread_count}
-                        </span>
-                      ) : null}
+                      {routeSummary && (
+                        <p className="text-[11px] text-slate-300 font-medium truncate max-w-[200px]">
+                          {routeSummary}
+                        </p>
+                      )}
                     </div>
                   </div>
-
-                  {conv.last_message?.content && (
-                    <div className="mt-2 text-[11px] text-slate-300 truncate bg-slate-950/40 p-1.5 rounded border border-slate-800/40">
-                      <span className="text-slate-500 font-medium mr-1">Latest:</span>
-                      {conv.last_message.content}
-                    </div>
-                  )}
+                  <div className="text-right shrink-0 flex flex-col items-end gap-1">
+                    <span className="text-[10px] text-slate-500 flex items-center gap-0.5 justify-end">
+                      <Clock className="w-2.5 h-2.5" />
+                      {formatTimestamp(conv.updated_at || conv.created_at)}
+                    </span>
+                    {conv.unread_count && conv.unread_count > 0 ? (
+                      <span
+                        id={`driver-conv-unread-${conv.id}`}
+                        className="px-1.5 py-0.5 text-[10px] font-bold font-mono rounded-full bg-indigo-600 text-white min-w-[1.125rem] text-center leading-none"
+                      >
+                        {conv.unread_count}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
-              );
-            })}
-          </>
+
+                {conv.last_message?.content && (
+                  <div className="mt-2 text-[11px] text-slate-300 truncate bg-slate-950/40 p-1.5 rounded border border-slate-800/40">
+                    <span className="text-slate-500 font-medium mr-1">Latest:</span>
+                    {conv.last_message.content}
+                  </div>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
     </div>

@@ -11,8 +11,12 @@ import {
   Shield,
   Radio,
   MapPin,
+  FileText,
+  ExternalLink,
+  Paperclip,
 } from 'lucide-react';
 import { ConversationMessage, MessageType } from '../types.ts';
+import { ChatAttachmentView } from './ChatAttachmentView.tsx';
 
 interface MessageListProps {
   messages: ConversationMessage[];
@@ -87,6 +91,14 @@ function getMessageTypeBadge(type: MessageType) {
         badgeClass: 'bg-slate-800 text-slate-300 border-slate-700',
         iconColor: 'text-slate-400',
         borderAccent: '',
+      };
+    case 'document_message':
+      return {
+        label: 'Document / Photo',
+        icon: Paperclip,
+        badgeClass: 'bg-indigo-950/80 text-indigo-300 border-indigo-800/80',
+        iconColor: 'text-indigo-400',
+        borderAccent: 'border-l-4 border-l-indigo-500',
       };
     default:
       return null;
@@ -216,9 +228,21 @@ export const MessageList: React.FC<MessageListProps> = ({
               )}
 
               {/* Message Content */}
-              <div className="text-xs sm:text-sm whitespace-pre-wrap break-words leading-relaxed text-slate-200">
-                {msg.content}
-              </div>
+              {msg.content && (
+                <div className="text-xs sm:text-sm whitespace-pre-wrap break-words leading-relaxed text-slate-200">
+                  {msg.content}
+                </div>
+              )}
+
+              {/* Attachment Display (Photo or Document) */}
+              {msg.context?.attachment && (
+                <div className={`${msg.content ? 'mt-2.5' : ''} space-y-1.5`}>
+                  <ChatAttachmentView
+                    attachment={msg.context.attachment}
+                    isOutbound={isOutgoing}
+                  />
+                </div>
+              )}
 
               {/* Driver Delay Action: Log Check Call */}
               {isDelayCheckCallCandidate && (
