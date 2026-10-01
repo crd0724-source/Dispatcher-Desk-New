@@ -13,7 +13,7 @@ import { getSupabaseAdmin } from './src/server/supabaseAdmin.ts';
 
 const app = express();
 // Port 3000 is hardcoded by infrastructure and proxied by nginx
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Helper to extract text from documentText or buffer
 async function extractTextFromPayload(documentText?: string, fileData?: string): Promise<string> {
