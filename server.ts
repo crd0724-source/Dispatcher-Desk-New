@@ -14,6 +14,23 @@ import { getSupabaseAdmin } from './src/server/supabaseAdmin.ts';
 const app = express();
 // Port 3000 is hardcoded by infrastructure and proxied by nginx
 const PORT = Number(process.env.PORT) || 3000;
+// Minimal CORS handling for production frontend
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+
+  if (origin === 'https://dispatcherdesk.online') {
+    res.setHeader('Access-Control-Allow-Origin', 'https://dispatcherdesk.online');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
+  next();
+});
 
 // Helper to extract text from documentText or buffer
 async function extractTextFromPayload(documentText?: string, fileData?: string): Promise<string> {

@@ -92,6 +92,13 @@ export function deriveBillingPeriodKey(
   return 'trial';
 }
 
+const API_BASE =
+  import.meta.env.VITE_API_URL ||
+  (typeof window !== 'undefined' &&
+   window.location.hostname === 'dispatcherdesk.online'
+    ? 'https://dispatcherdesk-api.onrender.com'
+    : '');
+
 class SubscriptionService {
   /**
    * Fetches real-time subscription usage for an organization.
@@ -289,7 +296,7 @@ class SubscriptionService {
   async createSubscription(plan: PlanType, organizationId: string): Promise<CreateSubscriptionResponse> {
     try {
       return await this.safeRequest<CreateSubscriptionResponse>(
-        '/api/billing/create-subscription',
+        `${API_BASE}/api/billing/create-subscription`,
         {
           method: 'POST',
           body: JSON.stringify({ plan, organizationId }),
@@ -308,7 +315,7 @@ class SubscriptionService {
   async verifyPayment(payload: VerifyPaymentPayload): Promise<{ verified: boolean; error?: string }> {
     try {
       return await this.safeRequest<{ verified: boolean; error?: string }>(
-        '/api/billing/verify-payment',
+        `${API_BASE}/api/billing/verify-payment`,
         {
           method: 'POST',
           body: JSON.stringify(payload),
@@ -327,7 +334,7 @@ class SubscriptionService {
   async cancelSubscription(organizationId: string): Promise<CancelSubscriptionResponse> {
     try {
       return await this.safeRequest<CancelSubscriptionResponse>(
-        '/api/billing/cancel-subscription',
+        `${API_BASE}/api/billing/cancel-subscription`,
         {
           method: 'POST',
           body: JSON.stringify({ organizationId }),
@@ -363,7 +370,7 @@ class SubscriptionService {
     try {
       const session = (await supabase.auth.getSession()).data.session;
       const token = session?.access_token;
-      const res = await fetch(`/api/billing/transactions?organizationId=${organizationId}`, {
+      const res = await fetch(`${API_BASE}/api/billing/transactions?organizationId=${organizationId}`, {
         credentials: 'include',
         headers: {
           'Accept': 'application/json',
