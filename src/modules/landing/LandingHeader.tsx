@@ -1,5 +1,5 @@
 import React from 'react';
-import { Truck, Menu, X, ArrowRight, LogIn } from 'lucide-react';
+import { Menu, X, ArrowRight, LogIn } from 'lucide-react';
 
 interface LandingHeaderProps {
   onLoginClick: () => void;
@@ -27,18 +27,12 @@ export const LandingHeader: React.FC<LandingHeaderProps> = ({
     <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-slate-950/90 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Brand Logo */}
-        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold shadow-md shadow-indigo-600/30 shrink-0">
-            <Truck className="w-4 h-4 sm:w-5 sm:h-5" />
-          </div>
-          <div className="min-w-0">
-            <span className="text-base sm:text-lg font-extrabold tracking-tight text-slate-100 block leading-tight truncate">
-              Dispatcher<span className="text-indigo-400">Desk</span>
-            </span>
-            <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider text-slate-400 block truncate">
-              Operating System for Dispatchers
-            </span>
-          </div>
+        <div className="flex items-center min-w-0">
+          <img
+            src="/images/brand/dispatcherdesk-logo.png"
+            alt="DispatcherDesk"
+            className="h-8 sm:h-9 w-auto max-w-[190px] sm:max-w-[220px] object-contain"
+          />
         </div>
 
         {/* Desktop Navigation Links */}

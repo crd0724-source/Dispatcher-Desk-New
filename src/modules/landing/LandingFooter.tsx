@@ -1,5 +1,5 @@
 import React from 'react';
-import { Truck, ArrowUpRight, ShieldCheck, Mail, Globe } from 'lucide-react';
+import { ArrowUpRight, ShieldCheck, Mail, Globe } from 'lucide-react';
 import { PolicyType } from './LandingPolicyModal.tsx';
 
 interface LandingFooterProps {
@@ -28,13 +28,12 @@ export const LandingFooter: React.FC<LandingFooterProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-8 sm:gap-10 mb-10 sm:mb-12">
           {/* Brand Column */}
           <div className="sm:col-span-2 lg:col-span-2 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold shadow-md shadow-indigo-600/30">
-                <Truck className="w-4 h-4" />
-              </div>
-              <span className="text-lg font-bold text-slate-100 tracking-tight">
-                Dispatcher<span className="text-indigo-400">Desk</span>
-              </span>
+            <div className="flex items-center">
+              <img
+                src="/images/brand/dispatcherdesk-logo.png"
+                alt="DispatcherDesk"
+                className="h-8 w-auto max-w-[200px] object-contain"
+              />
             </div>
 
             <p className="text-xs text-slate-400 leading-relaxed max-w-sm">

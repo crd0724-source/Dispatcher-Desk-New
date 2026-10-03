@@ -181,7 +181,7 @@ export const LandingPricing: React.FC<LandingPricingProps> = ({
                       : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
                   }`}
                 >
-                  <span>Start 14-Day Free Trial</span>
+                  <span>Start Free Trial</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>

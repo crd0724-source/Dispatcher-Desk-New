@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { LandingHeader } from './LandingHeader.tsx';
 import { LandingHero } from './LandingHero.tsx';
 import { LandingProblem } from './LandingProblem.tsx';
@@ -28,6 +28,41 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const [activePolicy, setActivePolicy] = useState<PolicyType | null>(null);
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [contactTopic, setContactTopic] = useState<string>('General Inquiry');
+
+  useEffect(() => {
+    const handleHash = () => {
+      const hash = window.location.hash.toLowerCase().replace(/^#/, '');
+      if (
+        hash === 'terms' ||
+        hash === 'privacy' ||
+        hash === 'refund' ||
+        hash === 'delivery' ||
+        hash === 'about'
+      ) {
+        setActivePolicy(hash as PolicyType);
+      }
+    };
+
+    handleHash();
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
+  const handleClosePolicy = () => {
+    setActivePolicy(null);
+    const hash = window.location.hash.toLowerCase().replace(/^#/, '');
+    if (
+      hash === 'terms' ||
+      hash === 'privacy' ||
+      hash === 'refund' ||
+      hash === 'delivery' ||
+      hash === 'about'
+    ) {
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState(null, document.title, window.location.pathname + window.location.search);
+      }
+    }
+  };
 
   const handleOpenContact = (topic: string = 'General Inquiry') => {
     setContactTopic(topic);
@@ -140,7 +175,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       {/* Legal & Policy Modals */}
       <LandingPolicyModal
         policyType={activePolicy}
-        onClose={() => setActivePolicy(null)}
+        onClose={handleClosePolicy}
       />
 
       {/* Contact & Custom Pricing Request Modal */}
