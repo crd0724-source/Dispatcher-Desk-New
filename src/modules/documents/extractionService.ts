@@ -12,6 +12,13 @@ import { LoadWithRelations, CreateLoadInput, UpdateLoadInput } from '../loads/lo
 import { EquipmentType } from '../../types/domain.types.ts';
 import { supabase } from '../../lib/supabase.ts';
 
+const API_BASE =
+  import.meta.env.VITE_API_URL ||
+  (typeof window !== 'undefined' &&
+   window.location.hostname === 'dispatcherdesk.online'
+    ? 'https://dispatcherdesk-api.onrender.com'
+    : '');
+
 class ExtractionService {
   /**
    * Reads a browser File object as Base64 string
@@ -75,7 +82,7 @@ class ExtractionService {
     }
 
     try {
-      const response = await fetch('/api/ai/extract-rate-con', {
+      const response = await fetch(`${API_BASE}/api/ai/extract-rate-con`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -102,6 +109,13 @@ class ExtractionService {
           // Response body was not JSON (e.g. reverse proxy HTML error page)
         }
         throw new Error(errorMsg);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error(
+          'Server returned an unexpected non-JSON response. Please check backend API availability.'
+        );
       }
 
       const resData: ExtractionResponse = await response.json();
